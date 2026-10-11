@@ -22,6 +22,7 @@ struct AppSettingsTests {
         #expect(settings.minimumReadyLength == 2)
         #expect(settings.ignoredAppBundleIDs == AppSettings.defaultIgnoredAppBundleIDs)
         #expect(settings.showReaderPanel == true)
+        #expect(settings.keepHistory == true)
         #expect(settings.sanitizerOptions == SanitizerOptions())
     }
 
@@ -40,6 +41,7 @@ struct AppSettingsTests {
         settings.minimumReadyLength = 10
         settings.ignoredAppBundleIDs = ["com.example.app"]
         settings.showReaderPanel = false
+        settings.keepHistory = false
         let reloaded = AppSettings(defaults: defaults)
         #expect(reloaded.engineID == "system")
         #expect(reloaded.kokoroVoiceID == "am_adam")
@@ -53,6 +55,7 @@ struct AppSettingsTests {
         #expect(reloaded.minimumReadyLength == 10)
         #expect(reloaded.ignoredAppBundleIDs == ["com.example.app"])
         #expect(reloaded.showReaderPanel == false)
+        #expect(reloaded.keepHistory == false)
         #expect(
             reloaded.sanitizerOptions
                 == SanitizerOptions(

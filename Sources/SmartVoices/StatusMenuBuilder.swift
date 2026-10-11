@@ -14,6 +14,31 @@ extension AppDelegate {
         read.isEnabled = isIdle
         menu.addItem(read)
 
+        let recentItem = NSMenuItem(title: "Recent", action: nil, keyEquivalent: "")
+        let recentMenu = NSMenu()
+        let recent = Array(history.items.prefix(10))
+        if recent.isEmpty {
+            let empty = NSMenuItem(title: "No recent items", action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            recentMenu.addItem(empty)
+        } else {
+            let formatter = RelativeDateTimeFormatter()
+            formatter.dateTimeStyle = .named
+            formatter.unitsStyle = .short
+            let now = Date()
+            for item in recent {
+                let title =
+                    "\(item.preview.prefix(50)) — \(formatter.localizedString(for: item.date, relativeTo: now))"
+                let replay = NSMenuItem(
+                    title: title, action: #selector(replayHistory(_:)), keyEquivalent: "")
+                replay.target = self
+                replay.representedObject = item.id.uuidString
+                recentMenu.addItem(replay)
+            }
+        }
+        recentItem.submenu = recentMenu
+        menu.addItem(recentItem)
+
         let pauseTitle = isPaused ? "Resume" : "Pause"
         let pauseItem = NSMenuItem(title: pauseTitle, action: #selector(togglePause(_:)), keyEquivalent: "")
         pauseItem.target = self

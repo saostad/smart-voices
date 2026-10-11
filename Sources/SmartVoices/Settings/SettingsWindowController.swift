@@ -14,7 +14,8 @@ final class SettingsWindowController {
         loginItem: any LoginItemControlling,
         onSelectEngine: @escaping (String) -> Void,
         onSelectVoice: @escaping (String?) -> Void,
-        onPreviewVoice: @escaping () -> Void
+        onPreviewVoice: @escaping () -> Void,
+        onClearHistory: @escaping () -> Void
     ) {
         if window == nil {
             let root = SettingsRootView(
@@ -24,7 +25,8 @@ final class SettingsWindowController {
                 loginItem: loginItem,
                 onSelectEngine: onSelectEngine,
                 onSelectVoice: onSelectVoice,
-                onPreviewVoice: onPreviewVoice)
+                onPreviewVoice: onPreviewVoice,
+                onClearHistory: onClearHistory)
             let hosting = NSHostingView(rootView: root)
             hosting.frame = NSRect(x: 0, y: 0, width: 600, height: 520)
             let window = NSWindow(

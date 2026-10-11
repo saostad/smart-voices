@@ -7,6 +7,7 @@ import SwiftUI
 struct GeneralSettingsView: View {
     @Bindable var settings: AppSettings
     var loginItem: any LoginItemControlling
+    var onClearHistory: () -> Void
     @State private var launchAtLogin = false
     @State private var loginError: String?
 
@@ -46,6 +47,15 @@ struct GeneralSettingsView: View {
                 Section("Reading panel") {
                     Toggle("Show reading panel while playing", isOn: $settings.showReaderPanel)
                     Explanation(text: "A small floating window that highlights each sentence and word as it's read.")
+                }
+
+                Section("History") {
+                    Toggle("Remember recently read text", isOn: $settings.keepHistory)
+                    Explanation(text: "Keeps the last 20 items on this Mac so you can replay them.")
+                    Button("Clear History") {
+                        onClearHistory()
+                    }
+                    Explanation(text: "Deletes all remembered text right away.")
                 }
 
                 Section("Ignored apps") {

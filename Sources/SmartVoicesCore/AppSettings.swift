@@ -187,6 +187,18 @@ public final class AppSettings {
         }
     }
 
+    @ObservationIgnored private var _keepHistory: Bool
+    public var keepHistory: Bool {
+        get {
+            access(keyPath: \.keepHistory)
+            return _keepHistory
+        }
+        set {
+            withMutation(keyPath: \.keepHistory) { _keepHistory = newValue }
+            defaults.set(newValue, forKey: "sv.keepHistory")
+        }
+    }
+
     @ObservationIgnored private var _showReaderPanel: Bool
     public var showReaderPanel: Bool {
         get {
@@ -272,6 +284,11 @@ public final class AppSettings {
             self._showReaderPanel = defaults.bool(forKey: "sv.showReaderPanel")
         } else {
             self._showReaderPanel = true
+        }
+        if defaults.object(forKey: "sv.keepHistory") != nil {
+            self._keepHistory = defaults.bool(forKey: "sv.keepHistory")
+        } else {
+            self._keepHistory = true
         }
         self._codeBlocks = Self.loadValidated(
             defaults: defaults, key: "sv.codeBlocks", validate: Self.validatedCodeBlocks,

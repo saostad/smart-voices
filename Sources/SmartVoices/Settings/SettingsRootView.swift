@@ -11,6 +11,7 @@ struct SettingsRootView: View {
     var onSelectEngine: (String) -> Void
     var onSelectVoice: (String?) -> Void
     var onPreviewVoice: () -> Void
+    var onClearHistory: () -> Void
     @State var selectedTab: SettingsTab = .general
 
     var body: some View {
@@ -38,7 +39,8 @@ struct SettingsRootView: View {
     private func tabContent(_ tab: SettingsTab) -> some View {
         switch tab {
         case .general:
-            GeneralSettingsView(settings: settings, loginItem: loginItem)
+            GeneralSettingsView(
+                settings: settings, loginItem: loginItem, onClearHistory: onClearHistory)
         case .voice:
             VoiceSettingsView(
                 settings: settings, voiceModel: voiceModel,

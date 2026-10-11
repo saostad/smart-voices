@@ -34,6 +34,7 @@ func renderSettings(to dir: String) -> Int32 {
         "sv.engineID", "sv.kokoroVoiceID", "sv.systemVoiceID", "sv.speed", "sv.watchClipboard",
         "sv.codeBlocks", "sv.tables", "sv.bareURLs", "sv.maxTableRowsToRead",
         "sv.minimumReadyLength", "sv.ignoredAppBundleIDs", "sv.hotKeys", "sv.showReaderPanel",
+        "sv.keepHistory",
     ] {
         renderDefaults.removeObject(forKey: key)
     }
@@ -59,6 +60,7 @@ func renderSettings(to dir: String) -> Int32 {
                 onSelectEngine: { _ in },
                 onSelectVoice: { _ in },
                 onPreviewVoice: {},
+                onClearHistory: {},
                 selectedTab: tab)
             let hosting = NSHostingView(rootView: root)
             hosting.frame = NSRect(x: 0, y: 0, width: 600, height: 520)

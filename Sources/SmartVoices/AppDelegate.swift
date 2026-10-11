@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     let settings = AppSettings()
     let playback = PlaybackController(engine: SystemSpeechEngine(), output: AVAudioEngineOutput())
+    let history = ReadingHistory()
     private let monitor = ClipboardMonitor()
     let hotKeyCenter = HotKeyCenter()
     let voiceModel = VoiceModel()
@@ -48,6 +49,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startEnginePrepare()
         refreshVoices()
         reader.setTitle(readerTitle())
+        if let loadError = history.loadError {
+            playback.lastError =
+                "Couldn't save reading history: \(loadError.localizedDescription)"
+        }
         updateIcon()
         observeState()
         if CommandLine.arguments.contains("--debug-click") {
@@ -99,11 +104,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch monitor.readText() {
         case .text(let text):
             playback.play(text: text)
+            if playback.state != .idle {
+                recordHistory(text)
+            }
         case .empty:
             playback.lastError = "The clipboard doesn't contain any text."
         case .tooShort(let count):
             playback.lastError =
                 "The clipboard text is only \(count) characters. Copy something longer, or lower the minimum in Settings → General."
+        }
+    }
+
+    private func recordHistory(_ text: String) {
+        guard settings.keepHistory else { return }
+        do {
+            try history.record(text)
+        } catch {
+            playback.lastError = "Couldn't save reading history: \(error.localizedDescription)"
+        }
+    }
+
+    func clearHistory() {
+        do {
+            try history.clear()
+        } catch {
+            playback.lastError = "Couldn't save reading history: \(error.localizedDescription)"
         }
     }
 
@@ -116,6 +141,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func readClipboard(_ sender: Any?) {
         readClipboardAndPlay()
+    }
+
+    @objc func replayHistory(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String,
+            let item = history.items.first(where: { $0.id.uuidString == id })
+        else {
+            return
+        }
+        playback.play(text: item.fullText)
+        if playback.state != .idle {
+            recordHistory(item.fullText)
+        }
     }
 
     @objc func togglePause(_ sender: Any?) {
@@ -262,7 +299,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             loginItem: loginItem,
             onSelectEngine: { [weak self] id in Task { @MainActor in self?.setEngine(id: id) } },
             onSelectVoice: { [weak self] id in Task { @MainActor in self?.setVoice(id: id) } },
-            onPreviewVoice: { [weak self] in Task { @MainActor in self?.previewVoice() } })
+            onPreviewVoice: { [weak self] in Task { @MainActor in self?.previewVoice() } },
+            onClearHistory: { [weak self] in Task { @MainActor in self?.clearHistory() } })
     }
 
     private func engineForSettings() -> any SpeechEngine {
