@@ -63,12 +63,20 @@ func headlessText(args: [String]) -> String {
 }
 
 @MainActor
-func runExportAsync(text: String, engine: any SpeechEngine, outputPath: String) async -> Int32 {
+func runExportAsync(
+    text: String, engine: any SpeechEngine, outputPath: String, conversational: Bool = false
+) async -> Int32 {
     let exporter = AudioExporter()
+    let rewriter: (any ConversationRewriter)? =
+        conversational ? ConversationRewriteSupport.makeAttemptedRewriter() : nil
     do {
         let seconds = try await exporter.export(
             text: text, engine: engine, voiceID: nil, speed: 1.0,
-            sanitizerOptions: SanitizerOptions(), to: URL(fileURLWithPath: outputPath))
+            sanitizerOptions: SanitizerOptions(), rewriter: rewriter,
+            to: URL(fileURLWithPath: outputPath))
+        if let notice = exporter.lastNotice {
+            writeStderr("SmartVoices: \(notice)")
+        }
         print(String(format: "exported %.1f s to %@", seconds, outputPath))
         return 0
     } catch {
@@ -77,9 +85,27 @@ func runExportAsync(text: String, engine: any SpeechEngine, outputPath: String) 
     }
 }
 
-func runHeadlessAsync(text: String, engine: any SpeechEngine) async -> Int32 {
+func runHeadlessAsync(
+    text: String, engine: any SpeechEngine, conversational: Bool = false
+) async -> Int32 {
     let sanitizer = SpeechSanitizer()
     let chunker = SpeechChunker()
+    var text = text
+    if conversational {
+        let rewriter = ConversationRewriteSupport.makeAttemptedRewriter()
+        let segments = sanitizer.sanitize(text)
+        let result = await ConversationalRewrite.rewrite(
+            RewriteBlocks.makeBlocks(from: segments), with: rewriter)
+        if let rewritten = result.text {
+            print("conversational rewrite applied")
+            text = rewritten
+        } else if let notice = result.notice {
+            writeStderr("SmartVoices: \(notice)")
+        } else {
+            writeStderr("SmartVoices: conversational rewrite was cancelled.")
+            return 1
+        }
+    }
     var engine = engine
     var voiceID: String?
     if engine is KokoroSpeechEngine,

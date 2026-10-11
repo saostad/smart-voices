@@ -33,7 +33,10 @@ if let exportIndex = args.firstIndex(of: "--export") {
     let engine = makeHeadlessEngine(engineID: headlessEngineID(args: args))
     let text = headlessText(args: args)
     Task { @MainActor in
-        exit(await runExportAsync(text: text, engine: engine, outputPath: outPath))
+        exit(
+            await runExportAsync(
+                text: text, engine: engine, outputPath: outPath,
+                conversational: args.contains("--conversational")))
     }
     RunLoop.main.run()
     exit(1)
@@ -42,7 +45,10 @@ if args.contains("--say") || args.contains("--say-file") {
     let engine = makeHeadlessEngine(engineID: headlessEngineID(args: args))
     let text = headlessText(args: args)
     Task { @MainActor in
-        exit(await runHeadlessAsync(text: text, engine: engine))
+        exit(
+            await runHeadlessAsync(
+                text: text, engine: engine,
+                conversational: args.contains("--conversational")))
     }
     RunLoop.main.run()
     exit(1)

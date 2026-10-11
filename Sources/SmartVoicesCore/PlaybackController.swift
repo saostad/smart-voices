@@ -14,6 +14,7 @@ public final class PlaybackController {
     public var currentChunkIndex: Int = 0
     public var chunks: [SpeechChunk] = []
     public var lastError: String?
+    public var lastNotice: String?
     public var firstAudioLatency: Duration?
     public private(set) var currentChunkStartedAt: Date?
     public private(set) var currentChunkDuration: Double = 0
@@ -26,6 +27,10 @@ public final class PlaybackController {
     /// Pronunciations applied to chunk text right before synthesis.
     /// Display text (chunks) keeps the original spelling.
     public var pronunciationDictionary = PronunciationDictionary()
+
+    /// Optional conversational rewriter. When set, text is retold in a spoken
+    /// style before chunking; the display chunks show what is read.
+    public var rewriter: (any ConversationRewriter)?
 
     private let output: any AudioOutput
     private let chunker: SpeechChunker
@@ -63,9 +68,11 @@ public final class PlaybackController {
         activeEngineOverride = engineOverride
         activeVoiceOverride = voiceOverride
         lastError = nil
+        lastNotice = nil
         firstAudioLatency = nil
         clearChunkProgress()
-        let newChunks = chunker.chunks(from: SpeechSanitizer(options: sanitizerOptions).sanitize(text))
+        let segments = SpeechSanitizer(options: sanitizerOptions).sanitize(text)
+        let newChunks = chunker.chunks(from: segments)
         logger.notice("play requested: \(newChunks.count, privacy: .public) chunks")
         if newChunks.isEmpty {
             lastError = "Nothing to read: the clipboard text was empty after removing formatting."
@@ -74,14 +81,63 @@ public final class PlaybackController {
             currentChunkIndex = 0
             return
         }
+        let gen = generation
+        let start = ContinuousClock.now
+        if let rewriter {
+            chunks = []
+            currentChunkIndex = 0
+            state = .preparing
+            playbackTask = Task {
+                await rewriteAndRun(
+                    segments: segments, fallback: newChunks, rewriter: rewriter,
+                    generation: gen, playStart: start)
+            }
+            return
+        }
         chunks = newChunks
         currentChunkIndex = 0
         state = .preparing
-        let gen = generation
-        let start = ContinuousClock.now
         playbackTask = Task {
             await runLoop(from: 0, generation: gen, playStart: start)
         }
+    }
+
+    /// Rewrite first, then run the normal pipeline on the rewritten text.
+    /// Any fallback keeps the original chunks and records a notice.
+    private func rewriteAndRun(
+        segments: [SpeechSegment], fallback: [SpeechChunk], rewriter: any ConversationRewriter,
+        generation gen: Int, playStart: ContinuousClock.Instant
+    ) async {
+        let blocks = RewriteBlocks.makeBlocks(from: segments)
+        // play/stop/skip cancel playbackTask, so task cancellation marks stale rewrites.
+        // The generation check below stays as the backstop.
+        let result = await ConversationalRewrite.rewrite(blocks, with: rewriter) {
+            Task.isCancelled
+        }
+        if gen != generation { return }
+        if let rewritten = result.text {
+            let rewrittenChunks = chunker.chunks(
+                from: SpeechSanitizer(options: sanitizerOptions).sanitize(rewritten))
+            if rewrittenChunks.isEmpty {
+                lastNotice = "Conversational rewrite returned no text. Reading as-is."
+                logger.notice("conversational rewrite produced no chunks; reading as-is")
+                chunks = fallback
+            } else {
+                logger.notice(
+                    "conversational rewrite: \(rewrittenChunks.count, privacy: .public) chunks")
+                chunks = rewrittenChunks
+            }
+        } else {
+            if let notice = result.notice {
+                lastNotice = notice
+                logger.notice("\(notice, privacy: .public)")
+            } else {
+                return
+            }
+            chunks = fallback
+        }
+        currentChunkIndex = 0
+        await runLoop(from: 0, generation: gen, playStart: playStart)
     }
 
     /// Pause playback.

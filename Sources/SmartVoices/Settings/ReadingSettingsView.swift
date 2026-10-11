@@ -55,6 +55,20 @@ struct ReadingSettingsView: View {
                     Explanation(text: "Longer tables are summarized instead of read row by row.")
                 }
 
+                Section("Conversational") {
+                    Toggle(
+                        "Rewrite text conversationally before reading",
+                        isOn: $settings.conversationalMode)
+                    Explanation(text: "Retells text in a natural spoken style, like Grok voice mode. Uses Apple's on-device model; nothing leaves this Mac.")
+                    if settings.conversationalMode,
+                        case .unavailable(let reason) = ConversationRewriteSupport.availability()
+                    {
+                        Text("Not available: \(reason)")
+                            .font(.callout)
+                            .foregroundStyle(.orange)
+                    }
+                }
+
                 Section("Preview") {
                     TextEditor(text: $sample)
                         .frame(minHeight: 120)

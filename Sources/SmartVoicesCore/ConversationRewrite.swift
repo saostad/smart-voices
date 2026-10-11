@@ -101,6 +101,68 @@ public struct FoundationModelsRewriter: ConversationRewriter, Sendable {
 }
 #endif
 
+/// Shared rewrite step: playback, export, and headless all fall back the same way.
+/// Returns rewritten text, or nil with a notice when reading as-is (nil notice
+/// means the call was cancelled and the caller should abort silently).
+public enum ConversationalRewrite {
+    public static func rewrite(
+        _ blocks: [String], with rewriter: any ConversationRewriter,
+        isCancelled: @escaping @Sendable () -> Bool = { false }
+    ) async -> (text: String?, notice: String?) {
+        switch rewriter.availability() {
+        case .available:
+            break
+        case .unavailable(let reason):
+            return (
+                nil, "Conversational rewrite unavailable: \(reason) Reading as-is."
+            )
+        }
+        var rewritten: [String] = []
+        for block in blocks {
+            if isCancelled() { return (nil, nil) }
+            do {
+                rewritten.append(try await rewriter.rewrite(block))
+            } catch is CancellationError {
+                return (nil, nil)
+            } catch {
+                return (
+                    nil,
+                    "Conversational rewrite failed: \(error.localizedDescription). Reading as-is."
+                )
+            }
+            if isCancelled() { return (nil, nil) }
+        }
+        let joined = rewritten.joined(separator: "\n\n").trimmingCharacters(
+            in: .whitespacesAndNewlines)
+        if joined.isEmpty {
+            return (nil, "Conversational rewrite returned no text. Reading as-is.")
+        }
+        return (joined, nil)
+    }
+}
+
+/// A rewriter that is always unavailable. Lets callers attempt a rewrite on any
+/// OS and get the same fallback notice instead of branching on availability.
+public struct UnavailableRewriter: ConversationRewriter, Sendable {
+    public let reason: String
+    public init(reason: String) {
+        self.reason = reason
+    }
+
+    public func availability() -> RewriterAvailability {
+        .unavailable(reason: reason)
+    }
+
+    public func rewrite(_ text: String) async throws -> String {
+        throw RewriteUnavailableError(reason: reason)
+    }
+}
+
+private struct RewriteUnavailableError: Error, LocalizedError {
+    var reason: String
+    var errorDescription: String? { reason }
+}
+
 /// Entry point the app uses so call sites don't need availability checks.
 public enum ConversationRewriteSupport {
     public static func availability() -> RewriterAvailability {
@@ -110,6 +172,18 @@ public enum ConversationRewriteSupport {
         }
         #endif
         return .unavailable(reason: "Requires macOS 26 with Apple Intelligence.")
+    }
+
+    /// A rewriter to attempt playback with: the on-device model when available,
+    /// otherwise a placeholder that reports the same unavailability reason.
+    public static func makeAttemptedRewriter() -> any ConversationRewriter {
+        if let rewriter = makeRewriter() {
+            return rewriter
+        }
+        if case .unavailable(let reason) = availability() {
+            return UnavailableRewriter(reason: reason)
+        }
+        return UnavailableRewriter(reason: "Requires macOS 26 with Apple Intelligence.")
     }
 
     /// A working rewriter, or nil when rewriting is unavailable.

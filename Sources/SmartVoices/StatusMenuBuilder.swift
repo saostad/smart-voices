@@ -151,6 +151,15 @@ extension AppDelegate {
             menu.addItem(.separator())
         }
 
+        if let notice = playback.lastNotice {
+            let full = "ⓘ \(notice)"
+            let item = NSMenuItem(title: String(full.prefix(80)), action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            item.toolTip = full
+            menu.addItem(item)
+            menu.addItem(.separator())
+        }
+
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings(_:)), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)

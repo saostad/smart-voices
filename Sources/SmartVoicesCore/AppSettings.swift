@@ -211,6 +211,18 @@ public final class AppSettings {
         }
     }
 
+    @ObservationIgnored private var _conversationalMode: Bool
+    public var conversationalMode: Bool {
+        get {
+            access(keyPath: \.conversationalMode)
+            return _conversationalMode
+        }
+        set {
+            withMutation(keyPath: \.conversationalMode) { _conversationalMode = newValue }
+            defaults.set(newValue, forKey: "sv.conversationalMode")
+        }
+    }
+
     @ObservationIgnored private var _showReaderPanel: Bool
     public var showReaderPanel: Bool {
         get {
@@ -315,6 +327,11 @@ public final class AppSettings {
             self._showReaderPanel = defaults.bool(forKey: "sv.showReaderPanel")
         } else {
             self._showReaderPanel = true
+        }
+        if defaults.object(forKey: "sv.conversationalMode") != nil {
+            self._conversationalMode = defaults.bool(forKey: "sv.conversationalMode")
+        } else {
+            self._conversationalMode = false
         }
         if defaults.object(forKey: "sv.autoSwitchLanguage") != nil {
             self._autoSwitchLanguage = defaults.bool(forKey: "sv.autoSwitchLanguage")

@@ -151,9 +151,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Play text, switching to a matching macOS voice for non-English text
     /// when the Kokoro engine is selected and auto-switching is on.
-    private func playRouted(_ text: String) {
+    /// Voice/pronunciation previews pass rewrite: false so the exact sample is heard.
+    private func playRouted(_ text: String, rewrite: Bool = true) {
         routedVoiceName = nil
         routedReaderCaption = nil
+        playback.rewriter =
+            (rewrite && settings.conversationalMode)
+            ? ConversationRewriteSupport.makeAttemptedRewriter() : nil
         var engineOverride: (any SpeechEngine)?
         var voiceOverride: String?
         if settings.engineID == "kokoro", settings.autoSwitchLanguage,
@@ -301,12 +305,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let speed = settings.speed
         let options = settings.sanitizerOptions
         let pronunciations = settings.pronunciations
+        let rewriter: (any ConversationRewriter)? =
+            settings.conversationalMode
+            ? ConversationRewriteSupport.makeAttemptedRewriter() : nil
         Task { @MainActor [weak self] in
             guard let self else { return }
             do {
                 _ = try await self.exporter.export(
                     text: text, engine: engine, voiceID: voiceID, speed: speed,
-                    sanitizerOptions: options, pronunciations: pronunciations, to: url)
+                    sanitizerOptions: options, pronunciations: pronunciations,
+                    rewriter: rewriter, to: url)
+                if let notice = self.exporter.lastNotice {
+                    self.playback.lastNotice = notice
+                }
                 NSWorkspace.shared.activateFileViewerSelecting([url])
             } catch {
                 self.playback.lastError = "Couldn't export audio: \(error.localizedDescription)"
@@ -370,11 +381,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let currentID = voiceForSettings()
         let name =
             cachedVoices.first(where: { $0.id == currentID })?.name ?? currentID ?? "Default"
-        playRouted("Hi, I'm \(name). This is how I sound.")
+        playRouted("Hi, I'm \(name). This is how I sound.", rewrite: false)
     }
 
     func previewPronunciation(_ spoken: String) {
-        playRouted(spoken)
+        playRouted(spoken, rewrite: false)
     }
 
     @objc func showReaderPanel(_ sender: Any?) {

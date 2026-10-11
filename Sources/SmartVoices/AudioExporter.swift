@@ -32,19 +32,40 @@ final class AudioExporter {
 
     /// Synthesize every chunk and write AAC 24 kHz mono to `url`.
     /// Returns the audio duration in seconds.
+    private(set) var lastNotice: String?
+
     func export(
         text: String, engine: any SpeechEngine, voiceID: String?, speed: Double,
         sanitizerOptions: SanitizerOptions, pronunciations: [PronunciationEntry] = [],
+        rewriter: (any ConversationRewriter)? = nil,
         to url: URL
     ) async throws -> Double {
+        lastNotice = nil
         do {
             try await engine.prepare()
         } catch {
             throw AudioExportError.engineFailed(
                 "\(engine.displayName): \(error.localizedDescription)")
         }
-        let chunks = SpeechChunker().chunks(
-            from: SpeechSanitizer(options: sanitizerOptions).sanitize(text))
+        let segments = SpeechSanitizer(options: sanitizerOptions).sanitize(text)
+        var chunks = SpeechChunker().chunks(from: segments)
+        if let rewriter {
+            let result = await ConversationalRewrite.rewrite(
+                RewriteBlocks.makeBlocks(from: segments), with: rewriter)
+            if let rewritten = result.text {
+                let rewrittenChunks = SpeechChunker().chunks(
+                    from: SpeechSanitizer(options: sanitizerOptions).sanitize(rewritten))
+                if !rewrittenChunks.isEmpty {
+                    chunks = rewrittenChunks
+                } else {
+                    lastNotice = "Conversational rewrite returned no text. Reading as-is."
+                }
+            } else if let notice = result.notice {
+                lastNotice = notice
+            } else {
+                throw CancellationError()
+            }
+        }
         if chunks.isEmpty {
             throw AudioExportError.nothingToRead
         }
