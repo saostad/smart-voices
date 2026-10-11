@@ -43,7 +43,7 @@ final class FakeEngine: SpeechEngine, @unchecked Sendable {
         if let failure {
             throw failure
         }
-        return SynthesizedAudio(samples: [0.1, 0.2], sampleRate: 24000)
+        return SynthesizedAudio(samples: [Float(text.utf8.first ?? 0)], sampleRate: 24000)
     }
 }
 
@@ -120,7 +120,9 @@ struct PlaybackControllerTests {
         await waitForIdle(controller)
         #expect(controller.state == .idle)
         #expect(output.playCalls.count == 3)
-        let texts = engine.synthesizeCalls.map(\.text)
+        let played = output.playCalls.map { $0.samples.first ?? 0 }
+        #expect(played == [Float(70), Float(83), Float(84)])
+        let texts = engine.synthesizeCalls.map(\.text).sorted()
         #expect(texts == ["First sentence.", "Second sentence.", "Third sentence."])
         #expect(controller.firstAudioLatency != nil)
     }
