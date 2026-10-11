@@ -27,6 +27,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var engineLoading = false
     var engineLoadFailed = false
     var cachedVoices: [VoiceInfo] = []
+    private var routedVoiceName: String?
+    private var routedReaderCaption: String?
     private var prepareGeneration = 0
     private var voicesGeneration = 0
 
@@ -141,10 +143,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Play text from any source, recording it in history when playback starts.
     private func playAndRecord(_ text: String) {
-        playback.play(text: text)
+        playRouted(text)
         if playback.state != .idle {
             recordHistory(text)
         }
+    }
+
+    /// Play text, switching to a matching macOS voice for non-English text
+    /// when the Kokoro engine is selected and auto-switching is on.
+    private func playRouted(_ text: String) {
+        routedVoiceName = nil
+        routedReaderCaption = nil
+        var engineOverride: (any SpeechEngine)?
+        var voiceOverride: String?
+        if settings.engineID == "kokoro", settings.autoSwitchLanguage,
+            let detected = LanguageRouter.dominantLanguage(of: text),
+            detected.code != "en"
+        {
+            guard let voice = SystemVoicePicker.bestVoice(forLanguage: detected.code) else {
+                playback.lastError = LanguageRouting.missingVoiceMessage(for: detected.code)
+                return
+            }
+            let languageName =
+                Locale.current.localizedString(forLanguageCode: detected.code) ?? detected.code
+            engineOverride = SystemSpeechEngine()
+            voiceOverride = voice.id
+            routedVoiceName = voice.name
+            routedReaderCaption = "\(languageName) · macOS Voice (Kokoro speaks English)"
+            appLogger.notice(
+                "switched to macOS voice \(voice.name, privacy: .public) for \(languageName, privacy: .public) text (Kokoro speaks English)"
+            )
+        }
+        playback.play(text: text, engineOverride: engineOverride, voiceOverride: voiceOverride)
     }
 
     private func recordHistory(_ text: String) {
@@ -340,11 +370,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let currentID = voiceForSettings()
         let name =
             cachedVoices.first(where: { $0.id == currentID })?.name ?? currentID ?? "Default"
-        playback.play(text: "Hi, I'm \(name). This is how I sound.")
+        playRouted("Hi, I'm \(name). This is how I sound.")
     }
 
     func previewPronunciation(_ spoken: String) {
-        playback.play(text: spoken)
+        playRouted(spoken)
     }
 
     @objc func showReaderPanel(_ sender: Any?) {
@@ -374,6 +404,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func readerHeader() -> (name: String, caption: String) {
+        if let caption = routedReaderCaption {
+            return (routedVoiceName ?? "macOS Voice", caption)
+        }
         let currentID = voiceForSettings()
         let voiceName =
             cachedVoices.first(where: { $0.id == currentID })?.name ?? currentID ?? "Default"
@@ -543,6 +576,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.hotKeyCenter.updateBindings(self.settings.hotKeys)
                 if self.playback.state == .playing {
                     self.engineLoadFailed = false
+                }
+                if self.playback.state == .idle {
+                    self.routedVoiceName = nil
+                    self.routedReaderCaption = nil
                 }
                 self.updateReaderPanel()
                 self.updateNowPlaying()

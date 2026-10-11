@@ -1,6 +1,29 @@
 import AVFoundation
 import Foundation
 
+/// Picks the best installed macOS voice for a language.
+public enum SystemVoicePicker {
+    /// Best installed voice for a BCP-47 language code, preferring
+    /// premium/enhanced quality. Nil when no voice matches.
+    public static func bestVoice(forLanguage code: String) -> VoiceInfo? {
+        let want = code.lowercased()
+        return AVSpeechSynthesisVoice.speechVoices()
+            .filter { voice in
+                let language = voice.language.lowercased()
+                return language == want || language.hasPrefix(want + "-")
+                    || language.hasPrefix(want + "_")
+            }
+            .sorted {
+                if $0.quality.rawValue != $1.quality.rawValue {
+                    return $0.quality.rawValue > $1.quality.rawValue
+                }
+                return $0.name.localizedCompare($1.name) == .orderedAscending
+            }
+            .map { VoiceInfo(id: $0.identifier, name: $0.name, language: $0.language) }
+            .first
+    }
+}
+
 /// macOS system voice engine.
 public struct SystemSpeechEngine: SpeechEngine, Sendable {
     public var displayName: String { "macOS speech" }

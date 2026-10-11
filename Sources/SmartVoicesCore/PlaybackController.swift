@@ -35,6 +35,8 @@ public final class PlaybackController {
     private var playbackTask: Task<Void, Never>?
     private var pausedElapsed: Double?
     private let pendingBox = PendingBox()
+    private var activeEngineOverride: (any SpeechEngine)?
+    private var activeVoiceOverride: String?
 
     public init(
         engine: any SpeechEngine,
@@ -49,12 +51,17 @@ public final class PlaybackController {
     }
 
     /// Play text from the start, stopping any current playback.
-    public func play(text: String) {
+    /// The overrides apply to this play only; the stored engine/voice are unchanged.
+    public func play(
+        text: String, engineOverride: (any SpeechEngine)? = nil, voiceOverride: String? = nil
+    ) {
         generation += 1
         playbackTask?.cancel()
         playbackTask = nil
         output.stop()
         resumePendingWithCancellation()
+        activeEngineOverride = engineOverride
+        activeVoiceOverride = voiceOverride
         lastError = nil
         firstAudioLatency = nil
         clearChunkProgress()
@@ -120,6 +127,8 @@ public final class PlaybackController {
         playbackTask = nil
         output.stop()
         resumePendingWithCancellation()
+        activeEngineOverride = nil
+        activeVoiceOverride = nil
         state = .idle
         currentChunkIndex = 0
         clearChunkProgress()
@@ -204,6 +213,8 @@ public final class PlaybackController {
     }
 
     private func runLoop(from startIndex: Int, generation gen: Int, playStart: ContinuousClock.Instant?) async {
+        let resolvedEngine = activeEngineOverride ?? engine
+        let resolvedVoice = activeVoiceOverride ?? voiceID
         var cache: [Int: SynthesizedAudio] = [:]
         var synthTasks: [Int: Task<SynthesizedAudio, Error>] = [:]
         defer {
@@ -228,7 +239,7 @@ public final class PlaybackController {
                 } catch {
                     if gen != generation { return }
                     output.stop()
-                    let message = "Couldn't synthesize speech with \(engine.displayName): \(error.localizedDescription)"
+                    let message = "Couldn't synthesize speech with \(resolvedEngine.displayName): \(error.localizedDescription)"
                     logger.error("\(message, privacy: .public)")
                     lastError = message
                     state = .idle
@@ -238,9 +249,9 @@ public final class PlaybackController {
                 }
             } else {
                 let text = pronunciationDictionary.apply(to: chunks[index].text)
-                let voice = voiceID
+                let voice = resolvedVoice
                 let spd = speed
-                let eng = engine
+                let eng = resolvedEngine
                 do {
                     audio = try await eng.synthesize(text, voiceID: voice, speed: spd)
                     if gen != generation { return }
@@ -250,7 +261,7 @@ public final class PlaybackController {
                 } catch {
                     if gen != generation { return }
                     output.stop()
-                    let message = "Couldn't synthesize speech with \(engine.displayName): \(error.localizedDescription)"
+                    let message = "Couldn't synthesize speech with \(resolvedEngine.displayName): \(error.localizedDescription)"
                     logger.error("\(message, privacy: .public)")
                     lastError = message
                     state = .idle
@@ -263,9 +274,9 @@ public final class PlaybackController {
             for ahead in [index + 1, index + 2] {
                 if ahead < chunks.count, cache[ahead] == nil, synthTasks[ahead] == nil {
                     let text = pronunciationDictionary.apply(to: chunks[ahead].text)
-                    let voice = voiceID
+                    let voice = resolvedVoice
                     let spd = speed
-                    let eng = engine
+                    let eng = resolvedEngine
                     synthTasks[ahead] = Task {
                         try await eng.synthesize(text, voiceID: voice, speed: spd)
                     }

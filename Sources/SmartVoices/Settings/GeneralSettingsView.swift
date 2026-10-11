@@ -44,6 +44,13 @@ struct GeneralSettingsView: View {
                     Explanation(text: "Shorter copies won't light up the play badge or play.")
                 }
 
+                Section("Language") {
+                    Toggle(
+                        "Use a matching macOS voice for other languages",
+                        isOn: $settings.autoSwitchLanguage)
+                    Explanation(text: "Kokoro speaks English. For text in other languages (like Persian or German), Smart Voices switches to a macOS voice for that language.")
+                }
+
                 Section("Reading panel") {
                     Toggle("Show reading panel while playing", isOn: $settings.showReaderPanel)
                     Explanation(text: "A small floating window that highlights each sentence and word as it's read.")

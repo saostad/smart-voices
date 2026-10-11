@@ -199,6 +199,18 @@ public final class AppSettings {
         }
     }
 
+    @ObservationIgnored private var _autoSwitchLanguage: Bool
+    public var autoSwitchLanguage: Bool {
+        get {
+            access(keyPath: \.autoSwitchLanguage)
+            return _autoSwitchLanguage
+        }
+        set {
+            withMutation(keyPath: \.autoSwitchLanguage) { _autoSwitchLanguage = newValue }
+            defaults.set(newValue, forKey: "sv.autoSwitchLanguage")
+        }
+    }
+
     @ObservationIgnored private var _showReaderPanel: Bool
     public var showReaderPanel: Bool {
         get {
@@ -303,6 +315,11 @@ public final class AppSettings {
             self._showReaderPanel = defaults.bool(forKey: "sv.showReaderPanel")
         } else {
             self._showReaderPanel = true
+        }
+        if defaults.object(forKey: "sv.autoSwitchLanguage") != nil {
+            self._autoSwitchLanguage = defaults.bool(forKey: "sv.autoSwitchLanguage")
+        } else {
+            self._autoSwitchLanguage = true
         }
         if defaults.object(forKey: "sv.keepHistory") != nil {
             self._keepHistory = defaults.bool(forKey: "sv.keepHistory")

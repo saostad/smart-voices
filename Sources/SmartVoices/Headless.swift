@@ -80,6 +80,19 @@ func runExportAsync(text: String, engine: any SpeechEngine, outputPath: String) 
 func runHeadlessAsync(text: String, engine: any SpeechEngine) async -> Int32 {
     let sanitizer = SpeechSanitizer()
     let chunker = SpeechChunker()
+    var engine = engine
+    var voiceID: String?
+    if engine is KokoroSpeechEngine,
+        let detected = LanguageRouter.dominantLanguage(of: text),
+        detected.code != "en"
+    {
+        guard let voice = SystemVoicePicker.bestVoice(forLanguage: detected.code) else {
+            writeStderr("SmartVoices: \(LanguageRouting.missingVoiceMessage(for: detected.code))")
+            return 1
+        }
+        engine = SystemSpeechEngine()
+        voiceID = voice.id
+    }
     do {
         try await engine.prepare()
     } catch {
@@ -98,7 +111,7 @@ func runHeadlessAsync(text: String, engine: any SpeechEngine) async -> Int32 {
         let synthStart = ContinuousClock.now
         let audio: SynthesizedAudio
         do {
-            audio = try await engine.synthesize(chunk.text, voiceID: nil, speed: 1.0)
+            audio = try await engine.synthesize(chunk.text, voiceID: voiceID, speed: 1.0)
         } catch {
             writeStderr("SmartVoices: Couldn't synthesize speech with \(engine.displayName): \(error.localizedDescription)")
             return 1

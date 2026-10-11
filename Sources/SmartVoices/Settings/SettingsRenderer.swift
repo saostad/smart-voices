@@ -34,7 +34,7 @@ func renderSettings(to dir: String) -> Int32 {
         "sv.engineID", "sv.kokoroVoiceID", "sv.systemVoiceID", "sv.speed", "sv.watchClipboard",
         "sv.codeBlocks", "sv.tables", "sv.bareURLs", "sv.maxTableRowsToRead",
         "sv.minimumReadyLength", "sv.ignoredAppBundleIDs", "sv.hotKeys", "sv.showReaderPanel",
-        "sv.keepHistory", "sv.pronunciations",
+        "sv.keepHistory", "sv.pronunciations", "sv.autoSwitchLanguage",
     ] {
         renderDefaults.removeObject(forKey: key)
     }
