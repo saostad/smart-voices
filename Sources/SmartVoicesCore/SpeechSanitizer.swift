@@ -72,7 +72,11 @@ public struct SpeechSanitizer: Sendable {
         if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return []
         }
-        let document = Document(parsing: text)
+        let stripped = stripFootnoteDefinitions(text)
+        if stripped.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return []
+        }
+        let document = Document(parsing: stripped)
         var segments: [SpeechSegment] = []
         appendBlocks(document.children, to: &segments)
         return segments
@@ -199,11 +203,58 @@ public struct SpeechSanitizer: Sendable {
             case .unchecked: prefix += "To do: "
             }
         }
+        var itemText = cleaned
         if isOrdered {
             prefix += ordinalPrefix(number)
+            itemText = decapitalizeAfterOrdinal(itemText)
         }
-        let text = withTerminalPunctuation(prefix + cleaned)
+        let text = withTerminalPunctuation(prefix + itemText)
         return SpeechSegment(text: text, pause: .short)
+    }
+
+    private func decapitalizeAfterOrdinal(_ text: String) -> String {
+        guard let first = text.first, first.isUppercase else {
+            return text
+        }
+        let secondIndex = text.index(after: text.startIndex)
+        if secondIndex < text.endIndex, text[secondIndex].isUppercase {
+            return text
+        }
+        return first.lowercased() + text.dropFirst()
+    }
+
+    private func stripFootnoteDefinitions(_ text: String) -> String {
+        let lines = text.components(separatedBy: .newlines)
+        var kept: [String] = []
+        kept.reserveCapacity(lines.count)
+        for line in lines {
+            if isFootnoteDefinition(line) {
+                continue
+            }
+            kept.append(line)
+        }
+        return kept.joined(separator: "\n")
+    }
+
+    private func isFootnoteDefinition(_ line: String) -> Bool {
+        var index = line.startIndex
+        while index < line.endIndex, line[index] == " " || line[index] == "\t" {
+            index = line.index(after: index)
+        }
+        guard index < line.endIndex, line[index] == "[" else { return false }
+        index = line.index(after: index)
+        guard index < line.endIndex, line[index] == "^" else { return false }
+        index = line.index(after: index)
+        var count = 0
+        while index < line.endIndex, line[index] != "]" {
+            index = line.index(after: index)
+            count += 1
+        }
+        if count == 0 { return false }
+        guard index < line.endIndex, line[index] == "]" else { return false }
+        index = line.index(after: index)
+        guard index < line.endIndex, line[index] == ":" else { return false }
+        return true
     }
 
     private func listItemNestedSegments(for item: ListItem) -> [SpeechSegment] {
@@ -449,6 +500,7 @@ public struct SpeechSanitizer: Sendable {
     private func cleanFragment(_ raw: String) -> String? {
         var value = raw
         value = removeCitations(value)
+        value = removeSpaceBeforePunctuation(value)
         value = removeEmoji(value)
         value = replaceBareURLs(value)
         value = applyWordReplacements(value)
@@ -510,6 +562,31 @@ public struct SpeechSanitizer: Sendable {
             }
             result.append(value[index])
             index = value.index(after: index)
+        }
+        return result
+    }
+
+    private func removeSpaceBeforePunctuation(_ value: String) -> String {
+        var result = ""
+        result.reserveCapacity(value.count)
+        var index = value.startIndex
+        while index < value.endIndex {
+            let char = value[index]
+            if char == " " || char == "\t" {
+                var end = value.index(after: index)
+                while end < value.endIndex, value[end] == " " || value[end] == "\t" {
+                    end = value.index(after: end)
+                }
+                if end < value.endIndex, ".,;:!?".contains(value[end]) {
+                    index = end
+                    continue
+                }
+                result += value[index..<end]
+                index = end
+            } else {
+                result.append(char)
+                index = value.index(after: index)
+            }
         }
         return result
     }
@@ -680,9 +757,29 @@ public struct SpeechSanitizer: Sendable {
         result = replaceWord(result, target: "vs.", replacement: "versus")
         result = replaceWord(result, target: "vs", replacement: "versus")
         result = replaceWord(result, target: "w/", replacement: "with")
+        result = replaceTildeBeforeDigit(result)
         result = result.replacingOccurrences(of: "->", with: " to ")
         result = result.replacingOccurrences(of: "→", with: " to ")
         result = result.replacingOccurrences(of: "&", with: " and ")
+        return result
+    }
+
+    private func replaceTildeBeforeDigit(_ value: String) -> String {
+        var result = ""
+        result.reserveCapacity(value.count)
+        var index = value.startIndex
+        while index < value.endIndex {
+            if value[index] == "~" {
+                let next = value.index(after: index)
+                if next < value.endIndex, value[next].isNumber {
+                    result += "about "
+                    index = next
+                    continue
+                }
+            }
+            result.append(value[index])
+            index = value.index(after: index)
+        }
         return result
     }
 

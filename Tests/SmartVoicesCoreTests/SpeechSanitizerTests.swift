@@ -61,12 +61,41 @@ import Testing
         let md = (1...11).map { "\($0). Item \($0)" }.joined(separator: "\n")
         let result = sanitizer.sanitize(md)
         #expect(result.count == 11)
-        #expect(result[0].text == "First, Item 1.")
-        #expect(result[1].text == "Second, Item 2.")
-        #expect(result[9].text == "Tenth, Item 10.")
-        #expect(result[10].text == "Number 11, Item 11.")
+        #expect(result[0].text == "First, item 1.")
+        #expect(result[1].text == "Second, item 2.")
+        #expect(result[9].text == "Tenth, item 10.")
+        #expect(result[10].text == "Number 11, item 11.")
         #expect(result[10].pause == .medium)
         #expect(result[0].pause == .short)
+    }
+
+    @Test func citationBeforePunctuationLeavesNoGap() {
+        #expect(sanitizer.sanitize("citation [2].")[0].text == "citation.")
+        #expect(sanitizer.sanitize("Text[^1].")[0].text == "Text.")
+        #expect(sanitizer.sanitize("Hello [1], world.")[0].text == "Hello, world.")
+    }
+
+    @Test func orderedPrefixLowercasesUnlessAcronym() {
+        let result = sanitizer.sanitize("1. Download files\n2. API keys")
+        #expect(result.count == 2)
+        #expect(result[0].text == "First, download files.")
+        #expect(result[1].text == "Second, API keys.")
+    }
+
+    @Test func footnoteDefinitionsStripped() {
+        let result = sanitizer.sanitize("Text.\n\n[^1]: Footnote text.\n\nMore.")
+        #expect(result == [
+            SpeechSegment(text: "Text.", pause: .medium),
+            SpeechSegment(text: "More.", pause: .medium),
+        ])
+        #expect(sanitizer.sanitize("  [^12]: indented def.\nBody.") == [
+            SpeechSegment(text: "Body.", pause: .medium)
+        ])
+    }
+
+    @Test func tildeBeforeDigitBecomesAbout() {
+        #expect(sanitizer.sanitize("~300MB")[0].text == "about 300MB.")
+        #expect(sanitizer.sanitize("Costs ~300 dollars.")[0].text == "Costs about 300 dollars.")
     }
 
     @Test func taskItemsPrefixes() {
