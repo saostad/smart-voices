@@ -20,10 +20,17 @@ struct ReaderView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text(header.title)
-                    .font(.headline)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(header.name)
+                        .font(.headline)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Text(header.caption)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
                 Spacer()
                 Button(action: onClose) {
                     Image(systemName: "xmark.circle.fill")
@@ -137,28 +144,47 @@ struct ReaderView: View {
     private var footer: some View {
         VStack(spacing: 6) {
             HStack {
-                Button(action: onPrevious) {
-                    Image(systemName: "chevron.backward")
-                        .font(.title3)
-                }
-                .buttonStyle(.plain)
-                .disabled(!canGoPrevious)
-                Button(action: onTogglePlayPause) {
-                    Image(
-                        systemName: playback.state == .playing
-                            ? "pause.fill" : "play.fill"
-                    )
-                    .font(.title)
-                }
-                .buttonStyle(.plain)
-                .disabled(playback.chunks.isEmpty)
-                Button(action: onNext) {
-                    Image(systemName: "chevron.forward")
-                        .font(.title3)
-                }
-                .buttonStyle(.plain)
-                .disabled(!canGoNext)
+                Text(progressLabel)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Spacer()
+            }
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(.quaternary)
+                    Capsule()
+                        .fill(Color.accentColor)
+                        .frame(width: progress * geometry.size.width)
+                }
+            }
+            .frame(height: 4)
+            ZStack(alignment: .trailing) {
+                HStack {
+                    Spacer()
+                    Button(action: onPrevious) {
+                        Image(systemName: "chevron.backward")
+                            .font(.title3)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canGoPrevious)
+                    Button(action: onTogglePlayPause) {
+                        Image(
+                            systemName: playback.state == .playing
+                                ? "pause.fill" : "play.fill"
+                        )
+                        .font(.title)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(playback.chunks.isEmpty)
+                    Button(action: onNext) {
+                        Image(systemName: "chevron.forward")
+                            .font(.title3)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canGoNext)
+                    Spacer()
+                }
                 Menu {
                     ForEach(speeds, id: \.self) { value in
                         Button(String(format: "%g×", value)) {
@@ -166,16 +192,21 @@ struct ReaderView: View {
                         }
                     }
                 } label: {
-                    Text(String(format: "%g×", playback.speed))
+                    HStack(spacing: 2) {
+                        Text(String(format: "%g×", playback.speed))
+                        Image(systemName: "chevron.down")
+                            .font(.caption2)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background {
+                        Capsule()
+                            .strokeBorder(.secondary.opacity(0.4))
+                    }
                 }
                 .menuStyle(.borderlessButton)
+                .fixedSize()
             }
-            ProgressView(value: progress)
-                .controlSize(.small)
-            Text(progressLabel)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(12)
     }

@@ -64,7 +64,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         nowPlaying.onStop = { [weak self] in self?.playback.stop() }
         startEnginePrepare()
         refreshVoices()
-        reader.setTitle(readerTitle())
+        let header = readerHeader()
+        reader.setHeader(name: header.name, caption: header.caption)
         if let loadError = history.loadError {
             playback.lastError =
                 "Couldn't save reading history: \(loadError.localizedDescription)"
@@ -291,7 +292,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func presentReader() {
         reader.show(
-            playback: playback, title: readerTitle(),
+            playback: playback, header: readerHeader(),
             onJump: { [weak self] index in self?.playback.jump(to: index) },
             onTogglePlayPause: { [weak self] in self?.handleLeftClick() },
             onNext: { [weak self] in self?.playback.skipForward() },
@@ -309,11 +310,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             })
     }
 
-    private func readerTitle() -> String {
+    private func readerHeader() -> (name: String, caption: String) {
         let currentID = voiceForSettings()
         let voiceName =
             cachedVoices.first(where: { $0.id == currentID })?.name ?? currentID ?? "Default"
-        return "\(playback.engine.displayName) — \(voiceName)"
+        let engineLabel = settings.engineID == "kokoro" ? "Kokoro" : "macOS Voice"
+        let parts = voiceName.split(separator: "—", maxSplits: 1).map {
+            $0.trimmingCharacters(in: .whitespaces)
+        }
+        if parts.count == 2 {
+            return (parts[0], "\(engineLabel) · \(parts[1])")
+        }
+        return (voiceName, engineLabel)
     }
 
     private func updateReaderPanel() {
@@ -421,7 +429,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self, self.voicesGeneration == generation else { return }
             self.cachedVoices = list
             self.voiceModel.voices = list
-            self.reader.setTitle(self.readerTitle())
+            let header = self.readerHeader()
+            self.reader.setHeader(name: header.name, caption: header.caption)
         }
     }
 

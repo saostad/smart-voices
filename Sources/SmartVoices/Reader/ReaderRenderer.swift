@@ -38,7 +38,7 @@ func renderReader(to png: String) -> Int32 {
     ]
     playback.currentChunkIndex = 2
     playback.state = .playing
-    let header = ReaderHeaderModel(title: "Kokoro — Heart — American female")
+    let header = ReaderHeaderModel(name: "Heart", caption: "Kokoro · American female")
     let appearances: [(NSAppearance.Name, String)] = [(.aqua, "-light"), (.darkAqua, "-dark")]
     for (appearanceName, suffix) in appearances {
         let view = ReaderView(

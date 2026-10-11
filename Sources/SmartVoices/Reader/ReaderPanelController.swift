@@ -5,10 +5,12 @@ import SwiftUI
 /// Header title for the reading panel, updated without rebuilding the panel.
 @MainActor @Observable
 final class ReaderHeaderModel {
-    var title: String
+    var name: String
+    var caption: String
 
-    init(title: String = "") {
-        self.title = title
+    init(name: String = "", caption: String = "") {
+        self.name = name
+        self.caption = caption
     }
 }
 
@@ -27,13 +29,14 @@ final class ReaderPanelController {
         return panel.frame.contains(NSEvent.mouseLocation)
     }
 
-    func setTitle(_ title: String) {
-        header.title = title
+    func setHeader(name: String, caption: String) {
+        header.name = name
+        header.caption = caption
     }
 
     func show(
         playback: PlaybackController,
-        title: String,
+        header headerText: (name: String, caption: String),
         onJump: @escaping (Int) -> Void,
         onTogglePlayPause: @escaping () -> Void,
         onNext: @escaping () -> Void,
@@ -41,7 +44,8 @@ final class ReaderPanelController {
         onSpeed: @escaping (Double) -> Void,
         onClose: @escaping () -> Void
     ) {
-        header.title = title
+        header.name = headerText.name
+        header.caption = headerText.caption
         if panel == nil {
             let view = ReaderView(
                 playback: playback, header: header,
