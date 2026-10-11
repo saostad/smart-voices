@@ -6,6 +6,7 @@ let package = Package(
     platforms: [.macOS(.v15)],
     products: [
         .executable(name: "SmartVoices", targets: ["SmartVoices"]),
+        .executable(name: "svtext", targets: ["svtext"]),
         .library(name: "SmartVoicesCore", targets: ["SmartVoicesCore"]),
     ],
     dependencies: [
@@ -18,6 +19,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "SmartVoices",
+            dependencies: ["SmartVoicesCore"]
+        ),
+        .executableTarget(
+            name: "svtext",
             dependencies: ["SmartVoicesCore"]
         ),
         .testTarget(
