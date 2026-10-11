@@ -19,8 +19,9 @@ public final class PlaybackController {
     public var voiceID: String?
     public var engine: any SpeechEngine
 
+    public var sanitizerOptions: SanitizerOptions
+
     private let output: any AudioOutput
-    private let sanitizer: SpeechSanitizer
     private let chunker: SpeechChunker
     private let logger = Logger(subsystem: "dev.smartvoices", category: "playback")
 
@@ -31,12 +32,12 @@ public final class PlaybackController {
     public init(
         engine: any SpeechEngine,
         output: any AudioOutput,
-        sanitizer: SpeechSanitizer = SpeechSanitizer(),
+        sanitizerOptions: SanitizerOptions = SanitizerOptions(),
         chunker: SpeechChunker = SpeechChunker()
     ) {
         self.engine = engine
         self.output = output
-        self.sanitizer = sanitizer
+        self.sanitizerOptions = sanitizerOptions
         self.chunker = chunker
     }
 
@@ -49,7 +50,7 @@ public final class PlaybackController {
         resumePendingWithCancellation()
         lastError = nil
         firstAudioLatency = nil
-        let newChunks = chunker.chunks(from: sanitizer.sanitize(text))
+        let newChunks = chunker.chunks(from: SpeechSanitizer(options: sanitizerOptions).sanitize(text))
         logger.notice("play requested: \(newChunks.count, privacy: .public) chunks")
         if newChunks.isEmpty {
             lastError = "Nothing to read: the clipboard text was empty after removing formatting."

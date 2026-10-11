@@ -15,6 +15,13 @@ struct AppSettingsTests {
         #expect(settings.systemVoiceID == nil)
         #expect(settings.speed == 1.0)
         #expect(settings.watchClipboard == true)
+        #expect(settings.codeBlocks == "announce")
+        #expect(settings.tables == "readRows")
+        #expect(settings.bareURLs == "domainOnly")
+        #expect(settings.maxTableRowsToRead == 15)
+        #expect(settings.minimumReadyLength == 2)
+        #expect(settings.ignoredAppBundleIDs == AppSettings.defaultIgnoredAppBundleIDs)
+        #expect(settings.sanitizerOptions == SanitizerOptions())
     }
 
     @Test func roundTrip() {
@@ -25,12 +32,28 @@ struct AppSettingsTests {
         settings.systemVoiceID = "com.apple.voice.premium.en-US.Ava"
         settings.speed = 1.5
         settings.watchClipboard = false
+        settings.codeBlocks = "skip"
+        settings.tables = "announce"
+        settings.bareURLs = "skip"
+        settings.maxTableRowsToRead = 5
+        settings.minimumReadyLength = 10
+        settings.ignoredAppBundleIDs = ["com.example.app"]
         let reloaded = AppSettings(defaults: defaults)
         #expect(reloaded.engineID == "system")
         #expect(reloaded.kokoroVoiceID == "am_adam")
         #expect(reloaded.systemVoiceID == "com.apple.voice.premium.en-US.Ava")
         #expect(reloaded.speed == 1.5)
         #expect(reloaded.watchClipboard == false)
+        #expect(reloaded.codeBlocks == "skip")
+        #expect(reloaded.tables == "announce")
+        #expect(reloaded.bareURLs == "skip")
+        #expect(reloaded.maxTableRowsToRead == 5)
+        #expect(reloaded.minimumReadyLength == 10)
+        #expect(reloaded.ignoredAppBundleIDs == ["com.example.app"])
+        #expect(
+            reloaded.sanitizerOptions
+                == SanitizerOptions(
+                    codeBlocks: .skip, tables: .announce, bareURLs: .skip, maxTableRowsToRead: 5))
         settings.systemVoiceID = nil
         #expect(AppSettings(defaults: defaults).systemVoiceID == nil)
     }
@@ -45,6 +68,18 @@ struct AppSettingsTests {
         #expect(AppSettings(defaults: defaults).speed == 0.5)
         defaults.set(10.0, forKey: "sv.speed")
         #expect(AppSettings(defaults: defaults).speed == 3.0)
+        settings.maxTableRowsToRead = 0
+        #expect(settings.maxTableRowsToRead == 1)
+        settings.maxTableRowsToRead = 500
+        #expect(settings.maxTableRowsToRead == 100)
+        settings.minimumReadyLength = 0
+        #expect(settings.minimumReadyLength == 1)
+        settings.minimumReadyLength = 5000
+        #expect(settings.minimumReadyLength == 1000)
+        defaults.set(500, forKey: "sv.maxTableRowsToRead")
+        #expect(AppSettings(defaults: defaults).maxTableRowsToRead == 100)
+        defaults.set(-3, forKey: "sv.minimumReadyLength")
+        #expect(AppSettings(defaults: defaults).minimumReadyLength == 1)
     }
 
     @Test func invalidEngineReset() {
@@ -55,5 +90,24 @@ struct AppSettingsTests {
         #expect(defaults.string(forKey: "sv.engineID") == "kokoro")
         settings.engineID = "bogus"
         #expect(settings.engineID == "kokoro")
+    }
+
+    @Test func invalidReadingOptionsReset() {
+        let defaults = makeDefaults()
+        defaults.set("shout", forKey: "sv.codeBlocks")
+        defaults.set("chart", forKey: "sv.tables")
+        defaults.set("full", forKey: "sv.bareURLs")
+        let settings = AppSettings(defaults: defaults)
+        #expect(settings.codeBlocks == "announce")
+        #expect(settings.tables == "readRows")
+        #expect(settings.bareURLs == "domainOnly")
+        #expect(defaults.string(forKey: "sv.codeBlocks") == "announce")
+        settings.codeBlocks = "bogus"
+        settings.tables = "bogus"
+        settings.bareURLs = "bogus"
+        #expect(settings.codeBlocks == "announce")
+        #expect(settings.tables == "readRows")
+        #expect(settings.bareURLs == "domainOnly")
+        #expect(settings.sanitizerOptions == SanitizerOptions())
     }
 }

@@ -31,7 +31,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         playback.engine = engineForSettings()
         playback.speed = settings.speed
         playback.voiceID = voiceForSettings()
+        playback.sanitizerOptions = settings.sanitizerOptions
         monitor.isEnabled = settings.watchClipboard
+        monitor.ignoredAppBundleIDs = settings.ignoredAppBundleIDs
+        monitor.minimumReadyLength = settings.minimumReadyLength
         startEnginePrepare()
         refreshVoices()
         updateIcon()
@@ -64,11 +67,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .playing, .paused, .preparing:
             playback.togglePlayPause { nil }
         case .idle:
-            if let text = monitor.readText() {
-                playback.play(text: text)
-            } else {
-                playback.lastError = "The clipboard doesn't contain any text."
-            }
+            readClipboardAndPlay()
+        }
+    }
+
+    private func readClipboardAndPlay() {
+        switch monitor.readText() {
+        case .text(let text):
+            playback.play(text: text)
+        case .empty:
+            playback.lastError = "The clipboard doesn't contain any text."
+        case .tooShort(let count):
+            playback.lastError =
+                "The clipboard text is only \(count) characters. Copy something longer, or lower the minimum in Settings → General."
         }
     }
 
@@ -80,11 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func readClipboard(_ sender: Any?) {
-        if let text = monitor.readText() {
-            playback.play(text: text)
-        } else {
-            playback.lastError = "The clipboard doesn't contain any text."
-        }
+        readClipboardAndPlay()
     }
 
     @objc func togglePause(_ sender: Any?) {
@@ -209,6 +216,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             _ = playback.lastError
             _ = monitor.hasUnreadContent
             _ = settings.watchClipboard
+            _ = settings.ignoredAppBundleIDs
+            _ = settings.minimumReadyLength
+            _ = settings.codeBlocks
+            _ = settings.tables
+            _ = settings.bareURLs
+            _ = settings.maxTableRowsToRead
         } onChange: { [weak self] in
             guard let self else { return }
             // onChange fires before the new value is stored: re-register now, but
@@ -219,6 +232,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.monitor.isEnabled = self.settings.watchClipboard
+                self.monitor.ignoredAppBundleIDs = self.settings.ignoredAppBundleIDs
+                self.monitor.minimumReadyLength = self.settings.minimumReadyLength
+                self.playback.sanitizerOptions = self.settings.sanitizerOptions
                 if self.playback.state == .playing {
                     self.engineLoadFailed = false
                 }

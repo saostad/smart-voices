@@ -18,10 +18,21 @@ public final class SystemPasteboard: PasteboardSource {
     public func string() -> String? { NSPasteboard.general.string(forType: .string) }
 }
 
+/// Result of reading the clipboard.
+public enum ClipboardReadResult: Sendable, Equatable {
+    case text(String)
+    case empty
+    case tooShort(Int)
+}
+
 /// Watches the clipboard for new text.
 @MainActor @Observable
 public final class ClipboardMonitor {
     public var hasUnreadContent = false
+    public var lastSourceAppName: String?
+    public var ignoredAppBundleIDs: [String] = []
+    public var minimumReadyLength: Int = 1
+    public var frontmostAppProvider: () -> String?
     public var isEnabled = true {
         didSet {
             if isEnabled {
@@ -37,10 +48,12 @@ public final class ClipboardMonitor {
     private var lastChangeCount: Int
     private var timer: Timer?
 
-    public init(source: (any PasteboardSource)? = nil) {
+    public init(source: (any PasteboardSource)? = nil, frontmostAppProvider: (() -> String?)? = nil) {
         let resolved = source ?? SystemPasteboard()
         self.source = resolved
         self.lastChangeCount = resolved.changeCount
+        self.frontmostAppProvider =
+            frontmostAppProvider ?? { NSWorkspace.shared.frontmostApplication?.bundleIdentifier }
         startTimer()
     }
 
@@ -49,10 +62,16 @@ public final class ClipboardMonitor {
     }
 
     /// Read the clipboard string and clear the unread flag.
-    public func readText() -> String? {
+    public func readText() -> ClipboardReadResult {
         let text = source.string()
         hasUnreadContent = false
-        return text
+        guard let text else {
+            return .empty
+        }
+        if text.count < minimumReadyLength {
+            return .tooShort(text.count)
+        }
+        return .text(text)
     }
 
     func poll() {
@@ -70,7 +89,18 @@ public final class ClipboardMonitor {
         if !types.contains("public.utf8-plain-text") {
             return
         }
+        let bundleID = frontmostAppProvider()
+        lastSourceAppName = appName(for: bundleID)
+        if let bundleID, ignoredAppBundleIDs.contains(bundleID) {
+            return
+        }
         hasUnreadContent = true
+    }
+
+    private func appName(for bundleID: String?) -> String? {
+        guard let bundleID else { return nil }
+        return NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == bundleID })?
+            .localizedName
     }
 
     private func startTimer() {

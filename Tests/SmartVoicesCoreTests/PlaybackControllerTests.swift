@@ -219,6 +219,19 @@ struct PlaybackControllerTests {
         controller.stop()
     }
 
+    @Test func sanitizerOptionsReachEngine() async {
+        let engine = FakeEngine()
+        let output = FakeOutput()
+        let controller = PlaybackController(engine: engine, output: output)
+        controller.sanitizerOptions = SanitizerOptions(
+            codeBlocks: .skip, tables: .skip, bareURLs: .skip, maxTableRowsToRead: 15)
+        controller.play(
+            text: "Intro.\n\n```python\nprint(1)\n```\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\nOutro.")
+        await waitForIdle(controller)
+        #expect(controller.state == .idle)
+        #expect(engine.synthesizeCalls.map(\.text) == ["Intro.", "Outro."])
+    }
+
     @Test func toggleFromPreparingPauses() {
         let engine = FakeEngine()
         engine.delay = .milliseconds(200)

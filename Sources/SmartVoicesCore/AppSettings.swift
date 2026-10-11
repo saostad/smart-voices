@@ -10,6 +10,22 @@ public final class AppSettings {
     public static let defaultSpeed = 1.0
     public static let minSpeed = 0.5
     public static let maxSpeed = 3.0
+    public static let defaultCodeBlocks = "announce"
+    public static let defaultTables = "readRows"
+    public static let defaultBareURLs = "domainOnly"
+    public static let defaultMaxTableRowsToRead = 15
+    public static let minMaxTableRowsToRead = 1
+    public static let maxMaxTableRowsToRead = 100
+    public static let defaultMinimumReadyLength = 2
+    public static let minMinimumReadyLength = 1
+    public static let maxMinimumReadyLength = 1000
+    public static let defaultIgnoredAppBundleIDs = [
+        "com.1password.1password",
+        "com.agilebits.onepassword7",
+        "com.bitwarden.desktop",
+        "com.apple.keychainaccess",
+        "com.apple.Passwords",
+    ]
 
     // Custom accessors with manual observation: assigning to the property inside
     // its own didSet recurses forever once @Observable rewrites the storage.
@@ -79,6 +95,116 @@ public final class AppSettings {
         }
     }
 
+    @ObservationIgnored private var _codeBlocks: String
+    public var codeBlocks: String {
+        get {
+            access(keyPath: \.codeBlocks)
+            return _codeBlocks
+        }
+        set {
+            let value = Self.validatedCodeBlocks(newValue) ?? Self.defaultCodeBlocks
+            if value != newValue {
+                logger.warning("Unknown code blocks option '\(newValue, privacy: .public)'; resetting to default.")
+            }
+            withMutation(keyPath: \.codeBlocks) { _codeBlocks = value }
+            defaults.set(value, forKey: "sv.codeBlocks")
+        }
+    }
+
+    @ObservationIgnored private var _tables: String
+    public var tables: String {
+        get {
+            access(keyPath: \.tables)
+            return _tables
+        }
+        set {
+            let value = Self.validatedTables(newValue) ?? Self.defaultTables
+            if value != newValue {
+                logger.warning("Unknown tables option '\(newValue, privacy: .public)'; resetting to default.")
+            }
+            withMutation(keyPath: \.tables) { _tables = value }
+            defaults.set(value, forKey: "sv.tables")
+        }
+    }
+
+    @ObservationIgnored private var _bareURLs: String
+    public var bareURLs: String {
+        get {
+            access(keyPath: \.bareURLs)
+            return _bareURLs
+        }
+        set {
+            let value = Self.validatedBareURLs(newValue) ?? Self.defaultBareURLs
+            if value != newValue {
+                logger.warning("Unknown links option '\(newValue, privacy: .public)'; resetting to default.")
+            }
+            withMutation(keyPath: \.bareURLs) { _bareURLs = value }
+            defaults.set(value, forKey: "sv.bareURLs")
+        }
+    }
+
+    @ObservationIgnored private var _maxTableRowsToRead: Int
+    public var maxTableRowsToRead: Int {
+        get {
+            access(keyPath: \.maxTableRowsToRead)
+            return _maxTableRowsToRead
+        }
+        set {
+            let clamped = min(Self.maxMaxTableRowsToRead, max(Self.minMaxTableRowsToRead, newValue))
+            withMutation(keyPath: \.maxTableRowsToRead) { _maxTableRowsToRead = clamped }
+            defaults.set(clamped, forKey: "sv.maxTableRowsToRead")
+        }
+    }
+
+    @ObservationIgnored private var _minimumReadyLength: Int
+    public var minimumReadyLength: Int {
+        get {
+            access(keyPath: \.minimumReadyLength)
+            return _minimumReadyLength
+        }
+        set {
+            let clamped = min(Self.maxMinimumReadyLength, max(Self.minMinimumReadyLength, newValue))
+            withMutation(keyPath: \.minimumReadyLength) { _minimumReadyLength = clamped }
+            defaults.set(clamped, forKey: "sv.minimumReadyLength")
+        }
+    }
+
+    @ObservationIgnored private var _ignoredAppBundleIDs: [String]
+    public var ignoredAppBundleIDs: [String] {
+        get {
+            access(keyPath: \.ignoredAppBundleIDs)
+            return _ignoredAppBundleIDs
+        }
+        set {
+            withMutation(keyPath: \.ignoredAppBundleIDs) { _ignoredAppBundleIDs = newValue }
+            defaults.set(newValue, forKey: "sv.ignoredAppBundleIDs")
+        }
+    }
+
+    /// Sanitizer options matching the current reading settings.
+    public var sanitizerOptions: SanitizerOptions {
+        let code: SanitizerOptions.CodeBlocks =
+            switch codeBlocks {
+            case "skip": .skip
+            case "readFull": .readFull
+            default: .announce
+            }
+        let tables: SanitizerOptions.Tables =
+            switch tables {
+            case "announce": .announce
+            case "skip": .skip
+            default: .readRows
+            }
+        let urls: SanitizerOptions.BareURLs =
+            switch bareURLs {
+            case "skip": .skip
+            default: .domainOnly
+            }
+        return SanitizerOptions(
+            codeBlocks: code, tables: tables, bareURLs: urls,
+            maxTableRowsToRead: maxTableRowsToRead)
+    }
+
     private let defaults: UserDefaults
     private let logger = Logger(subsystem: "dev.smartvoices", category: "settings")
 
@@ -106,5 +232,62 @@ public final class AppSettings {
         } else {
             self._watchClipboard = true
         }
+        self._codeBlocks = Self.loadValidated(
+            defaults: defaults, key: "sv.codeBlocks", validate: Self.validatedCodeBlocks,
+            default: Self.defaultCodeBlocks, logger: logger)
+        self._tables = Self.loadValidated(
+            defaults: defaults, key: "sv.tables", validate: Self.validatedTables,
+            default: Self.defaultTables, logger: logger)
+        self._bareURLs = Self.loadValidated(
+            defaults: defaults, key: "sv.bareURLs", validate: Self.validatedBareURLs,
+            default: Self.defaultBareURLs, logger: logger)
+        if let storedMaxRows = defaults.object(forKey: "sv.maxTableRowsToRead") as? Int {
+            let clamped = min(Self.maxMaxTableRowsToRead, max(Self.minMaxTableRowsToRead, storedMaxRows))
+            self._maxTableRowsToRead = clamped
+            defaults.set(clamped, forKey: "sv.maxTableRowsToRead")
+        } else {
+            self._maxTableRowsToRead = Self.defaultMaxTableRowsToRead
+        }
+        if let storedMinLength = defaults.object(forKey: "sv.minimumReadyLength") as? Int {
+            let clamped = min(Self.maxMinimumReadyLength, max(Self.minMinimumReadyLength, storedMinLength))
+            self._minimumReadyLength = clamped
+            defaults.set(clamped, forKey: "sv.minimumReadyLength")
+        } else {
+            self._minimumReadyLength = Self.defaultMinimumReadyLength
+        }
+        self._ignoredAppBundleIDs =
+            defaults.stringArray(forKey: "sv.ignoredAppBundleIDs") ?? Self.defaultIgnoredAppBundleIDs
+    }
+
+    private static func validatedCodeBlocks(_ value: String) -> String? {
+        switch value {
+        case "announce", "skip", "readFull": return value
+        default: return nil
+        }
+    }
+
+    private static func validatedTables(_ value: String) -> String? {
+        switch value {
+        case "readRows", "announce", "skip": return value
+        default: return nil
+        }
+    }
+
+    private static func validatedBareURLs(_ value: String) -> String? {
+        switch value {
+        case "domainOnly", "skip": return value
+        default: return nil
+        }
+    }
+
+    private static func loadValidated(
+        defaults: UserDefaults, key: String, validate: (String) -> String?,
+        default defaultValue: String, logger: Logger
+    ) -> String {
+        guard let stored = defaults.string(forKey: key) else { return defaultValue }
+        if let valid = validate(stored) { return valid }
+        defaults.set(defaultValue, forKey: key)
+        logger.warning("Unknown stored value '\(stored, privacy: .public)' for \(key, privacy: .public); resetting to default.")
+        return defaultValue
     }
 }

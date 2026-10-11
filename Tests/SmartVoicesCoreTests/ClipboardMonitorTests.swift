@@ -68,7 +68,32 @@ struct ClipboardMonitorTests {
         fake.changeCount = 1
         monitor.poll()
         #expect(monitor.hasUnreadContent == true)
-        #expect(monitor.readText() == "clip text")
+        #expect(monitor.readText() == .text("clip text"))
         #expect(monitor.hasUnreadContent == false)
+    }
+
+    @Test func ignoredSourceApp() {
+        let fake = FakePasteboard()
+        let monitor = ClipboardMonitor(source: fake, frontmostAppProvider: { "com.1password.1password" })
+        monitor.ignoredAppBundleIDs = ["com.1password.1password"]
+        fake.changeCount = 1
+        monitor.poll()
+        #expect(monitor.hasUnreadContent == false)
+        monitor.frontmostAppProvider = { "com.example.notes" }
+        fake.changeCount = 2
+        monitor.poll()
+        #expect(monitor.hasUnreadContent == true)
+    }
+
+    @Test func readTextResults() {
+        let fake = FakePasteboard()
+        let monitor = ClipboardMonitor(source: fake)
+        monitor.minimumReadyLength = 5
+        fake.text = nil
+        #expect(monitor.readText() == .empty)
+        fake.text = "hi"
+        #expect(monitor.readText() == .tooShort(2))
+        fake.text = "hello there"
+        #expect(monitor.readText() == .text("hello there"))
     }
 }
