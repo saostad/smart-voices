@@ -28,12 +28,17 @@ public struct VoiceInfo: Sendable, Hashable, Identifiable {
 public enum SpeechEngineError: Error, Sendable, Equatable {
     case noAudio(String)
     case conversionFailed(String)
+    case engineUnavailable(String)
+    case unknownVoice(String)
 }
 
 extension SpeechEngineError: LocalizedError {
     public var errorDescription: String? {
         switch self {
-        case .noAudio(let message), .conversionFailed(let message):
+        case .noAudio(let message),
+            .conversionFailed(let message),
+            .engineUnavailable(let message),
+            .unknownVoice(let message):
             return message
         }
     }

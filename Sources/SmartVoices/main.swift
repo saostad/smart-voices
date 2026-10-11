@@ -3,6 +3,7 @@ import Foundation
 import Observation
 import os
 import SmartVoicesCore
+import SmartVoicesKokoro
 
 private let appLogger = Logger(subsystem: "dev.smartvoices", category: "app")
 
@@ -18,8 +19,9 @@ func msBetween(_ start: ContinuousClock.Instant, _ end: ContinuousClock.Instant)
 }
 
 func makeHeadlessEngine(engineID: String) -> any SpeechEngine {
-    // Item 3 wires "kokoro" to KokoroSpeechEngine and makes it the default.
-    _ = engineID
+    if engineID == "kokoro" {
+        return KokoroSpeechEngine()
+    }
     return SystemSpeechEngine()
 }
 
@@ -83,7 +85,7 @@ let args = CommandLine.arguments
 let sayIndex = args.firstIndex(of: "--say")
 let sayFileIndex = args.firstIndex(of: "--say-file")
 if sayIndex != nil || sayFileIndex != nil {
-    var engineID = "system"
+    var engineID = "kokoro"
     if let engineIndex = args.firstIndex(of: "--engine") {
         if engineIndex + 1 >= args.count {
             writeStderr("SmartVoices: missing argument for --engine")
