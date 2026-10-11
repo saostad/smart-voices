@@ -14,10 +14,12 @@ struct PronunciationSettingsView: View {
                 Section("Dictionary") {
                     Table($settings.pronunciations, selection: $selection) {
                         TableColumn("Written") { $entry in
-                            TextField("Written", text: $entry.written)
+                            TextField("", text: $entry.written)
+                                .labelsHidden()
                         }
                         TableColumn("Says") { $entry in
-                            TextField("Says", text: $entry.spoken)
+                            TextField("", text: $entry.spoken)
+                                .labelsHidden()
                         }
                         TableColumn("Whole word") { $entry in
                             Toggle("", isOn: $entry.wholeWord)

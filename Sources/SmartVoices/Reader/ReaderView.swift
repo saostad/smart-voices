@@ -232,20 +232,20 @@ struct ReaderView: View {
                         }
                     }
                 } label: {
-                    HStack(spacing: 2) {
-                        Text(String(format: "%g×", playback.speed))
-                        Image(systemName: "chevron.down")
-                            .font(.caption2)
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background {
-                        Capsule()
-                            .strokeBorder(.secondary.opacity(0.4))
-                    }
+                    // One Text run: a separate Image view gets hoisted
+                    // in front of the text by the menu style.
+                    Text(String(format: "%g×", playback.speed)) + Text(" ")
+                        + Text(Image(systemName: "chevron.down")).font(.caption2)
                 }
                 .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
                 .fixedSize()
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background {
+                    Capsule()
+                        .strokeBorder(.secondary.opacity(0.5))
+                }
             }
         }
         .padding(12)
