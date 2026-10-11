@@ -2,6 +2,15 @@ import AppKit
 import Foundation
 
 let args = CommandLine.arguments
+if let renderIndex = args.firstIndex(of: "--render-settings") {
+    if renderIndex + 1 >= args.count {
+        writeStderr("SmartVoices: missing argument for --render-settings")
+        exit(1)
+    }
+    let dir = args[renderIndex + 1]
+    let code: Int32 = MainActor.assumeIsolated { renderSettings(to: dir) }
+    exit(code)
+}
 let sayIndex = args.firstIndex(of: "--say")
 let sayFileIndex = args.firstIndex(of: "--say-file")
 if sayIndex != nil || sayFileIndex != nil {

@@ -112,6 +112,10 @@ extension AppDelegate {
             menu.addItem(.separator())
         }
 
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings(_:)), keyEquivalent: ",")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+
         let quit = NSMenuItem(title: "Quit Smart Voices", action: #selector(quitApp(_:)), keyEquivalent: "q")
         quit.target = self
         menu.addItem(quit)

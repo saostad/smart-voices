@@ -13,7 +13,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let settings = AppSettings()
     let playback = PlaybackController(engine: SystemSpeechEngine(), output: AVAudioEngineOutput())
     private let monitor = ClipboardMonitor()
-    private let hotKeyCenter = HotKeyCenter()
+    let hotKeyCenter = HotKeyCenter()
+    let voiceModel = VoiceModel()
+    let loginItem: any LoginItemControlling = SMAppServiceLoginItem()
+    private let settingsWindowController = SettingsWindowController()
     private var engineLoading = false
     var engineLoadFailed = false
     var cachedVoices: [VoiceInfo] = []
@@ -137,11 +140,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func setVoice(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String else { return }
+        setVoice(id: id)
+    }
+
+    func setVoice(id: String?) {
         if playback.state != .idle {
             playback.stop()
         }
         if settings.engineID == "kokoro" {
-            settings.kokoroVoiceID = id
+            if let id {
+                settings.kokoroVoiceID = id
+            }
         } else {
             settings.systemVoiceID = id
         }
@@ -149,10 +158,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func setEngine(_ sender: NSMenuItem) {
-        guard let id = sender.representedObject as? String,
-            id == "kokoro" || id == "system",
-            id != settings.engineID
-        else {
+        guard let id = sender.representedObject as? String else { return }
+        setEngine(id: id)
+    }
+
+    func setEngine(id: String) {
+        guard id == "kokoro" || id == "system", id != settings.engineID else {
             return
         }
         if playback.state != .idle {
@@ -164,6 +175,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         cachedVoices = []
         refreshVoices()
         startEnginePrepare()
+    }
+
+    func previewVoice() {
+        let currentID = voiceForSettings()
+        let name =
+            cachedVoices.first(where: { $0.id == currentID })?.name ?? currentID ?? "Default"
+        playback.play(text: "Hi, I'm \(name). This is how I sound.")
+    }
+
+    @objc func openSettings(_ sender: Any?) {
+        showSettings()
+    }
+
+    func showSettings() {
+        settingsWindowController.show(
+            settings: settings,
+            voiceModel: voiceModel,
+            hotKeyCenter: hotKeyCenter,
+            loginItem: loginItem,
+            onSelectEngine: { [weak self] id in Task { @MainActor in self?.setEngine(id: id) } },
+            onSelectVoice: { [weak self] id in Task { @MainActor in self?.setVoice(id: id) } },
+            onPreviewVoice: { [weak self] in Task { @MainActor in self?.previewVoice() } })
     }
 
     private func engineForSettings() -> any SpeechEngine {
@@ -188,6 +221,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updateIcon()
         let engine = playback.engine
         appLogger.notice("engine prepare started (\(engine.displayName, privacy: .public))")
+        voiceModel.status = .loading
         let start = ContinuousClock.now
         Task { @MainActor [weak self] in
             do {
@@ -197,6 +231,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.engineLoading = false
                 self.engineLoadFailed = true
                 self.playback.lastError = error.localizedDescription
+                self.voiceModel.status = .failed(error.localizedDescription)
                 appLogger.notice("engine prepare failed: \(error.localizedDescription, privacy: .public)")
                 self.updateIcon()
                 return
@@ -204,6 +239,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self, self.prepareGeneration == generation else { return }
             self.engineLoading = false
             self.engineLoadFailed = false
+            self.voiceModel.status = .ready
             appLogger.notice("engine prepare finished in \(msBetween(start, ContinuousClock.now), privacy: .public) ms")
             self.updateIcon()
         }
@@ -221,6 +257,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             guard let self, self.voicesGeneration == generation else { return }
             self.cachedVoices = list
+            self.voiceModel.voices = list
         }
     }
 
@@ -241,6 +278,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             _ = settings.bareURLs
             _ = settings.maxTableRowsToRead
             _ = settings.hotKeys
+            _ = settings.speed
         } onChange: { [weak self] in
             guard let self else { return }
             // onChange fires before the new value is stored: re-register now, but
@@ -254,6 +292,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.monitor.ignoredAppBundleIDs = self.settings.ignoredAppBundleIDs
                 self.monitor.minimumReadyLength = self.settings.minimumReadyLength
                 self.playback.sanitizerOptions = self.settings.sanitizerOptions
+                self.playback.speed = self.settings.speed
                 self.hotKeyCenter.updateBindings(self.settings.hotKeys)
                 if self.playback.state == .playing {
                     self.engineLoadFailed = false
