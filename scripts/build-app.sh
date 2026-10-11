@@ -15,6 +15,11 @@ for bundle in .build/release/*.bundle; do
         cp -R "$bundle" "$APP/Contents/Resources/"
     fi
 done
+if [ ! -f "Resources/AppIcon.icns" ]; then
+    echo "build-app.sh: missing Resources/AppIcon.icns (run: swift scripts/make-icon.swift Resources/AppIcon.icns)" >&2
+    exit 1
+fi
+cp "Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -26,6 +31,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <string>dev.smartvoices.app</string>
     <key>CFBundleName</key>
     <string>Smart Voices</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

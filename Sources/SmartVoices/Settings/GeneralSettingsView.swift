@@ -46,13 +46,14 @@ struct GeneralSettingsView: View {
                 Section("Ignored apps") {
                     ForEach(settings.ignoredAppBundleIDs, id: \.self) { bundleID in
                         HStack {
+                            Image(nsImage: appIcon(for: bundleID))
+                                .resizable()
+                                .frame(width: 16, height: 16)
                             VStack(alignment: .leading) {
                                 Text(appName(for: bundleID))
-                                if appName(for: bundleID) != bundleID {
-                                    Text(bundleID)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
+                                Text(appCaption(for: bundleID))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                             }
                             Spacer()
                             Button("Remove") {
@@ -88,8 +89,34 @@ struct GeneralSettingsView: View {
             .sorted { ($0.localizedName ?? "") < ($1.localizedName ?? "") }
     }
 
+    private func appURL(for bundleID: String) -> URL? {
+        NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)
+    }
+
     private func appName(for bundleID: String) -> String {
-        NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == bundleID })?
-            .localizedName ?? bundleID
+        guard let url = appURL(for: bundleID) else { return bundleID }
+        if let bundle = Bundle(url: url),
+            let name = (bundle.object(forInfoDictionaryKey: "CFBundleDisplayName")
+                ?? bundle.object(forInfoDictionaryKey: "CFBundleName")) as? String,
+            !name.isEmpty
+        {
+            return name
+        }
+        let display = FileManager.default.displayName(atPath: url.path)
+        if display.hasSuffix(".app") {
+            return String(display.dropLast(4))
+        }
+        return display
+    }
+
+    private func appCaption(for bundleID: String) -> String {
+        appURL(for: bundleID) == nil ? "Not installed" : bundleID
+    }
+
+    private func appIcon(for bundleID: String) -> NSImage {
+        if let url = appURL(for: bundleID) {
+            return NSWorkspace.shared.icon(forFile: url.path)
+        }
+        return NSImage(named: NSImage.applicationIconName) ?? NSImage()
     }
 }

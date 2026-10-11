@@ -7,6 +7,15 @@ struct AboutSettingsView: View {
     var body: some View {
         ScrollView {
             Form {
+                if let icon = appIconImage() {
+                    HStack {
+                        Spacer()
+                        Image(nsImage: icon)
+                            .resizable()
+                            .frame(width: 64, height: 64)
+                        Spacer()
+                    }
+                }
                 Section("Smart Voices") {
                     Text("Smart Voices \(version)")
                         .font(.headline)

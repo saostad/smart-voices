@@ -60,9 +60,20 @@ struct VoiceSettingsView: View {
 
                 Section("Speed") {
                     HStack {
-                        Slider(value: $settings.speed, in: 0.5...3.0, step: 0.05)
+                        Text("Speed")
+                        Slider(
+                            value: Binding(
+                                get: { settings.speed },
+                                set: { settings.speed = ($0 * 20).rounded() / 20 }
+                            ), in: 0.5...3.0)
                         Text(String(format: "%g×", settings.speed))
                             .frame(minWidth: 48, alignment: .trailing)
+                        if settings.speed != 1.0 {
+                            Button("Reset") {
+                                settings.speed = 1.0
+                            }
+                            .controlSize(.small)
+                        }
                     }
                     Explanation(text: "How fast Smart Voices reads. Applies right away.")
                 }
