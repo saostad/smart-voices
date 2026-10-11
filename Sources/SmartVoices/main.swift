@@ -131,8 +131,14 @@ if sayIndex != nil || sayFileIndex != nil {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
+    private let settings = AppSettings()
     private let playback = PlaybackController(engine: SystemSpeechEngine(), output: AVAudioEngineOutput())
     private let monitor = ClipboardMonitor()
+    private var engineLoading = false
+    private var engineLoadFailed = false
+    private var cachedVoices: [VoiceInfo] = []
+    private var prepareGeneration = 0
+    private var voicesGeneration = 0
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -143,6 +149,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             button.target = self
             button.toolTip = "Smart Voices \u{2014} click to read the clipboard"
         }
+        playback.engine = engineForSettings()
+        playback.speed = settings.speed
+        playback.voiceID = voiceForSettings()
+        monitor.isEnabled = settings.watchClipboard
+        startEnginePrepare()
+        refreshVoices()
         updateIcon()
         observeState()
         if CommandLine.arguments.contains("--debug-click") {
@@ -248,6 +260,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         speedItem.submenu = speedMenu
         menu.addItem(speedItem)
 
+        let voiceItem = NSMenuItem(title: "Voice", action: nil, keyEquivalent: "")
+        let voiceMenu = NSMenu()
+        if cachedVoices.isEmpty {
+            let loading = NSMenuItem(title: "Loading voices…", action: nil, keyEquivalent: "")
+            loading.isEnabled = false
+            voiceMenu.addItem(loading)
+        } else {
+            let currentID = voiceForSettings()
+            for voice in cachedVoices {
+                let item = NSMenuItem(title: voice.name, action: #selector(setVoice(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = voice.id
+                item.state = voice.id == currentID ? .on : .off
+                voiceMenu.addItem(item)
+            }
+        }
+        voiceItem.submenu = voiceMenu
+        menu.addItem(voiceItem)
+
+        let engineItem = NSMenuItem(title: "Engine", action: nil, keyEquivalent: "")
+        let engineMenu = NSMenu()
+        for (title, id) in [("Kokoro (natural)", "kokoro"), ("macOS Voice", "system")] {
+            let item = NSMenuItem(title: title, action: #selector(setEngine(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = id
+            item.state = settings.engineID == id ? .on : .off
+            engineMenu.addItem(item)
+        }
+        engineItem.submenu = engineMenu
+        menu.addItem(engineItem)
+
+        if engineLoadFailed && settings.engineID == "kokoro" {
+            let fallback = NSMenuItem(title: "Use macOS Voice Instead", action: #selector(setEngine(_:)), keyEquivalent: "")
+            fallback.target = self
+            fallback.representedObject = "system"
+            menu.addItem(fallback)
+        }
+
         menu.addItem(.separator())
 
         if let error = playback.lastError {
@@ -291,7 +341,93 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func setSpeed(_ sender: NSMenuItem) {
         if let value = sender.representedObject as? Double {
-            playback.speed = value
+            settings.speed = value
+            playback.speed = settings.speed
+        }
+    }
+
+    @objc func setVoice(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        if playback.state != .idle {
+            playback.stop()
+        }
+        if settings.engineID == "kokoro" {
+            settings.kokoroVoiceID = id
+        } else {
+            settings.systemVoiceID = id
+        }
+        playback.voiceID = voiceForSettings()
+    }
+
+    @objc func setEngine(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String,
+            id == "kokoro" || id == "system",
+            id != settings.engineID
+        else {
+            return
+        }
+        if playback.state != .idle {
+            playback.stop()
+        }
+        settings.engineID = id
+        playback.engine = engineForSettings()
+        playback.voiceID = voiceForSettings()
+        cachedVoices = []
+        refreshVoices()
+        startEnginePrepare()
+    }
+
+    private func engineForSettings() -> any SpeechEngine {
+        if settings.engineID == "kokoro" {
+            return KokoroSpeechEngine()
+        }
+        return SystemSpeechEngine()
+    }
+
+    private func voiceForSettings() -> String? {
+        if settings.engineID == "kokoro" {
+            return settings.kokoroVoiceID
+        }
+        return settings.systemVoiceID
+    }
+
+    private func startEnginePrepare() {
+        prepareGeneration += 1
+        let generation = prepareGeneration
+        engineLoading = true
+        engineLoadFailed = false
+        updateIcon()
+        let engine = playback.engine
+        Task { @MainActor [weak self] in
+            do {
+                try await engine.prepare()
+            } catch {
+                guard let self, self.prepareGeneration == generation else { return }
+                self.engineLoading = false
+                self.engineLoadFailed = true
+                self.playback.lastError = error.localizedDescription
+                self.updateIcon()
+                return
+            }
+            guard let self, self.prepareGeneration == generation else { return }
+            self.engineLoading = false
+            self.engineLoadFailed = false
+            self.updateIcon()
+        }
+    }
+
+    private func refreshVoices() {
+        voicesGeneration += 1
+        let generation = voicesGeneration
+        let engine = playback.engine
+        let systemOnly = settings.engineID == "system"
+        Task { @MainActor [weak self] in
+            var list = await engine.voices()
+            if systemOnly {
+                list = Array(list.filter { $0.language.lowercased().hasPrefix("en") }.prefix(30))
+            }
+            guard let self, self.voicesGeneration == generation else { return }
+            self.cachedVoices = list
         }
     }
 
@@ -304,9 +440,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             _ = playback.state
             _ = playback.lastError
             _ = monitor.hasUnreadContent
+            _ = settings.watchClipboard
         } onChange: { [weak self] in
             guard let self else { return }
             MainActor.assumeIsolated {
+                self.monitor.isEnabled = self.settings.watchClipboard
+                if self.playback.state == .playing {
+                    self.engineLoadFailed = false
+                }
                 self.updateIcon()
                 self.observeState()
             }
@@ -316,8 +457,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func updateIcon() {
         guard let button = statusItem?.button else { return }
         let symbol: String
+        let toolTip: String
         if playback.lastError != nil {
             symbol = "exclamationmark.triangle"
+            toolTip = "Smart Voices \u{2014} click to read the clipboard"
+        } else if engineLoading {
+            symbol = "ellipsis.circle"
+            toolTip = "Smart Voices \u{2014} loading the Kokoro voice model\u{2026}"
         } else {
             switch playback.state {
             case .preparing:
@@ -329,11 +475,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .idle:
                 symbol = monitor.hasUnreadContent ? "play.circle.fill" : "waveform"
             }
+            toolTip = "Smart Voices \u{2014} click to read the clipboard"
         }
         let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Smart Voices")
         image?.isTemplate = true
         button.image = image
-        button.toolTip = "Smart Voices \u{2014} click to read the clipboard"
+        button.toolTip = toolTip
     }
 }
 

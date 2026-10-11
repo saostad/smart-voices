@@ -6,6 +6,10 @@ APP="build/Smart Voices.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/release/SmartVoices "$APP/Contents/MacOS/SmartVoices"
+if [ ! -e ".build/release/FluidAudio_FluidAudio.bundle" ]; then
+    echo "build-app.sh: missing FluidAudio_FluidAudio.bundle in .build/release/ (the Kokoro engine needs it in Contents/Resources/)" >&2
+    exit 1
+fi
 for bundle in .build/release/*.bundle; do
     if [ -e "$bundle" ]; then
         cp -R "$bundle" "$APP/Contents/Resources/"
