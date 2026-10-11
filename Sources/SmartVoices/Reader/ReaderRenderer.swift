@@ -44,7 +44,8 @@ func renderReader(to png: String) -> Int32 {
         let view = ReaderView(
             playback: playback, header: header,
             onJump: { _ in }, onTogglePlayPause: {}, onNext: {}, onPrevious: {},
-            onSpeed: { _ in }, onClose: {}, previewWordIndex: 3)
+            onSpeed: { _ in }, onClose: {}, onDropURLs: { _ in }, onDropText: { _ in },
+            previewWordIndex: 3)
             .frame(width: 440, height: 300)
         let hosting = NSHostingView(rootView: view)
         hosting.translatesAutoresizingMaskIntoConstraints = false

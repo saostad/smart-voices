@@ -19,6 +19,8 @@ final class ReaderHeaderModel {
 final class ReaderPanelController {
     private var panel: NSPanel?
     private let header = ReaderHeaderModel()
+    var onDropURLs: (([URL]) -> Void)?
+    var onDropText: ((String) -> Void)?
 
     var isVisible: Bool {
         panel?.isVisible ?? false
@@ -51,7 +53,10 @@ final class ReaderPanelController {
                 playback: playback, header: header,
                 onJump: onJump, onTogglePlayPause: onTogglePlayPause,
                 onNext: onNext, onPrevious: onPrevious, onSpeed: onSpeed,
-                onClose: onClose, previewWordIndex: nil)
+                onClose: onClose,
+                onDropURLs: { [weak self] urls in self?.onDropURLs?(urls) },
+                onDropText: { [weak self] text in self?.onDropText?(text) },
+                previewWordIndex: nil)
             let hosting = NSHostingView(rootView: view)
             hosting.translatesAutoresizingMaskIntoConstraints = false
             let effect = NSVisualEffectView()

@@ -1,5 +1,6 @@
 import SmartVoicesCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Reading panel content: chunk list with live word highlighting plus controls.
 @MainActor
@@ -12,6 +13,8 @@ struct ReaderView: View {
     var onPrevious: () -> Void
     var onSpeed: (Double) -> Void
     var onClose: () -> Void
+    var onDropURLs: ([URL]) -> Void
+    var onDropText: (String) -> Void
     /// Forces the highlighted word (used by --render-reader).
     var previewWordIndex: Int?
 
@@ -69,6 +72,43 @@ struct ReaderView: View {
             }
             Divider()
             footer
+        }
+        .onDrop(of: [.fileURL, .plainText], isTargeted: nil) { providers in
+            handleDrop(providers)
+            return true
+        }
+    }
+
+    private func handleDrop(_ providers: [NSItemProvider]) {
+        Task { @MainActor in
+            var urls: [URL] = []
+            var texts: [String] = []
+            for provider in providers {
+                if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier),
+                    let item = try? await provider.loadItem(
+                        forTypeIdentifier: UTType.fileURL.identifier, options: nil),
+                    let url = (item as? URL) ?? (item as? NSURL) as URL?
+                {
+                    urls.append(url)
+                    continue
+                }
+                if let item = try? await provider.loadItem(
+                    forTypeIdentifier: UTType.plainText.identifier, options: nil)
+                {
+                    if let string = (item as? NSString) as String? {
+                        texts.append(string)
+                    } else if let data = item as? Data,
+                        let string = String(data: data, encoding: .utf8)
+                    {
+                        texts.append(string)
+                    }
+                }
+            }
+            if !urls.isEmpty {
+                onDropURLs(urls)
+            } else if !texts.isEmpty {
+                onDropText(texts.joined(separator: "\n\n"))
+            }
         }
     }
 

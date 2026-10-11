@@ -14,6 +14,11 @@ extension AppDelegate {
         read.isEnabled = isIdle
         menu.addItem(read)
 
+        let readFile = NSMenuItem(title: "Read File…", action: #selector(readFile(_:)), keyEquivalent: "o")
+        readFile.target = self
+        readFile.isEnabled = isIdle
+        menu.addItem(readFile)
+
         let recentItem = NSMenuItem(title: "Recent", action: nil, keyEquivalent: "")
         let recentMenu = NSMenu()
         let recent = Array(history.items.prefix(10))

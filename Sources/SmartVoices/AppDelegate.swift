@@ -21,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let voiceModel = VoiceModel()
     let loginItem: any LoginItemControlling = SMAppServiceLoginItem()
     private let settingsWindowController = SettingsWindowController()
+    private let servicesProvider = ServicesProvider()
     private let reader = ReaderPanelController()
     private var readerHideTimer: Timer?
     private var engineLoading = false
@@ -63,6 +64,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         nowPlaying.onNext = { [weak self] in self?.playback.skipForward() }
         nowPlaying.onPrevious = { [weak self] in self?.playback.skipBack() }
         nowPlaying.onStop = { [weak self] in self?.playback.stop() }
+        servicesProvider.onReadSelection = { [weak self] text in self?.playAndRecord(text) }
+        servicesProvider.onServiceError = { [weak self] message in
+            self?.playback.lastError = message
+        }
+        NSApp.servicesProvider = servicesProvider
+        NSUpdateDynamicServices()
+        reader.onDropURLs = { [weak self] urls in self?.readDroppedURLs(urls) }
+        reader.onDropText = { [weak self] text in self?.playAndRecord(text) }
         startEnginePrepare()
         refreshVoices()
         let header = readerHeader()
@@ -121,15 +130,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func readClipboardAndPlay() {
         switch monitor.readText() {
         case .text(let text):
-            playback.play(text: text)
-            if playback.state != .idle {
-                recordHistory(text)
-            }
+            playAndRecord(text)
         case .empty:
             playback.lastError = "The clipboard doesn't contain any text."
         case .tooShort(let count):
             playback.lastError =
                 "The clipboard text is only \(count) characters. Copy something longer, or lower the minimum in Settings → General."
+        }
+    }
+
+    /// Play text from any source, recording it in history when playback starts.
+    private func playAndRecord(_ text: String) {
+        playback.play(text: text)
+        if playback.state != .idle {
+            recordHistory(text)
         }
     }
 
@@ -167,10 +181,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         else {
             return
         }
-        playback.play(text: item.fullText)
-        if playback.state != .idle {
-            recordHistory(item.fullText)
+        playAndRecord(item.fullText)
+    }
+
+    @objc func readFile(_ sender: Any?) {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = DocumentTextLoader.supportedExtensions.compactMap {
+            UTType(filenameExtension: $0)
         }
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        readFileAndPlay(url)
+    }
+
+    private func readFileAndPlay(_ url: URL) {
+        let name = url.lastPathComponent
+        let text: String
+        do {
+            text = try DocumentTextLoader.load(url: url)
+        } catch {
+            playback.lastError = "Couldn't open \(name): \(error.localizedDescription)"
+            return
+        }
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            playback.lastError = "\(name) has no readable text."
+            return
+        }
+        playAndRecord(text)
+    }
+
+    private func readDroppedURLs(_ urls: [URL]) {
+        var texts: [String] = []
+        for url in urls {
+            do {
+                texts.append(try DocumentTextLoader.load(url: url))
+            } catch {
+                playback.lastError =
+                    "Couldn't open \(url.lastPathComponent): \(error.localizedDescription)"
+                return
+            }
+        }
+        let combined = texts.joined(separator: "\n\n").trimmingCharacters(
+            in: .whitespacesAndNewlines)
+        if combined.isEmpty {
+            playback.lastError = "\(urls.first?.lastPathComponent ?? "file") has no readable text."
+            return
+        }
+        playAndRecord(combined)
     }
 
     @objc func togglePause(_ sender: Any?) {

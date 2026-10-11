@@ -43,6 +43,25 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <string>15.0</string>
     <key>LSUIElement</key>
     <true/>
+    <key>NSServices</key>
+    <array>
+        <dict>
+            <key>NSMenuItem</key>
+            <dict>
+                <key>default</key>
+                <string>Read Aloud with Smart Voices</string>
+            </dict>
+            <key>NSMessage</key>
+            <string>readSelection</string>
+            <key>NSPortName</key>
+            <string>Smart Voices</string>
+            <key>NSSendTypes</key>
+            <array>
+                <string>NSStringPboardType</string>
+                <string>public.utf8-plain-text</string>
+            </array>
+        </dict>
+    </array>
 </dict>
 </plist>
 PLIST
