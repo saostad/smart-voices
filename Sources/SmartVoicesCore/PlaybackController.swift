@@ -50,6 +50,7 @@ public final class PlaybackController {
         lastError = nil
         firstAudioLatency = nil
         let newChunks = chunker.chunks(from: sanitizer.sanitize(text))
+        logger.notice("play requested: \(newChunks.count, privacy: .public) chunks")
         if newChunks.isEmpty {
             lastError = "Nothing to read: the clipboard text was empty after removing formatting."
             state = .idle
@@ -193,7 +194,7 @@ public final class PlaybackController {
                     if gen != generation { return }
                     output.stop()
                     let message = "Couldn't synthesize speech with \(engine.displayName): \(error.localizedDescription)"
-                    logger.error("\(message)")
+                    logger.error("\(message, privacy: .public)")
                     lastError = message
                     state = .idle
                     if gen == generation { playbackTask = nil }
@@ -214,7 +215,7 @@ public final class PlaybackController {
                     if gen != generation { return }
                     output.stop()
                     let message = "Couldn't synthesize speech with \(engine.displayName): \(error.localizedDescription)"
-                    logger.error("\(message)")
+                    logger.error("\(message, privacy: .public)")
                     lastError = message
                     state = .idle
                     if gen == generation { playbackTask = nil }
@@ -244,7 +245,7 @@ public final class PlaybackController {
                 firstAudioLatency = latency
                 let seconds = Double(latency.components.seconds)
                 let ms = Int(seconds * 1000 + Double(latency.components.attoseconds) / 1_000_000_000_000_000)
-                logger.info("First audio latency: \(ms) ms")
+                logger.notice("First audio latency: \(ms, privacy: .public) ms")
             }
             do {
                 try await playAndWait(audio, generation: gen)
@@ -254,7 +255,7 @@ public final class PlaybackController {
                 if gen != generation { return }
                 output.stop()
                 let message = "Couldn't play audio: \(error.localizedDescription)"
-                logger.error("\(message)")
+                logger.error("\(message, privacy: .public)")
                 lastError = message
                 state = .idle
                 if gen == generation { playbackTask = nil }
