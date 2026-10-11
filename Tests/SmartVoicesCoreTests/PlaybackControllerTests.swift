@@ -244,4 +244,93 @@ struct PlaybackControllerTests {
         #expect(controller.state == .paused)
         controller.stop()
     }
+
+    @Test func jumpToIndex() async {
+        let engine = FakeEngine()
+        let output = FakeOutput()
+        output.autoComplete = false
+        let controller = PlaybackController(engine: engine, output: output)
+        controller.play(text: "One. Two. Three.")
+        await waitForPlays(output, count: 1)
+        controller.jump(to: 2)
+        await waitForPlays(output, count: 2)
+        #expect(controller.currentChunkIndex == 2)
+        #expect(output.playCalls.count == 2)
+        // Second play call is "Three." (stale completion of chunk 0 ignored).
+        #expect(output.playCalls[1].samples.first == Float(84))
+        output.completeAll()
+        await waitForIdle(controller)
+        #expect(controller.state == .idle)
+    }
+
+    @Test func jumpClampsIntoRange() async {
+        let engine = FakeEngine()
+        let output = FakeOutput()
+        output.autoComplete = false
+        let controller = PlaybackController(engine: engine, output: output)
+        controller.play(text: "One. Two. Three.")
+        await waitForPlays(output, count: 1)
+        controller.jump(to: 99)
+        await waitForPlays(output, count: 2)
+        #expect(controller.currentChunkIndex == 2)
+        controller.jump(to: -3)
+        await waitForPlays(output, count: 3)
+        #expect(controller.currentChunkIndex == 0)
+        controller.stop()
+    }
+
+    @Test func jumpWhenIdleIsNoOp() {
+        let engine = FakeEngine()
+        let output = FakeOutput()
+        let controller = PlaybackController(engine: engine, output: output)
+        controller.jump(to: 1)
+        #expect(controller.state == .idle)
+        #expect(output.playCalls.isEmpty)
+    }
+
+    @Test func chunkProgressAcrossPauseResume() async {
+        let engine = FakeEngine()
+        let output = FakeOutput()
+        output.autoComplete = false
+        let controller = PlaybackController(engine: engine, output: output)
+        #expect(controller.currentChunkStartedAt == nil)
+        #expect(controller.currentChunkDuration == 0)
+        controller.play(text: "Hello world.")
+        await waitForPlays(output, count: 1)
+        guard let started = controller.currentChunkStartedAt else {
+            Issue.record("startedAt should be set once audio is handed to the output")
+            return
+        }
+        #expect(controller.currentChunkDuration == 1.0 / 24000)
+        let elapsedBeforePause = Date().timeIntervalSince(started)
+        controller.pause()
+        #expect(controller.currentChunkStartedAt == nil)
+        #expect(controller.currentChunkDuration == 1.0 / 24000)
+        try? await Task.sleep(for: .milliseconds(100))
+        controller.resume()
+        guard let resumed = controller.currentChunkStartedAt else {
+            Issue.record("startedAt should be set again after resume")
+            return
+        }
+        // The paused 100 ms must not count as spoken time.
+        let elapsedAfterResume = Date().timeIntervalSince(resumed)
+        #expect(abs(elapsedAfterResume - elapsedBeforePause) < 0.05)
+        output.completeAll()
+        await waitForIdle(controller)
+        #expect(controller.currentChunkStartedAt == nil)
+        #expect(controller.currentChunkDuration == 0)
+    }
+
+    @Test func chunkProgressClearedOnStop() async {
+        let engine = FakeEngine()
+        let output = FakeOutput()
+        output.autoComplete = false
+        let controller = PlaybackController(engine: engine, output: output)
+        controller.play(text: "Hello world.")
+        await waitForPlays(output, count: 1)
+        #expect(controller.currentChunkStartedAt != nil)
+        controller.stop()
+        #expect(controller.currentChunkStartedAt == nil)
+        #expect(controller.currentChunkDuration == 0)
+    }
 }

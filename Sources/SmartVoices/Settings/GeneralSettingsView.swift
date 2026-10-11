@@ -43,6 +43,11 @@ struct GeneralSettingsView: View {
                     Explanation(text: "Shorter copies won't light up the play badge or play.")
                 }
 
+                Section("Reading panel") {
+                    Toggle("Show reading panel while playing", isOn: $settings.showReaderPanel)
+                    Explanation(text: "A small floating window that highlights each sentence and word as it's read.")
+                }
+
                 Section("Ignored apps") {
                     ForEach(settings.ignoredAppBundleIDs, id: \.self) { bundleID in
                         HStack {

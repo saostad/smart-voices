@@ -11,6 +11,15 @@ if let renderIndex = args.firstIndex(of: "--render-settings") {
     let code: Int32 = MainActor.assumeIsolated { renderSettings(to: dir) }
     exit(code)
 }
+if let readerIndex = args.firstIndex(of: "--render-reader") {
+    if readerIndex + 1 >= args.count {
+        writeStderr("SmartVoices: missing argument for --render-reader")
+        exit(1)
+    }
+    let png = args[readerIndex + 1]
+    let code: Int32 = MainActor.assumeIsolated { renderReader(to: png) }
+    exit(code)
+}
 let sayIndex = args.firstIndex(of: "--say")
 let sayFileIndex = args.firstIndex(of: "--say-file")
 if sayIndex != nil || sayFileIndex != nil {

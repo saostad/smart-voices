@@ -35,6 +35,10 @@ extension AppDelegate {
         next.isEnabled = isActive && playback.currentChunkIndex < playback.chunks.count - 1
         menu.addItem(next)
 
+        let readerPanel = NSMenuItem(title: "Show Reading Panel", action: #selector(showReaderPanel(_:)), keyEquivalent: "p")
+        readerPanel.target = self
+        menu.addItem(readerPanel)
+
         menu.addItem(.separator())
 
         let speedItem = NSMenuItem(title: "Speed", action: nil, keyEquivalent: "")

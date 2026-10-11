@@ -15,6 +15,8 @@ public final class PlaybackController {
     public var chunks: [SpeechChunk] = []
     public var lastError: String?
     public var firstAudioLatency: Duration?
+    public private(set) var currentChunkStartedAt: Date?
+    public private(set) var currentChunkDuration: Double = 0
     public var speed: Double = 1.0
     public var voiceID: String?
     public var engine: any SpeechEngine
@@ -27,6 +29,7 @@ public final class PlaybackController {
 
     private var generation = 0
     private var playbackTask: Task<Void, Never>?
+    private var pausedElapsed: Double?
     private let pendingBox = PendingBox()
 
     public init(
@@ -50,6 +53,7 @@ public final class PlaybackController {
         resumePendingWithCancellation()
         lastError = nil
         firstAudioLatency = nil
+        clearChunkProgress()
         let newChunks = chunker.chunks(from: SpeechSanitizer(options: sanitizerOptions).sanitize(text))
         logger.notice("play requested: \(newChunks.count, privacy: .public) chunks")
         if newChunks.isEmpty {
@@ -73,6 +77,10 @@ public final class PlaybackController {
     public func pause() {
         guard state == .playing || state == .preparing else { return }
         state = .paused
+        if let startedAt = currentChunkStartedAt {
+            pausedElapsed = Date().timeIntervalSince(startedAt)
+            currentChunkStartedAt = nil
+        }
         output.pause()
     }
 
@@ -80,6 +88,10 @@ public final class PlaybackController {
     public func resume() {
         guard state == .paused else { return }
         state = .playing
+        if let elapsed = pausedElapsed {
+            currentChunkStartedAt = Date().addingTimeInterval(-elapsed)
+            pausedElapsed = nil
+        }
         output.resume()
     }
 
@@ -106,6 +118,7 @@ public final class PlaybackController {
         resumePendingWithCancellation()
         state = .idle
         currentChunkIndex = 0
+        clearChunkProgress()
     }
 
     /// Skip to the next chunk.
@@ -118,20 +131,37 @@ public final class PlaybackController {
         jump(by: -1)
     }
 
+    /// Jump to a chunk, clamping into range. No-op when idle.
+    public func jump(to index: Int) {
+        guard state != .idle, !chunks.isEmpty else { return }
+        restart(at: min(max(index, 0), chunks.count - 1))
+    }
+
     private func jump(by delta: Int) {
         guard state != .idle, !chunks.isEmpty else { return }
         let newIndex = currentChunkIndex + delta
         guard newIndex >= 0, newIndex < chunks.count else { return }
+        restart(at: newIndex)
+    }
+
+    private func restart(at newIndex: Int) {
         generation += 1
         playbackTask?.cancel()
         playbackTask = nil
         output.stop()
         resumePendingWithCancellation()
         currentChunkIndex = newIndex
+        clearChunkProgress()
         let gen = generation
         playbackTask = Task {
             await runLoop(from: newIndex, generation: gen, playStart: nil)
         }
+    }
+
+    private func clearChunkProgress() {
+        currentChunkStartedAt = nil
+        currentChunkDuration = 0
+        pausedElapsed = nil
     }
 
     private func resumePendingWithCancellation() {
@@ -198,6 +228,7 @@ public final class PlaybackController {
                     logger.error("\(message, privacy: .public)")
                     lastError = message
                     state = .idle
+                    clearChunkProgress()
                     if gen == generation { playbackTask = nil }
                     return
                 }
@@ -219,6 +250,7 @@ public final class PlaybackController {
                     logger.error("\(message, privacy: .public)")
                     lastError = message
                     state = .idle
+                    clearChunkProgress()
                     if gen == generation { playbackTask = nil }
                     return
                 }
@@ -248,6 +280,9 @@ public final class PlaybackController {
                 let ms = Int(seconds * 1000 + Double(latency.components.attoseconds) / 1_000_000_000_000_000)
                 logger.notice("First audio latency: \(ms, privacy: .public) ms")
             }
+            currentChunkStartedAt = Date()
+            currentChunkDuration =
+                audio.sampleRate > 0 ? Double(audio.samples.count) / audio.sampleRate : 0
             do {
                 try await playAndWait(audio, generation: gen)
             } catch is CancellationError {
@@ -259,6 +294,7 @@ public final class PlaybackController {
                 logger.error("\(message, privacy: .public)")
                 lastError = message
                 state = .idle
+                clearChunkProgress()
                 if gen == generation { playbackTask = nil }
                 return
             }
@@ -277,6 +313,7 @@ public final class PlaybackController {
         if gen == generation {
             state = .idle
             playbackTask = nil
+            clearChunkProgress()
         }
     }
 }

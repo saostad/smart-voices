@@ -187,6 +187,18 @@ public final class AppSettings {
         }
     }
 
+    @ObservationIgnored private var _showReaderPanel: Bool
+    public var showReaderPanel: Bool {
+        get {
+            access(keyPath: \.showReaderPanel)
+            return _showReaderPanel
+        }
+        set {
+            withMutation(keyPath: \.showReaderPanel) { _showReaderPanel = newValue }
+            defaults.set(newValue, forKey: "sv.showReaderPanel")
+        }
+    }
+
     @ObservationIgnored private var _hotKeys: [HotKeyAction: HotKey]
     /// Global shortcuts by action. A missing entry means disabled.
     public var hotKeys: [HotKeyAction: HotKey] {
@@ -255,6 +267,11 @@ public final class AppSettings {
             self._watchClipboard = defaults.bool(forKey: "sv.watchClipboard")
         } else {
             self._watchClipboard = true
+        }
+        if defaults.object(forKey: "sv.showReaderPanel") != nil {
+            self._showReaderPanel = defaults.bool(forKey: "sv.showReaderPanel")
+        } else {
+            self._showReaderPanel = true
         }
         self._codeBlocks = Self.loadValidated(
             defaults: defaults, key: "sv.codeBlocks", validate: Self.validatedCodeBlocks,

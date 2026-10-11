@@ -17,6 +17,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let voiceModel = VoiceModel()
     let loginItem: any LoginItemControlling = SMAppServiceLoginItem()
     private let settingsWindowController = SettingsWindowController()
+    private let reader = ReaderPanelController()
+    private var readerHideTimer: Timer?
     private var engineLoading = false
     var engineLoadFailed = false
     var cachedVoices: [VoiceInfo] = []
@@ -45,6 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotKeyCenter.updateBindings(settings.hotKeys)
         startEnginePrepare()
         refreshVoices()
+        reader.setTitle(readerTitle())
         updateIcon()
         observeState()
         if CommandLine.arguments.contains("--debug-click") {
@@ -184,6 +187,69 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         playback.play(text: "Hi, I'm \(name). This is how I sound.")
     }
 
+    @objc func showReaderPanel(_ sender: Any?) {
+        readerHideTimer?.invalidate()
+        readerHideTimer = nil
+        presentReader()
+    }
+
+    private func presentReader() {
+        reader.show(
+            playback: playback, title: readerTitle(),
+            onJump: { [weak self] index in self?.playback.jump(to: index) },
+            onTogglePlayPause: { [weak self] in self?.handleLeftClick() },
+            onNext: { [weak self] in self?.playback.skipForward() },
+            onPrevious: { [weak self] in self?.playback.skipBack() },
+            onSpeed: { [weak self] value in
+                self?.settings.speed = value
+                if let self {
+                    self.playback.speed = self.settings.speed
+                }
+            },
+            onClose: { [weak self] in
+                self?.readerHideTimer?.invalidate()
+                self?.readerHideTimer = nil
+                self?.reader.hide()
+            })
+    }
+
+    private func readerTitle() -> String {
+        let currentID = voiceForSettings()
+        let voiceName =
+            cachedVoices.first(where: { $0.id == currentID })?.name ?? currentID ?? "Default"
+        return "\(playback.engine.displayName) — \(voiceName)"
+    }
+
+    private func updateReaderPanel() {
+        let active =
+            playback.state == .playing || playback.state == .preparing
+            || playback.state == .paused
+        if active {
+            readerHideTimer?.invalidate()
+            readerHideTimer = nil
+            if settings.showReaderPanel {
+                presentReader()
+            }
+        } else if reader.isVisible {
+            scheduleReaderHide()
+        }
+    }
+
+    private func scheduleReaderHide() {
+        readerHideTimer?.invalidate()
+        readerHideTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) {
+            [weak self] _ in
+            guard let self else { return }
+            MainActor.assumeIsolated {
+                if self.reader.isMouseOver {
+                    self.scheduleReaderHide()
+                } else {
+                    self.reader.hide()
+                }
+            }
+        }
+    }
+
     @objc func openSettings(_ sender: Any?) {
         showSettings()
     }
@@ -258,6 +324,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self, self.voicesGeneration == generation else { return }
             self.cachedVoices = list
             self.voiceModel.voices = list
+            self.reader.setTitle(self.readerTitle())
         }
     }
 
@@ -270,6 +337,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             _ = playback.state
             _ = playback.lastError
             _ = monitor.hasUnreadContent
+            _ = settings.showReaderPanel
             _ = settings.watchClipboard
             _ = settings.ignoredAppBundleIDs
             _ = settings.minimumReadyLength
@@ -297,6 +365,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if self.playback.state == .playing {
                     self.engineLoadFailed = false
                 }
+                self.updateReaderPanel()
                 self.updateIcon()
             }
         }
