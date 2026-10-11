@@ -11,6 +11,7 @@ struct SettingsRootView: View {
     var onSelectEngine: (String) -> Void
     var onSelectVoice: (String?) -> Void
     var onPreviewVoice: () -> Void
+    var onPreviewPronunciation: (String) -> Void
     var onClearHistory: () -> Void
     @State var selectedTab: SettingsTab = .general
 
@@ -24,6 +25,9 @@ struct SettingsRootView: View {
             }
             Tab("Reading", systemImage: "text.bubble", value: SettingsTab.reading) {
                 tabContent(.reading)
+            }
+            Tab("Pronunciation", systemImage: "character.bubble", value: SettingsTab.pronunciation) {
+                tabContent(.pronunciation)
             }
             Tab("Shortcuts", systemImage: "keyboard", value: SettingsTab.shortcuts) {
                 tabContent(.shortcuts)
@@ -48,6 +52,9 @@ struct SettingsRootView: View {
                 onPreviewVoice: onPreviewVoice)
         case .reading:
             ReadingSettingsView(settings: settings)
+        case .pronunciation:
+            PronunciationSettingsView(
+                settings: settings, onPreviewPronunciation: onPreviewPronunciation)
         case .shortcuts:
             ShortcutsSettingsView(settings: settings, hotKeyCenter: hotKeyCenter)
         case .about:

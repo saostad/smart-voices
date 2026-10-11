@@ -15,6 +15,7 @@ final class SettingsWindowController {
         onSelectEngine: @escaping (String) -> Void,
         onSelectVoice: @escaping (String?) -> Void,
         onPreviewVoice: @escaping () -> Void,
+        onPreviewPronunciation: @escaping (String) -> Void,
         onClearHistory: @escaping () -> Void
     ) {
         if window == nil {
@@ -26,6 +27,7 @@ final class SettingsWindowController {
                 onSelectEngine: onSelectEngine,
                 onSelectVoice: onSelectVoice,
                 onPreviewVoice: onPreviewVoice,
+                onPreviewPronunciation: onPreviewPronunciation,
                 onClearHistory: onClearHistory)
             let hosting = NSHostingView(rootView: root)
             hosting.frame = NSRect(x: 0, y: 0, width: 600, height: 520)

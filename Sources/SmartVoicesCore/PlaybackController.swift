@@ -23,6 +23,10 @@ public final class PlaybackController {
 
     public var sanitizerOptions: SanitizerOptions
 
+    /// Pronunciations applied to chunk text right before synthesis.
+    /// Display text (chunks) keeps the original spelling.
+    public var pronunciationDictionary = PronunciationDictionary()
+
     private let output: any AudioOutput
     private let chunker: SpeechChunker
     private let logger = Logger(subsystem: "dev.smartvoices", category: "playback")
@@ -233,7 +237,7 @@ public final class PlaybackController {
                     return
                 }
             } else {
-                let text = chunks[index].text
+                let text = pronunciationDictionary.apply(to: chunks[index].text)
                 let voice = voiceID
                 let spd = speed
                 let eng = engine
@@ -258,7 +262,7 @@ public final class PlaybackController {
             if gen != generation { return }
             for ahead in [index + 1, index + 2] {
                 if ahead < chunks.count, cache[ahead] == nil, synthTasks[ahead] == nil {
-                    let text = chunks[ahead].text
+                    let text = pronunciationDictionary.apply(to: chunks[ahead].text)
                     let voice = voiceID
                     let spd = speed
                     let eng = engine

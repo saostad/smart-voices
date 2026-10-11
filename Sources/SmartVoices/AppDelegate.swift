@@ -42,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         playback.speed = settings.speed
         playback.voiceID = voiceForSettings()
         playback.sanitizerOptions = settings.sanitizerOptions
+        playback.pronunciationDictionary = PronunciationDictionary(entries: settings.pronunciations)
         monitor.isEnabled = settings.watchClipboard
         monitor.ignoredAppBundleIDs = settings.ignoredAppBundleIDs
         monitor.minimumReadyLength = settings.minimumReadyLength
@@ -212,12 +213,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let voiceID = voiceForSettings()
         let speed = settings.speed
         let options = settings.sanitizerOptions
+        let pronunciations = settings.pronunciations
         Task { @MainActor [weak self] in
             guard let self else { return }
             do {
                 _ = try await self.exporter.export(
                     text: text, engine: engine, voiceID: voiceID, speed: speed,
-                    sanitizerOptions: options, to: url)
+                    sanitizerOptions: options, pronunciations: pronunciations, to: url)
                 NSWorkspace.shared.activateFileViewerSelecting([url])
             } catch {
                 self.playback.lastError = "Couldn't export audio: \(error.localizedDescription)"
@@ -282,6 +284,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let name =
             cachedVoices.first(where: { $0.id == currentID })?.name ?? currentID ?? "Default"
         playback.play(text: "Hi, I'm \(name). This is how I sound.")
+    }
+
+    func previewPronunciation(_ spoken: String) {
+        playback.play(text: spoken)
     }
 
     @objc func showReaderPanel(_ sender: Any?) {
@@ -367,6 +373,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onSelectEngine: { [weak self] id in Task { @MainActor in self?.setEngine(id: id) } },
             onSelectVoice: { [weak self] id in Task { @MainActor in self?.setVoice(id: id) } },
             onPreviewVoice: { [weak self] in Task { @MainActor in self?.previewVoice() } },
+            onPreviewPronunciation: { [weak self] text in
+                Task { @MainActor in self?.previewPronunciation(text) }
+            },
             onClearHistory: { [weak self] in Task { @MainActor in self?.clearHistory() } })
     }
 
@@ -455,6 +464,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             _ = settings.tables
             _ = settings.bareURLs
             _ = settings.maxTableRowsToRead
+            _ = settings.pronunciations
             _ = settings.hotKeys
             _ = settings.speed
         } onChange: { [weak self] in
@@ -470,6 +480,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.monitor.ignoredAppBundleIDs = self.settings.ignoredAppBundleIDs
                 self.monitor.minimumReadyLength = self.settings.minimumReadyLength
                 self.playback.sanitizerOptions = self.settings.sanitizerOptions
+                self.playback.pronunciationDictionary = PronunciationDictionary(
+                    entries: self.settings.pronunciations)
                 self.playback.speed = self.settings.speed
                 self.hotKeyCenter.updateBindings(self.settings.hotKeys)
                 if self.playback.state == .playing {

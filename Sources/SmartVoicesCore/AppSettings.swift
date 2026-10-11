@@ -211,6 +211,25 @@ public final class AppSettings {
         }
     }
 
+    public static let defaultPronunciations: [PronunciationEntry] = PronunciationEntry.defaults
+
+    @ObservationIgnored private var _pronunciations: [PronunciationEntry]
+    /// How to speak names, acronyms and jargon. Applied before synthesis only.
+    public var pronunciations: [PronunciationEntry] {
+        get {
+            access(keyPath: \.pronunciations)
+            return _pronunciations
+        }
+        set {
+            withMutation(keyPath: \.pronunciations) { _pronunciations = newValue }
+            do {
+                defaults.set(try JSONEncoder().encode(newValue), forKey: "sv.pronunciations")
+            } catch {
+                logger.error("Couldn't save pronunciations: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
     @ObservationIgnored private var _hotKeys: [HotKeyAction: HotKey]
     /// Global shortcuts by action. A missing entry means disabled.
     public var hotKeys: [HotKeyAction: HotKey] {
@@ -315,6 +334,28 @@ public final class AppSettings {
         }
         self._ignoredAppBundleIDs =
             defaults.stringArray(forKey: "sv.ignoredAppBundleIDs") ?? Self.defaultIgnoredAppBundleIDs
+        if let storedPronunciations = defaults.data(forKey: "sv.pronunciations") {
+            do {
+                self._pronunciations = try JSONDecoder().decode(
+                    [PronunciationEntry].self, from: storedPronunciations)
+            } catch {
+                self._pronunciations = Self.defaultPronunciations
+                do {
+                    defaults.set(
+                        try JSONEncoder().encode(Self.defaultPronunciations),
+                        forKey: "sv.pronunciations")
+                } catch {
+                    logger.error(
+                        "Couldn't save default pronunciations: \(error.localizedDescription, privacy: .public)"
+                    )
+                }
+                logger.warning(
+                    "Couldn't read stored pronunciations; resetting to defaults: \(error.localizedDescription, privacy: .public)"
+                )
+            }
+        } else {
+            self._pronunciations = Self.defaultPronunciations
+        }
         if let storedHotKeys = defaults.data(forKey: "sv.hotKeys") {
             do {
                 let raw = try JSONDecoder().decode([String: HotKey].self, from: storedHotKeys)

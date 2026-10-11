@@ -5,6 +5,7 @@ enum SettingsTab: String, CaseIterable, Hashable {
     case general
     case voice
     case reading
+    case pronunciation
     case shortcuts
     case about
 
@@ -13,6 +14,7 @@ enum SettingsTab: String, CaseIterable, Hashable {
         case .general: return "General"
         case .voice: return "Voice"
         case .reading: return "Reading"
+        case .pronunciation: return "Pronunciation"
         case .shortcuts: return "Shortcuts"
         case .about: return "About"
         }
@@ -23,6 +25,7 @@ enum SettingsTab: String, CaseIterable, Hashable {
         case .general: return "gearshape"
         case .voice: return "waveform"
         case .reading: return "text.bubble"
+        case .pronunciation: return "character.bubble"
         case .shortcuts: return "keyboard"
         case .about: return "info.circle"
         }

@@ -34,7 +34,8 @@ final class AudioExporter {
     /// Returns the audio duration in seconds.
     func export(
         text: String, engine: any SpeechEngine, voiceID: String?, speed: Double,
-        sanitizerOptions: SanitizerOptions, to url: URL
+        sanitizerOptions: SanitizerOptions, pronunciations: [PronunciationEntry] = [],
+        to url: URL
     ) async throws -> Double {
         do {
             try await engine.prepare()
@@ -55,10 +56,12 @@ final class AudioExporter {
         }
         var audios: [SynthesizedAudio] = []
         var pauses: [Double] = []
+        let dictionary = PronunciationDictionary(entries: pronunciations)
         for chunk in chunks {
             do {
                 audios.append(
-                    try await engine.synthesize(chunk.text, voiceID: voiceID, speed: speed))
+                    try await engine.synthesize(
+                        dictionary.apply(to: chunk.text), voiceID: voiceID, speed: speed))
             } catch {
                 throw AudioExportError.engineFailed(
                     "\(engine.displayName): \(error.localizedDescription)")
