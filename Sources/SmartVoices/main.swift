@@ -1,7 +1,10 @@
 import AppKit
 import Foundation
 import Observation
+import os
 import SmartVoicesCore
+
+private let appLogger = Logger(subsystem: "dev.smartvoices", category: "app")
 
 func writeStderr(_ message: String) {
     if let data = (message + "\n").data(using: .utf8) {
@@ -9,38 +12,20 @@ func writeStderr(_ message: String) {
     }
 }
 
-final class ExitBox: @unchecked Sendable {
-    private let lock = NSLock()
-    private var code: Int32 = 0
-
-    func set(_ value: Int32) {
-        lock.lock()
-        defer { lock.unlock() }
-        code = value
-    }
-
-    func get() -> Int32 {
-        lock.lock()
-        defer { lock.unlock() }
-        return code
-    }
+func msBetween(_ start: ContinuousClock.Instant, _ end: ContinuousClock.Instant) -> Int {
+    let duration = start.duration(to: end)
+    return Int(Double(duration.components.seconds) * 1000 + Double(duration.components.attoseconds) / 1_000_000_000_000_000)
 }
 
-func runHeadless(text: String) -> Int32 {
-    let semaphore = DispatchSemaphore(value: 0)
-    let box = ExitBox()
-    Task.detached {
-        box.set(await runHeadlessAsync(text: text))
-        semaphore.signal()
-    }
-    semaphore.wait()
-    return box.get()
+func makeHeadlessEngine(engineID: String) -> any SpeechEngine {
+    // Item 3 wires "kokoro" to KokoroSpeechEngine and makes it the default.
+    _ = engineID
+    return SystemSpeechEngine()
 }
 
-func runHeadlessAsync(text: String) async -> Int32 {
+func runHeadlessAsync(text: String, engine: any SpeechEngine) async -> Int32 {
     let sanitizer = SpeechSanitizer()
     let chunker = SpeechChunker()
-    let engine: any SpeechEngine = SystemSpeechEngine()
     do {
         try await engine.prepare()
     } catch {
@@ -55,7 +40,8 @@ func runHeadlessAsync(text: String) async -> Int32 {
     let output: any AudioOutput = AVAudioEngineOutput()
     let start = ContinuousClock.now
     var first = true
-    for chunk in chunks {
+    for (index, chunk) in chunks.enumerated() {
+        let synthStart = ContinuousClock.now
         let audio: SynthesizedAudio
         do {
             audio = try await engine.synthesize(chunk.text, voiceID: nil, speed: 1.0)
@@ -63,11 +49,12 @@ func runHeadlessAsync(text: String) async -> Int32 {
             writeStderr("SmartVoices: Couldn't synthesize speech with \(engine.displayName): \(error.localizedDescription)")
             return 1
         }
+        let synthMs = msBetween(synthStart, ContinuousClock.now)
+        let audioMs = audio.sampleRate > 0 ? Int(Double(audio.samples.count) / audio.sampleRate * 1000) : 0
+        print("chunk \(index): synth \(synthMs) ms, audio \(audioMs) ms")
         if first {
             first = false
-            let latency = start.duration(to: ContinuousClock.now)
-            let ms = Int(Double(latency.components.seconds) * 1000 + Double(latency.components.attoseconds) / 1_000_000_000_000_000)
-            print("first audio after \(ms) ms")
+            print("first audio after \(msBetween(start, ContinuousClock.now)) ms")
         }
         do {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -93,19 +80,49 @@ func runHeadlessAsync(text: String) async -> Int32 {
 }
 
 let args = CommandLine.arguments
-if let index = args.firstIndex(of: "--say"), index + 1 < args.count {
-    exit(runHeadless(text: args[index + 1]))
-} else if let index = args.firstIndex(of: "--say-file"), index + 1 < args.count {
-    let path = args[index + 1]
-    do {
-        let text = try String(contentsOfFile: path, encoding: .utf8)
-        exit(runHeadless(text: text))
-    } catch {
-        writeStderr("SmartVoices: cannot read \(path): \(error.localizedDescription)")
+let sayIndex = args.firstIndex(of: "--say")
+let sayFileIndex = args.firstIndex(of: "--say-file")
+if sayIndex != nil || sayFileIndex != nil {
+    var engineID = "system"
+    if let engineIndex = args.firstIndex(of: "--engine") {
+        if engineIndex + 1 >= args.count {
+            writeStderr("SmartVoices: missing argument for --engine")
+            exit(1)
+        }
+        engineID = args[engineIndex + 1]
+    }
+    if engineID != "kokoro" && engineID != "system" {
+        writeStderr("SmartVoices: unknown engine '\(engineID)'. Use kokoro or system.")
         exit(1)
     }
-} else if args.contains("--say") || args.contains("--say-file") {
-    writeStderr("SmartVoices: missing argument for \(args.contains("--say") ? "--say" : "--say-file")")
+    let text: String
+    if let index = sayIndex {
+        if index + 1 >= args.count {
+            writeStderr("SmartVoices: missing argument for --say")
+            exit(1)
+        }
+        text = args[index + 1]
+    } else if let index = sayFileIndex {
+        if index + 1 >= args.count {
+            writeStderr("SmartVoices: missing argument for --say-file")
+            exit(1)
+        }
+        let path = args[index + 1]
+        do {
+            text = try String(contentsOfFile: path, encoding: .utf8)
+        } catch {
+            writeStderr("SmartVoices: cannot read \(path): \(error.localizedDescription)")
+            exit(1)
+        }
+    } else {
+        writeStderr("SmartVoices: missing argument for --say")
+        exit(1)
+    }
+    let engine = makeHeadlessEngine(engineID: engineID)
+    Task { @MainActor in
+        exit(await runHeadlessAsync(text: text, engine: engine))
+    }
+    RunLoop.main.run()
     exit(1)
 }
 
@@ -126,6 +143,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         updateIcon()
         observeState()
+        if CommandLine.arguments.contains("--debug-click") {
+            Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { [weak self] _ in
+                guard let self else { return }
+                MainActor.assumeIsolated {
+                    self.handleLeftClick()
+                    appLogger.info("debug-click: \(String(describing: self.playback.state))")
+                }
+            }
+        }
     }
 
     @objc func statusItemClicked(_ sender: Any?) {
