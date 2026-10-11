@@ -4,6 +4,7 @@ import Observation
 import os
 import SmartVoicesCore
 import SmartVoicesKokoro
+import UniformTypeIdentifiers
 
 let appLogger = Logger(subsystem: "dev.smartvoices", category: "app")
 
@@ -13,6 +14,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let settings = AppSettings()
     let playback = PlaybackController(engine: SystemSpeechEngine(), output: AVAudioEngineOutput())
     let history = ReadingHistory()
+    let exporter = AudioExporter()
+    private let nowPlaying = NowPlayingController()
     private let monitor = ClipboardMonitor()
     let hotKeyCenter = HotKeyCenter()
     let voiceModel = VoiceModel()
@@ -46,6 +49,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.handleHotKey(action)
         }
         hotKeyCenter.updateBindings(settings.hotKeys)
+        nowPlaying.onPlay = { [weak self] in
+            guard let self else { return }
+            if self.playback.state == .paused {
+                self.playback.resume()
+            } else if self.playback.state == .idle {
+                self.readClipboardAndPlay()
+            }
+        }
+        nowPlaying.onPause = { [weak self] in self?.playback.pause() }
+        nowPlaying.onToggle = { [weak self] in self?.handleLeftClick() }
+        nowPlaying.onNext = { [weak self] in self?.playback.skipForward() }
+        nowPlaying.onPrevious = { [weak self] in self?.playback.skipBack() }
+        nowPlaying.onStop = { [weak self] in self?.playback.stop() }
         startEnginePrepare()
         refreshVoices()
         reader.setTitle(readerTitle())
@@ -169,6 +185,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func nextSentence(_ sender: Any?) {
         playback.skipForward()
+    }
+
+    @objc func exportClipboardAsAudio(_ sender: Any?) {
+        let text: String
+        switch monitor.readText() {
+        case .text(let value):
+            text = value
+        case .empty:
+            playback.lastError = "The clipboard doesn't contain any text."
+            return
+        case .tooShort(let count):
+            playback.lastError =
+                "The clipboard text is only \(count) characters. Copy something longer, or lower the minimum in Settings → General."
+            return
+        }
+        let panel = NSSavePanel()
+        if let m4a = UTType(filenameExtension: "m4a") {
+            panel.allowedContentTypes = [m4a]
+        }
+        panel.nameFieldStringValue = defaultExportName()
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let engine = playback.engine
+        let voiceID = voiceForSettings()
+        let speed = settings.speed
+        let options = settings.sanitizerOptions
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                _ = try await self.exporter.export(
+                    text: text, engine: engine, voiceID: voiceID, speed: speed,
+                    sanitizerOptions: options, to: url)
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            } catch {
+                self.playback.lastError = "Couldn't export audio: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func defaultExportName() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HHmm"
+        return "Smart Voices \(formatter.string(from: Date())).m4a"
     }
 
     @objc func setSpeed(_ sender: NSMenuItem) {
@@ -374,6 +433,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         withObservationTracking {
             _ = playback.state
             _ = playback.lastError
+            _ = playback.currentChunkIndex
+            _ = playback.chunks
+            _ = exporter.isExporting
+            _ = exporter.completedChunks
             _ = monitor.hasUnreadContent
             _ = settings.showReaderPanel
             _ = settings.watchClipboard
@@ -404,9 +467,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.engineLoadFailed = false
                 }
                 self.updateReaderPanel()
+                self.updateNowPlaying()
                 self.updateIcon()
             }
         }
+    }
+
+    private func updateNowPlaying() {
+        nowPlaying.update(
+            state: playback.state, chunks: playback.chunks,
+            index: playback.currentChunkIndex, speed: playback.speed)
     }
 
     private func updateIcon() {
@@ -416,6 +486,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if playback.lastError != nil {
             symbol = "exclamationmark.triangle"
             toolTip = "Smart Voices \u{2014} click to read the clipboard"
+        } else if exporter.isExporting {
+            symbol = "ellipsis.circle"
+            toolTip =
+                "Smart Voices \u{2014} exporting audio (\(exporter.completedChunks) of \(exporter.totalChunks))\u{2026}"
         } else if engineLoading {
             symbol = "ellipsis.circle"
             toolTip = "Smart Voices \u{2014} loading the Kokoro voice model\u{2026}"

@@ -20,6 +20,63 @@ func makeHeadlessEngine(engineID: String) -> any SpeechEngine {
     return SystemSpeechEngine()
 }
 
+/// Parse --engine (default kokoro). Exits 1 on error.
+func headlessEngineID(args: [String]) -> String {
+    var engineID = "kokoro"
+    if let engineIndex = args.firstIndex(of: "--engine") {
+        if engineIndex + 1 >= args.count {
+            writeStderr("SmartVoices: missing argument for --engine")
+            exit(1)
+        }
+        engineID = args[engineIndex + 1]
+    }
+    if engineID != "kokoro" && engineID != "system" {
+        writeStderr("SmartVoices: unknown engine '\(engineID)'. Use kokoro or system.")
+        exit(1)
+    }
+    return engineID
+}
+
+/// Parse --say/--say-file text. Exits 1 on error.
+func headlessText(args: [String]) -> String {
+    if let index = args.firstIndex(of: "--say") {
+        if index + 1 >= args.count {
+            writeStderr("SmartVoices: missing argument for --say")
+            exit(1)
+        }
+        return args[index + 1]
+    } else if let index = args.firstIndex(of: "--say-file") {
+        if index + 1 >= args.count {
+            writeStderr("SmartVoices: missing argument for --say-file")
+            exit(1)
+        }
+        let path = args[index + 1]
+        do {
+            return try String(contentsOfFile: path, encoding: .utf8)
+        } catch {
+            writeStderr("SmartVoices: cannot read \(path): \(error.localizedDescription)")
+            exit(1)
+        }
+    }
+    writeStderr("SmartVoices: missing argument for --say")
+    exit(1)
+}
+
+@MainActor
+func runExportAsync(text: String, engine: any SpeechEngine, outputPath: String) async -> Int32 {
+    let exporter = AudioExporter()
+    do {
+        let seconds = try await exporter.export(
+            text: text, engine: engine, voiceID: nil, speed: 1.0,
+            sanitizerOptions: SanitizerOptions(), to: URL(fileURLWithPath: outputPath))
+        print(String(format: "exported %.1f s to %@", seconds, outputPath))
+        return 0
+    } catch {
+        writeStderr("SmartVoices: Couldn't export audio: \(error.localizedDescription)")
+        return 1
+    }
+}
+
 func runHeadlessAsync(text: String, engine: any SpeechEngine) async -> Int32 {
     let sanitizer = SpeechSanitizer()
     let chunker = SpeechChunker()

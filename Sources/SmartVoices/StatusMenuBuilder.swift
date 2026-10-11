@@ -64,6 +64,11 @@ extension AppDelegate {
         readerPanel.target = self
         menu.addItem(readerPanel)
 
+        let exportItem = NSMenuItem(title: "Export Clipboard as Audio…", action: #selector(exportClipboardAsAudio(_:)), keyEquivalent: "")
+        exportItem.target = self
+        exportItem.isEnabled = isIdle && !exporter.isExporting
+        menu.addItem(exportItem)
+
         menu.addItem(.separator())
 
         let speedItem = NSMenuItem(title: "Speed", action: nil, keyEquivalent: "")

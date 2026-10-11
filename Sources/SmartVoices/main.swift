@@ -20,45 +20,27 @@ if let readerIndex = args.firstIndex(of: "--render-reader") {
     let code: Int32 = MainActor.assumeIsolated { renderReader(to: png) }
     exit(code)
 }
-let sayIndex = args.firstIndex(of: "--say")
-let sayFileIndex = args.firstIndex(of: "--say-file")
-if sayIndex != nil || sayFileIndex != nil {
-    var engineID = "kokoro"
-    if let engineIndex = args.firstIndex(of: "--engine") {
-        if engineIndex + 1 >= args.count {
-            writeStderr("SmartVoices: missing argument for --engine")
-            exit(1)
-        }
-        engineID = args[engineIndex + 1]
-    }
-    if engineID != "kokoro" && engineID != "system" {
-        writeStderr("SmartVoices: unknown engine '\(engineID)'. Use kokoro or system.")
+if let exportIndex = args.firstIndex(of: "--export") {
+    if exportIndex + 1 >= args.count {
+        writeStderr("SmartVoices: missing argument for --export")
         exit(1)
     }
-    let text: String
-    if let index = sayIndex {
-        if index + 1 >= args.count {
-            writeStderr("SmartVoices: missing argument for --say")
-            exit(1)
-        }
-        text = args[index + 1]
-    } else if let index = sayFileIndex {
-        if index + 1 >= args.count {
-            writeStderr("SmartVoices: missing argument for --say-file")
-            exit(1)
-        }
-        let path = args[index + 1]
-        do {
-            text = try String(contentsOfFile: path, encoding: .utf8)
-        } catch {
-            writeStderr("SmartVoices: cannot read \(path): \(error.localizedDescription)")
-            exit(1)
-        }
-    } else {
-        writeStderr("SmartVoices: missing argument for --say")
+    let outPath = args[exportIndex + 1]
+    if !args.contains("--say") && !args.contains("--say-file") {
+        writeStderr("SmartVoices: --export needs --say or --say-file for the text to read")
         exit(1)
     }
-    let engine = makeHeadlessEngine(engineID: engineID)
+    let engine = makeHeadlessEngine(engineID: headlessEngineID(args: args))
+    let text = headlessText(args: args)
+    Task { @MainActor in
+        exit(await runExportAsync(text: text, engine: engine, outputPath: outPath))
+    }
+    RunLoop.main.run()
+    exit(1)
+}
+if args.contains("--say") || args.contains("--say-file") {
+    let engine = makeHeadlessEngine(engineID: headlessEngineID(args: args))
+    let text = headlessText(args: args)
     Task { @MainActor in
         exit(await runHeadlessAsync(text: text, engine: engine))
     }
