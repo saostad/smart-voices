@@ -26,6 +26,12 @@ public final class AppSettings {
         "com.apple.keychainaccess",
         "com.apple.Passwords",
     ]
+    public static let defaultHotKeys: [HotKeyAction: HotKey] = [
+        .playPause: HotKey(keyCode: 49, modifiers: HotKey.controlKey | HotKey.optionKey),
+        .stop: HotKey(keyCode: 47, modifiers: HotKey.controlKey | HotKey.optionKey),
+        .nextSentence: HotKey(keyCode: 124, modifiers: HotKey.controlKey | HotKey.optionKey),
+        .previousSentence: HotKey(keyCode: 123, modifiers: HotKey.controlKey | HotKey.optionKey),
+    ]
 
     // Custom accessors with manual observation: assigning to the property inside
     // its own didSet recurses forever once @Observable rewrites the storage.
@@ -181,6 +187,24 @@ public final class AppSettings {
         }
     }
 
+    @ObservationIgnored private var _hotKeys: [HotKeyAction: HotKey]
+    /// Global shortcuts by action. A missing entry means disabled.
+    public var hotKeys: [HotKeyAction: HotKey] {
+        get {
+            access(keyPath: \.hotKeys)
+            return _hotKeys
+        }
+        set {
+            withMutation(keyPath: \.hotKeys) { _hotKeys = newValue }
+            do {
+                let raw = Dictionary(uniqueKeysWithValues: newValue.map { ($0.rawValue, $1) })
+                defaults.set(try JSONEncoder().encode(raw), forKey: "sv.hotKeys")
+            } catch {
+                logger.error("Couldn't save shortcuts: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
     /// Sanitizer options matching the current reading settings.
     public var sanitizerOptions: SanitizerOptions {
         let code: SanitizerOptions.CodeBlocks =
@@ -257,6 +281,35 @@ public final class AppSettings {
         }
         self._ignoredAppBundleIDs =
             defaults.stringArray(forKey: "sv.ignoredAppBundleIDs") ?? Self.defaultIgnoredAppBundleIDs
+        if let storedHotKeys = defaults.data(forKey: "sv.hotKeys") {
+            do {
+                let raw = try JSONDecoder().decode([String: HotKey].self, from: storedHotKeys)
+                var decoded: [HotKeyAction: HotKey] = [:]
+                for (key, value) in raw {
+                    if let action = HotKeyAction(rawValue: key) {
+                        decoded[action] = value
+                    }
+                }
+                self._hotKeys = decoded
+            } catch {
+                self._hotKeys = Self.defaultHotKeys
+                do {
+                    defaults.set(try JSONEncoder().encode(Self.defaultHotKeysRaw), forKey: "sv.hotKeys")
+                } catch {
+                    logger.error(
+                        "Couldn't save default shortcuts: \(error.localizedDescription, privacy: .public)")
+                }
+                logger.warning(
+                    "Couldn't read stored shortcuts; resetting to defaults: \(error.localizedDescription, privacy: .public)"
+                )
+            }
+        } else {
+            self._hotKeys = Self.defaultHotKeys
+        }
+    }
+
+    private static var defaultHotKeysRaw: [String: HotKey] {
+        Dictionary(uniqueKeysWithValues: defaultHotKeys.map { ($0.rawValue, $1) })
     }
 
     private static func validatedCodeBlocks(_ value: String) -> String? {

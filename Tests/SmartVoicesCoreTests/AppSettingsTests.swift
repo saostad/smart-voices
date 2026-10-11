@@ -92,6 +92,20 @@ struct AppSettingsTests {
         #expect(settings.engineID == "kokoro")
     }
 
+    @Test func hotKeysRoundTrip() {
+        let defaults = makeDefaults()
+        let settings = AppSettings(defaults: defaults)
+        let custom = HotKey(keyCode: 15, modifiers: HotKey.optionKey | HotKey.cmdKey)
+        settings.hotKeys[.playPause] = custom
+        settings.hotKeys.removeValue(forKey: .stop)
+        let reloaded = AppSettings(defaults: defaults)
+        #expect(reloaded.hotKeys[.playPause] == custom)
+        #expect(reloaded.hotKeys[.stop] == nil)
+        #expect(reloaded.hotKeys[.nextSentence] == AppSettings.defaultHotKeys[.nextSentence])
+        defaults.set(Data("not json".utf8), forKey: "sv.hotKeys")
+        #expect(AppSettings(defaults: defaults).hotKeys == AppSettings.defaultHotKeys)
+    }
+
     @Test func invalidReadingOptionsReset() {
         let defaults = makeDefaults()
         defaults.set("shout", forKey: "sv.codeBlocks")

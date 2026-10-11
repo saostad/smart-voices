@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let settings = AppSettings()
     let playback = PlaybackController(engine: SystemSpeechEngine(), output: AVAudioEngineOutput())
     private let monitor = ClipboardMonitor()
+    private let hotKeyCenter = HotKeyCenter()
     private var engineLoading = false
     var engineLoadFailed = false
     var cachedVoices: [VoiceInfo] = []
@@ -35,6 +36,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         monitor.isEnabled = settings.watchClipboard
         monitor.ignoredAppBundleIDs = settings.ignoredAppBundleIDs
         monitor.minimumReadyLength = settings.minimumReadyLength
+        hotKeyCenter.onAction = { [weak self] action in
+            self?.handleHotKey(action)
+        }
+        hotKeyCenter.updateBindings(settings.hotKeys)
         startEnginePrepare()
         refreshVoices()
         updateIcon()
@@ -68,6 +73,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             playback.togglePlayPause { nil }
         case .idle:
             readClipboardAndPlay()
+        }
+    }
+
+    private func handleHotKey(_ action: HotKeyAction) {
+        switch action {
+        case .playPause:
+            handleLeftClick()
+        case .stop:
+            playback.stop()
+        case .nextSentence:
+            playback.skipForward()
+        case .previousSentence:
+            playback.skipBack()
         }
     }
 
@@ -222,6 +240,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             _ = settings.tables
             _ = settings.bareURLs
             _ = settings.maxTableRowsToRead
+            _ = settings.hotKeys
         } onChange: { [weak self] in
             guard let self else { return }
             // onChange fires before the new value is stored: re-register now, but
@@ -235,6 +254,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.monitor.ignoredAppBundleIDs = self.settings.ignoredAppBundleIDs
                 self.monitor.minimumReadyLength = self.settings.minimumReadyLength
                 self.playback.sanitizerOptions = self.settings.sanitizerOptions
+                self.hotKeyCenter.updateBindings(self.settings.hotKeys)
                 if self.playback.state == .playing {
                     self.engineLoadFailed = false
                 }
