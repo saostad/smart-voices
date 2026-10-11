@@ -40,9 +40,18 @@ text ever leaves your computer.
 
 ## Install and run
 
+Download `SmartVoices-1.0.0.dmg` from the
+[releases page](https://github.com/saostad/smart-voices/releases), open it, and
+drag Smart Voices to Applications. (The app is ad-hoc signed, so on first
+launch right-click it and choose Open.)
+
+Or build from source:
+
 ```sh
 scripts/build-app.sh && open "build/Smart Voices.app"
 ```
+
+Every push to `main` automatically builds and publishes a new DMG release.
 
 Click the menu-bar icon to read the clipboard. Right-click (or Control-click)
 for the menu: Read Clipboard (⌘R), Read File… (⌘O), Recent, Pause/Resume, Stop,

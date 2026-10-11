@@ -1,0 +1,40 @@
+name: Build and Release
+
+# Every push to main builds the app and publishes a DMG on a new release.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain versions
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Run tests
+        run: swift test
+
+      - name: Build app
+        run: scripts/build-app.sh
+
+      - name: Build DMG
+        run: scripts/build-dmg.sh
+
+      - name: Create release with DMG
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(plutil -extract CFBundleShortVersionString raw "build/Smart Voices.app/Contents/Info.plist")
+          TAG="v${VERSION}-build.${{ github.run_number }}"
+          gh release create "$TAG" \
+            "build/SmartVoices-${VERSION}.dmg" \
+            --title "Smart Voices ${VERSION} (build ${{ github.run_number }})" \
+            --notes "Automated build from main (${{ github.sha }}). Download the DMG, open it, and drag Smart Voices to Applications."
