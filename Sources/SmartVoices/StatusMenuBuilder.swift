@@ -102,6 +102,31 @@ extension AppDelegate {
         speedItem.submenu = speedMenu
         menu.addItem(speedItem)
 
+        let sleepTitle: String
+        if let left = sleepTimer.remaining {
+            sleepTitle = "Sleep Timer (\(SleepTimer.format(remaining: left)) left)"
+        } else {
+            sleepTitle = "Sleep Timer"
+        }
+        let sleepItem = NSMenuItem(title: sleepTitle, action: nil, keyEquivalent: "")
+        let sleepMenu = NSMenu()
+        let off = NSMenuItem(title: "Off", action: #selector(setSleepTimer(_:)), keyEquivalent: "")
+        off.target = self
+        off.representedObject = 0
+        off.state = sleepMinutes == nil ? .on : .off
+        sleepMenu.addItem(off)
+        for minutes in SleepTimer.menuMinutes {
+            let item = NSMenuItem(
+                title: "\(minutes) minutes", action: #selector(setSleepTimer(_:)),
+                keyEquivalent: "")
+            item.target = self
+            item.representedObject = minutes
+            item.state = sleepMinutes == minutes ? .on : .off
+            sleepMenu.addItem(item)
+        }
+        sleepItem.submenu = sleepMenu
+        menu.addItem(sleepItem)
+
         let voiceItem = NSMenuItem(title: "Voice", action: nil, keyEquivalent: "")
         let voiceMenu = NSMenu()
         if cachedVoices.isEmpty {

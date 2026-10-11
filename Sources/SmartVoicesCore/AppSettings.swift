@@ -211,6 +211,18 @@ public final class AppSettings {
         }
     }
 
+    @ObservationIgnored private var _autoReadClipboard: Bool
+    public var autoReadClipboard: Bool {
+        get {
+            access(keyPath: \.autoReadClipboard)
+            return _autoReadClipboard
+        }
+        set {
+            withMutation(keyPath: \.autoReadClipboard) { _autoReadClipboard = newValue }
+            defaults.set(newValue, forKey: "sv.autoReadClipboard")
+        }
+    }
+
     @ObservationIgnored private var _conversationalMode: Bool
     public var conversationalMode: Bool {
         get {
@@ -332,6 +344,11 @@ public final class AppSettings {
             self._conversationalMode = defaults.bool(forKey: "sv.conversationalMode")
         } else {
             self._conversationalMode = false
+        }
+        if defaults.object(forKey: "sv.autoReadClipboard") != nil {
+            self._autoReadClipboard = defaults.bool(forKey: "sv.autoReadClipboard")
+        } else {
+            self._autoReadClipboard = false
         }
         if defaults.object(forKey: "sv.autoSwitchLanguage") != nil {
             self._autoSwitchLanguage = defaults.bool(forKey: "sv.autoSwitchLanguage")

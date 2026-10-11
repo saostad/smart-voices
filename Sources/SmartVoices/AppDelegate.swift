@@ -29,6 +29,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var cachedVoices: [VoiceInfo] = []
     private var routedVoiceName: String?
     private var routedReaderCaption: String?
+    let sleepTimer = SleepTimer()
+    var sleepMinutes: Int?
     private var prepareGeneration = 0
     private var voicesGeneration = 0
 
@@ -338,6 +340,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    @objc func setSleepTimer(_ sender: NSMenuItem) {
+        guard let minutes = sender.representedObject as? Int else { return }
+        if minutes <= 0 {
+            sleepTimer.cancel()
+            sleepMinutes = nil
+            return
+        }
+        sleepMinutes = minutes
+        sleepTimer.start(seconds: TimeInterval(minutes * 60)) { [weak self] in
+            guard let self else { return }
+            MainActor.assumeIsolated {
+                self.sleepMinutes = nil
+                self.playback.stop()
+                appLogger.notice("sleep timer fired; playback stopped")
+            }
+        }
+    }
+
     @objc func setVoice(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String else { return }
         setVoice(id: id)
@@ -559,6 +579,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             _ = monitor.hasUnreadContent
             _ = settings.showReaderPanel
             _ = settings.watchClipboard
+            _ = settings.autoReadClipboard
             _ = settings.ignoredAppBundleIDs
             _ = settings.minimumReadyLength
             _ = settings.codeBlocks
@@ -591,6 +612,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if self.playback.state == .idle {
                     self.routedVoiceName = nil
                     self.routedReaderCaption = nil
+                }
+                if self.settings.autoReadClipboard, self.monitor.hasUnreadContent,
+                    self.playback.state == .idle, !self.exporter.isExporting
+                {
+                    self.readClipboardAndPlay()
                 }
                 self.updateReaderPanel()
                 self.updateNowPlaying()

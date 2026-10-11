@@ -38,6 +38,8 @@ struct GeneralSettingsView: View {
                 Section("Clipboard") {
                     Toggle("Watch the clipboard", isOn: $settings.watchClipboard)
                     Explanation(text: "Shows a play badge in the menu bar when you copy new text. Smart Voices only reads the clipboard when you press play.")
+                    Toggle("Read new copies automatically", isOn: $settings.autoReadClipboard)
+                    Explanation(text: "Starts reading as soon as you copy text.")
                     Stepper(
                         "Minimum text length: \(settings.minimumReadyLength) characters",
                         value: $settings.minimumReadyLength, in: 1...1000)
