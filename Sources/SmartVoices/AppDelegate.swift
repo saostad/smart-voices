@@ -24,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let servicesProvider = ServicesProvider()
     private let reader = ReaderPanelController()
     private var readerHideTimer: Timer?
+    private var readerDismissedReadingID: Int?
     private var engineLoading = false
     var engineLoadFailed = false
     var cachedVoices: [VoiceInfo] = []
@@ -411,6 +412,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func showReaderPanel(_ sender: Any?) {
         readerHideTimer?.invalidate()
         readerHideTimer = nil
+        readerDismissedReadingID = nil
         presentReader()
     }
 
@@ -430,6 +432,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onClose: { [weak self] in
                 self?.readerHideTimer?.invalidate()
                 self?.readerHideTimer = nil
+                self?.readerDismissedReadingID = self?.playback.readingID
+                appLogger.notice("reading panel closed; hidden until the next reading")
                 self?.reader.hide()
             })
     }
@@ -458,7 +462,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if active {
             readerHideTimer?.invalidate()
             readerHideTimer = nil
-            if settings.showReaderPanel {
+            if ReaderPanelPolicy.shouldShow(
+                isActive: active, showSetting: settings.showReaderPanel,
+                dismissedReadingID: readerDismissedReadingID,
+                currentReadingID: playback.readingID
+            ) {
                 presentReader()
             }
         } else if reader.isVisible {
