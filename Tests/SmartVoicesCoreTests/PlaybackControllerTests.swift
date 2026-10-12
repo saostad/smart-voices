@@ -333,4 +333,48 @@ struct PlaybackControllerTests {
         #expect(controller.currentChunkStartedAt == nil)
         #expect(controller.currentChunkDuration == 0)
     }
+
+    @Test func newPlayMidReadingDropsOldChunks() async {
+        let engine = FakeEngine()
+        let output = FakeOutput()
+        output.autoComplete = false
+        let controller = PlaybackController(engine: engine, output: output)
+        controller.play(
+            text: "Alpha one. Apple two. Amber three. August four. Anchor five.")
+        await waitForPlays(output, count: 1)
+        #expect(output.playCalls.count == 1)
+        let stopsBefore = output.stopCount
+        let playsBefore = output.playCalls.count
+        controller.play(text: "Beta one. Bravo two.")
+        #expect(output.stopCount > stopsBefore)
+        output.autoComplete = true
+        output.completeAll()
+        await waitForIdle(controller)
+        #expect(controller.state == .idle)
+        let newPlays = output.playCalls.dropFirst(playsBefore)
+        #expect(newPlays.count == 2)
+        #expect(newPlays.allSatisfy { $0.samples.first == Float(66) })
+    }
+
+    @Test func newPlayWhilePausedStartsNewText() async {
+        let engine = FakeEngine()
+        let output = FakeOutput()
+        output.autoComplete = false
+        let controller = PlaybackController(engine: engine, output: output)
+        controller.play(
+            text: "Alpha one. Apple two. Amber three. August four. Anchor five.")
+        await waitForPlays(output, count: 1)
+        controller.pause()
+        #expect(controller.state == .paused)
+        let playsBefore = output.playCalls.count
+        controller.play(text: "Beta one. Bravo two.")
+        #expect(controller.state != .paused)
+        output.autoComplete = true
+        output.completeAll()
+        await waitForIdle(controller)
+        #expect(controller.state == .idle)
+        let newPlays = output.playCalls.dropFirst(playsBefore)
+        #expect(newPlays.count == 2)
+        #expect(newPlays.allSatisfy { $0.samples.first == Float(66) })
+    }
 }
