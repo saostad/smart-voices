@@ -613,9 +613,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.routedVoiceName = nil
                     self.routedReaderCaption = nil
                 }
-                if self.settings.autoReadClipboard, self.monitor.hasUnreadContent,
-                    self.playback.state == .idle, !self.exporter.isExporting
-                {
+                if AutoReadPolicy.shouldRead(
+                    autoReadEnabled: self.settings.autoReadClipboard,
+                    hasUnreadContent: self.monitor.hasUnreadContent,
+                    isExporting: self.exporter.isExporting
+                ) {
+                    if self.playback.state != .idle {
+                        appLogger.notice("new clipboard copy: stopping current reading to read the new text")
+                    }
                     self.readClipboardAndPlay()
                 }
                 self.updateReaderPanel()
