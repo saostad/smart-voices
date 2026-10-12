@@ -377,4 +377,40 @@ struct PlaybackControllerTests {
         #expect(newPlays.count == 2)
         #expect(newPlays.allSatisfy { $0.samples.first == Float(66) })
     }
+
+    @Test func readingIDIncrementsOnlyOnPlay() async {
+        let engine = FakeEngine()
+        let output = FakeOutput()
+        output.autoComplete = false
+        let controller = PlaybackController(engine: engine, output: output)
+        #expect(controller.readingID == 0)
+        controller.play(text: "First sentence. Second sentence. Third sentence.")
+        #expect(controller.readingID == 1)
+        await waitForPlays(output, count: 1)
+        controller.pause()
+        #expect(controller.readingID == 1)
+        controller.resume()
+        #expect(controller.readingID == 1)
+        controller.skipForward()
+        #expect(controller.readingID == 1)
+        controller.jump(to: 0)
+        #expect(controller.readingID == 1)
+        controller.stop()
+        #expect(controller.readingID == 1)
+        controller.play(text: "Another reading. Second sentence.")
+        #expect(controller.readingID == 2)
+        output.autoComplete = true
+        output.completeAll()
+        await waitForIdle(controller)
+    }
+
+    @Test func emptyPlayStillIncrementsReadingID() {
+        let engine = FakeEngine()
+        let output = FakeOutput()
+        let controller = PlaybackController(engine: engine, output: output)
+        controller.play(text: "   ")
+        #expect(controller.readingID == 1)
+        controller.play(text: "Real sentence here.")
+        #expect(controller.readingID == 2)
+    }
 }

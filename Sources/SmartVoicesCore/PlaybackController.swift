@@ -11,6 +11,7 @@ public final class PlaybackController {
     }
 
     public var state: PlaybackState = .idle
+    public private(set) var readingID = 0
     public var currentChunkIndex: Int = 0
     public var chunks: [SpeechChunk] = []
     public var lastError: String?
@@ -60,6 +61,7 @@ public final class PlaybackController {
     public func play(
         text: String, engineOverride: (any SpeechEngine)? = nil, voiceOverride: String? = nil
     ) {
+        readingID += 1
         generation += 1
         playbackTask?.cancel()
         playbackTask = nil
