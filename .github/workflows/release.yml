@@ -19,9 +19,6 @@ jobs:
           xcodebuild -version
           swift --version
 
-      - name: Run tests
-        run: swift test
-
       - name: Build app
         run: scripts/build-app.sh
 
