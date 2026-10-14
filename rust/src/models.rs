@@ -35,7 +35,7 @@ impl fmt::Display for ModelError {
             }
             ModelError::Unpack { dir, message } => write!(
                 f,
-                "Couldn't unpack the voice model into {}: {message}",
+                "Couldn't download or unpack the voice model into {}: {message}",
                 dir.display()
             ),
             ModelError::Incomplete { path } => write!(
@@ -106,7 +106,15 @@ pub fn download(
     };
 
     let url = variant.url();
-    let response = ureq::get(url).call().map_err(|err| {
+    // Timeouts so a stalled connection can't hang forever; no overall
+    // timeout since the file is ~350 MB. Proxy comes from the environment
+    // (HTTP_PROXY/HTTPS_PROXY/ALL_PROXY, any case).
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(15))
+        .timeout_read(Duration::from_secs(30))
+        .try_proxy_from_env(true)
+        .build();
+    let response = agent.get(url).call().map_err(|err| {
         cleanup(&partial);
         ModelError::Download {
             url: url.to_string(),
