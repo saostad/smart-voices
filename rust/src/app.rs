@@ -45,6 +45,10 @@ enum AppEvent {
     Tray(TrayIconEvent),
     Menu(MenuEvent),
     Shortcut(GlobalHotKeyEvent),
+    #[cfg(target_os = "linux")]
+    PortalShortcut(ShortcutAction),
+    #[cfg(target_os = "linux")]
+    PortalError(String),
     DownloadProgress(ModelId, u64, Option<u64>),
     DownloadDone(Result<(), String>),
 }
@@ -1118,9 +1122,12 @@ impl App {
     /// taken by another app) shows an error but never stops the app or the
     /// other shortcuts.
     fn register_shortcuts(&mut self) {
+        // On Wayland, global-hotkey's X11 grab can't see keys from native
+        // Wayland apps; bind through the XDG GlobalShortcuts portal instead.
         #[cfg(target_os = "linux")]
         if std::env::var("WAYLAND_DISPLAY").is_ok() {
-            eprintln!("Note: global shortcuts on Wayland only work in X11 apps for now.");
+            self.register_portal_shortcuts();
+            return;
         }
         let manager = match GlobalHotKeyManager::new() {
             Ok(manager) => manager,
@@ -1159,6 +1166,23 @@ impl App {
         self.hotkey_manager = Some(manager);
     }
 
+    /// Bind the four shortcuts through the XDG portal on a dedicated
+    /// thread (Linux/Wayland only); activations and failures come back as
+    /// loop events and run the same actions as the X11 path.
+    #[cfg(target_os = "linux")]
+    fn register_portal_shortcuts(&mut self) {
+        let shortcuts = self.settings.shortcuts.clone();
+        let proxy = self.proxy.clone();
+        let activations = proxy.clone();
+        std::thread::spawn(move || {
+            if let Err(message) = crate::shortcuts::portal::run(&shortcuts, move |action| {
+                let _ = activations.send_event(AppEvent::PortalShortcut(action));
+            }) {
+                let _ = proxy.send_event(AppEvent::PortalError(message));
+            }
+        });
+    }
+
     fn on_shortcut(&mut self, event: GlobalHotKeyEvent) {
         if event.state() != HotKeyState::Pressed {
             return;
@@ -1168,7 +1192,13 @@ impl App {
             .iter()
             .find(|(id, _)| *id == event.id())
             .map(|(_, action)| *action);
-        match action {
+        if let Some(action) = action {
+            self.on_shortcut_action(action);
+        }
+    }
+
+    fn on_shortcut_action(&mut self, action: ShortcutAction) {
+        match Some(action) {
             Some(ShortcutAction::ReadOrPause) => {
                 if self.paused {
                     if let Some(player) = &self.player {
@@ -1225,6 +1255,10 @@ impl ApplicationHandler<AppEvent> for App {
             AppEvent::Tray(event) => self.on_tray_event(event),
             AppEvent::Menu(event) => self.on_menu_event(event_loop, event),
             AppEvent::Shortcut(event) => self.on_shortcut(event),
+            #[cfg(target_os = "linux")]
+            AppEvent::PortalShortcut(action) => self.on_shortcut_action(action),
+            #[cfg(target_os = "linux")]
+            AppEvent::PortalError(message) => self.show_error(&message),
             AppEvent::DownloadProgress(model, done, total) => {
                 self.on_download_progress(model, done, total)
             }

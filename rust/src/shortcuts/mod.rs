@@ -2,6 +2,9 @@
 //! stored in `Settings::shortcuts` (`HotKey::from_str` syntax, e.g.
 //! `"ctrl+alt+Space"`).
 
+#[cfg(target_os = "linux")]
+pub mod portal;
+
 use global_hotkey::hotkey::HotKey;
 
 /// What a registered global shortcut does.
@@ -111,6 +114,92 @@ fn mod_label(name: &str) -> &'static str {
     }
 }
 
+/// Convert a settings binding (`"ctrl+alt+Space"`, `HotKey::from_str`
+/// syntax) to the XDG GlobalShortcuts portal trigger syntax
+/// (`"CTRL+ALT+space"`). Returns `None` for an empty (disabled) binding.
+/// Unknown key names pass through unchanged; the portal then rejects the
+/// bind and it surfaces as a portal error.
+pub fn portal_trigger(binding: &str) -> Option<String> {
+    if binding.trim().is_empty() {
+        return None;
+    }
+    let mut mods: Vec<&str> = Vec::new();
+    let mut key: Option<&str> = None;
+    for token in binding.split('+') {
+        let token = token.trim();
+        if token.is_empty() {
+            continue;
+        }
+        match token.to_uppercase().as_str() {
+            "CTRL" | "CONTROL" | "COMMANDORCONTROL" | "COMMANDORCTRL" | "CMDORCTRL"
+            | "CMDORCONTROL" => push_unique(&mut mods, "CTRL"),
+            "ALT" | "OPTION" => push_unique(&mut mods, "ALT"),
+            "SHIFT" => push_unique(&mut mods, "SHIFT"),
+            "SUPER" | "META" | "CMD" | "COMMAND" => push_unique(&mut mods, "SUPER"),
+            _ => key = Some(token),
+        }
+    }
+    // Canonical modifier order, whatever order the file used.
+    mods.sort_by_key(|name| match *name {
+        "CTRL" => 0,
+        "ALT" => 1,
+        "SHIFT" => 2,
+        _ => 3,
+    });
+    let mut parts: Vec<String> = mods.iter().map(ToString::to_string).collect();
+    match key {
+        Some(token) => parts.push(portal_key(token)),
+        // No key part at all (e.g. `"ctrl+alt"`): pass the raw binding
+        // through so the portal rejects it loudly instead of binding
+        // something unexpected.
+        None => parts.push(binding.trim().to_string()),
+    }
+    Some(parts.join("+"))
+}
+
+/// Map the main key to its portal trigger name: `Space` → `space`, `Period`
+/// → `period`, arrows → `Right`/`Left`/`Up`/`Down`, single characters
+/// lowercased, function keys uppercased; anything else passes through.
+fn portal_key(token: &str) -> String {
+    match token.to_uppercase().as_str() {
+        "SPACE" => "space".to_string(),
+        "PERIOD" | "." => "period".to_string(),
+        "COMMA" | "," => "comma".to_string(),
+        "SLASH" | "/" => "slash".to_string(),
+        "SEMICOLON" | ";" => "semicolon".to_string(),
+        "MINUS" | "-" => "minus".to_string(),
+        "EQUAL" | "=" => "equal".to_string(),
+        "ARROWRIGHT" | "RIGHT" => "Right".to_string(),
+        "ARROWLEFT" | "LEFT" => "Left".to_string(),
+        "ARROWUP" | "UP" => "Up".to_string(),
+        "ARROWDOWN" | "DOWN" => "Down".to_string(),
+        "ESCAPE" | "ESC" => "Escape".to_string(),
+        "TAB" => "Tab".to_string(),
+        "BACKSPACE" => "BackSpace".to_string(),
+        "RETURN" | "ENTER" => "Return".to_string(),
+        "DELETE" | "DEL" => "Delete".to_string(),
+        "HOME" => "Home".to_string(),
+        "END" => "End".to_string(),
+        "PAGEUP" => "Page_Up".to_string(),
+        "PAGEDOWN" => "Page_Down".to_string(),
+        "INSERT" | "INS" => "Insert".to_string(),
+        _ if token.chars().count() == 1 => token.to_lowercase(),
+        _ if is_function_key(token) => token.to_uppercase(),
+        _ => token.to_string(),
+    }
+}
+
+/// `F1`–`F24`, case-insensitive. The `[1..]` slice is safe: the token starts
+/// with ASCII `F`/`f`, so byte 1 is a char boundary (and `"F"[1..]` is just
+/// empty, which fails the number parse).
+fn is_function_key(token: &str) -> bool {
+    token.len() <= 3
+        && token.starts_with(['F', 'f'])
+        && token[1..]
+            .parse::<u8>()
+            .is_ok_and(|n| (1..=24).contains(&n))
+}
+
 /// Display text for the main key: punctuation and arrows become glyphs,
 /// single characters are uppercased, other names are shown as-is.
 fn format_key(token: &str) -> String {
@@ -207,5 +296,56 @@ mod tests {
         assert_eq!(formatted, "\u{2303}frobnicate");
         #[cfg(not(target_os = "macos"))]
         assert_eq!(formatted, "Ctrl+frobnicate");
+    }
+
+    #[test]
+    fn portal_triggers_for_the_default_bindings() {
+        assert_eq!(
+            portal_trigger("ctrl+alt+Space"),
+            Some("CTRL+ALT+space".to_string())
+        );
+        assert_eq!(
+            portal_trigger("ctrl+alt+Period"),
+            Some("CTRL+ALT+period".to_string())
+        );
+        assert_eq!(
+            portal_trigger("ctrl+alt+ArrowRight"),
+            Some("CTRL+ALT+Right".to_string())
+        );
+        assert_eq!(
+            portal_trigger("ctrl+alt+ArrowLeft"),
+            Some("CTRL+ALT+Left".to_string())
+        );
+    }
+
+    #[test]
+    fn portal_trigger_rules() {
+        assert_eq!(portal_trigger(""), None);
+        assert_eq!(portal_trigger("   "), None);
+        // Canonical modifier order, whatever order the file used.
+        assert_eq!(portal_trigger("alt+ctrl+q"), Some("CTRL+ALT+q".to_string()));
+        assert_eq!(
+            portal_trigger("super+shift+alt+ctrl+F5"),
+            Some("CTRL+ALT+SHIFT+SUPER+F5".to_string())
+        );
+        // Single characters are lowercased, digits pass through.
+        assert_eq!(portal_trigger("ctrl+Q"), Some("CTRL+q".to_string()));
+        assert_eq!(portal_trigger("ctrl+5"), Some("CTRL+5".to_string()));
+        // Named keys.
+        assert_eq!(
+            portal_trigger("ctrl+Escape"),
+            Some("CTRL+Escape".to_string())
+        );
+        assert_eq!(portal_trigger("alt+F12"), Some("ALT+F12".to_string()));
+        // Unknown key names pass through for the portal to reject.
+        assert_eq!(
+            portal_trigger("ctrl+frobnicate"),
+            Some("CTRL+frobnicate".to_string())
+        );
+        // No key part: the raw binding passes through.
+        assert_eq!(
+            portal_trigger("ctrl+alt"),
+            Some("CTRL+ALT+ctrl+alt".to_string())
+        );
     }
 }
