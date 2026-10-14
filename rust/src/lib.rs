@@ -6,6 +6,7 @@ pub mod chunk;
 pub mod clipboard;
 pub mod engine;
 pub mod icon;
+pub mod lang;
 pub mod models;
 pub mod pipeline;
 pub mod player;
