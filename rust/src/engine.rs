@@ -4,13 +4,81 @@ use std::error::Error;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
 use sherpa_onnx::{
     GenerationConfig, OfflineTts, OfflineTtsConfig, OfflineTtsKokoroModelConfig,
     OfflineTtsModelConfig,
 };
 
-/// Model directory name under the models root.
-const MODEL_DIR_NAME: &str = "kokoro-int8-multi-lang-v1_0";
+/// Downloadable model variant: full-precision (fast) or int8 (small).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ModelVariant {
+    /// Full-precision model: larger download, faster synthesis.
+    #[default]
+    Fast,
+    /// Quantized int8 model: smaller download, slower synthesis.
+    Small,
+}
+
+impl ModelVariant {
+    /// Parse a CLI value (`"fast"` or `"small"`).
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "fast" => Some(Self::Fast),
+            "small" => Some(Self::Small),
+            _ => None,
+        }
+    }
+
+    /// Directory name under the models root.
+    pub fn dir_name(self) -> &'static str {
+        match self {
+            Self::Fast => "kokoro-multi-lang-v1_0",
+            Self::Small => "kokoro-int8-multi-lang-v1_0",
+        }
+    }
+
+    /// ONNX model file name inside the model dir.
+    pub fn model_file(self) -> &'static str {
+        match self {
+            Self::Fast => "model.onnx",
+            Self::Small => "model.int8.onnx",
+        }
+    }
+
+    /// Download URL of the `.tar.bz2` archive.
+    pub fn url(self) -> &'static str {
+        match self {
+            Self::Fast => {
+                "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-multi-lang-v1_0.tar.bz2"
+            }
+            Self::Small => {
+                "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-int8-multi-lang-v1_0.tar.bz2"
+            }
+        }
+    }
+
+    /// Human-readable label for download progress.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Fast => "Fast (larger download, ~350 MB)",
+            Self::Small => "Small (slower, ~130 MB)",
+        }
+    }
+
+    /// Files and dirs that must exist inside the model dir (model file first).
+    pub fn required_files(self) -> [&'static str; 6] {
+        [
+            self.model_file(),
+            "voices.bin",
+            "tokens.txt",
+            "espeak-ng-data",
+            "dict",
+            "lexicon-us-en.txt",
+        ]
+    }
+}
 
 /// English Kokoro voices in speaker-id order (sid = index).
 pub const VOICES: [&str; 28] = [
@@ -105,20 +173,12 @@ pub struct KokoroEngine {
 }
 
 impl KokoroEngine {
-    /// Load the voice model from `models_root/kokoro-int8-multi-lang-v1_0`.
-    pub fn load(models_root: &Path) -> Result<Self, EngineError> {
-        let dir = models_root.join(MODEL_DIR_NAME);
-        // Checked in this order; the model file first so a bare directory
-        // reports the most actionable missing path.
-        let required = [
-            "model.int8.onnx",
-            "voices.bin",
-            "tokens.txt",
-            "espeak-ng-data",
-            "dict",
-            "lexicon-us-en.txt",
-        ];
-        for name in required {
+    /// Load the voice model variant from `models_root/<variant dir>`.
+    pub fn load(models_root: &Path, variant: ModelVariant) -> Result<Self, EngineError> {
+        let dir = models_root.join(variant.dir_name());
+        // The model file is checked first so a bare directory reports the
+        // most actionable missing path.
+        for name in variant.required_files() {
             let path = dir.join(name);
             if !path.exists() {
                 return Err(EngineError::MissingModel(path));
@@ -129,11 +189,11 @@ impl KokoroEngine {
         let num_threads = std::thread::available_parallelism()
             .map(|n| n.get())
             .unwrap_or(1)
-            .clamp(1, 4) as i32;
+            .clamp(1, 8) as i32;
         let config = OfflineTtsConfig {
             model: OfflineTtsModelConfig {
                 kokoro: OfflineTtsKokoroModelConfig {
-                    model: Some(path_string("model.int8.onnx")),
+                    model: Some(path_string(variant.model_file())),
                     voices: Some(path_string("voices.bin")),
                     tokens: Some(path_string("tokens.txt")),
                     data_dir: Some(path_string("espeak-ng-data")),
@@ -228,14 +288,39 @@ mod tests {
     fn load_on_empty_dir_reports_missing_model_file() {
         let dir = unique_temp_dir();
         std::fs::create_dir_all(&dir).unwrap();
-        let result = KokoroEngine::load(&dir);
+        let result = KokoroEngine::load(&dir, ModelVariant::Small);
         std::fs::remove_dir_all(&dir).unwrap();
         match result {
             Err(EngineError::MissingModel(path)) => {
-                assert_eq!(path, dir.join(MODEL_DIR_NAME).join("model.int8.onnx"));
+                assert_eq!(
+                    path,
+                    dir.join(ModelVariant::Small.dir_name())
+                        .join("model.int8.onnx")
+                );
             }
             Ok(_) => panic!("expected MissingModel, got Ok"),
             Err(other) => panic!("expected MissingModel, got {other}"),
+        }
+    }
+
+    #[test]
+    fn each_variant_missing_model_names_its_own_model_file() {
+        for variant in [ModelVariant::Fast, ModelVariant::Small] {
+            let dir = unique_temp_dir();
+            std::fs::create_dir_all(&dir).unwrap();
+            let result = KokoroEngine::load(&dir, variant);
+            std::fs::remove_dir_all(&dir).unwrap();
+            match result {
+                Err(EngineError::MissingModel(path)) => {
+                    assert_eq!(
+                        path,
+                        dir.join(variant.dir_name()).join(variant.model_file()),
+                        "variant {variant:?}"
+                    );
+                }
+                Ok(_) => panic!("expected MissingModel, got Ok ({variant:?})"),
+                Err(other) => panic!("expected MissingModel, got {other} ({variant:?})"),
+            }
         }
     }
 

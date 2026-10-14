@@ -2,9 +2,10 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use smart_voices::audio::AudioOut;
-use smart_voices::engine::{DEFAULT_VOICE, KokoroEngine};
+use smart_voices::engine::{DEFAULT_VOICE, KokoroEngine, ModelVariant};
 
-const USAGE: &str = "Usage: smart-voices speak \"<text>\" [--voice <name>] [--speed <f>]";
+const USAGE: &str =
+    "Usage: smart-voices speak \"<text>\" [--voice <name>] [--speed <f>] [--model fast|small]";
 
 fn main() {
     std::process::exit(run());
@@ -25,12 +26,14 @@ struct SpeakOptions {
     text: String,
     voice: String,
     speed: f32,
+    model: ModelVariant,
 }
 
 fn parse_speak(args: &[String]) -> Option<SpeakOptions> {
     let mut text: Option<String> = None;
     let mut voice = DEFAULT_VOICE.to_string();
     let mut speed = 1.0;
+    let mut model = ModelVariant::Fast;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -41,6 +44,10 @@ fn parse_speak(args: &[String]) -> Option<SpeakOptions> {
             "--speed" => {
                 i += 1;
                 speed = args.get(i)?.parse::<f32>().ok()?;
+            }
+            "--model" => {
+                i += 1;
+                model = ModelVariant::parse(args.get(i)?)?;
             }
             flag if flag.starts_with("--") => return None,
             positional => {
@@ -56,6 +63,7 @@ fn parse_speak(args: &[String]) -> Option<SpeakOptions> {
         text: text?,
         voice,
         speed,
+        model,
     })
 }
 
@@ -82,7 +90,7 @@ fn speak(args: &[String]) -> i32 {
     };
 
     let started = Instant::now();
-    let engine = match KokoroEngine::load(&models_root) {
+    let engine = match KokoroEngine::load(&models_root, options.model) {
         Ok(engine) => engine,
         Err(err) => {
             eprintln!("Error: {err}");
@@ -99,11 +107,16 @@ fn speak(args: &[String]) -> i32 {
             return 1;
         }
     };
+    let synth_elapsed = started.elapsed();
     let rate = engine.sample_rate();
     let seconds = samples.len() as f32 / rate as f32;
     eprintln!(
         "Synthesized {seconds:.2} s of audio in {} ms",
-        started.elapsed().as_millis()
+        synth_elapsed.as_millis()
+    );
+    eprintln!(
+        "Real-time factor: {:.2}",
+        synth_elapsed.as_secs_f32() / seconds
     );
 
     let rate = match u32::try_from(rate) {
