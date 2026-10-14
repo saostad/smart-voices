@@ -25,7 +25,7 @@ use crate::audio::AudioSink;
 use crate::clipboard::{self, ClipboardEvent, MIN_TEXT_LEN};
 use crate::engine::{KokoroEngine, ModelVariant, VOICES, voice_display_name};
 use crate::icon;
-use crate::models;
+use crate::models::{self, ModelId};
 use crate::player::{Player, PlayerConfig, PlayerEvent, PlayerState, Synth};
 use crate::pronounce::{Pronunciations, pronunciations_path};
 use crate::sanitize::SanitizerOptions;
@@ -594,7 +594,7 @@ impl App {
 
     fn play_text(&mut self, text: String) {
         self.reload_pronunciations();
-        if !models::is_installed(&self.models_root, self.model) {
+        if !models::is_installed(&self.models_root, ModelId::Kokoro(self.model)) {
             // Download on a worker thread, then play; a newer request while
             // a download runs replaces the pending text.
             self.pending_text = Some(text);
@@ -619,10 +619,10 @@ impl App {
         self.set_status("Downloading voice…");
         let proxy = self.proxy.clone();
         let root = self.models_root.clone();
-        let variant = self.model;
+        let model = ModelId::Kokoro(self.model);
         std::thread::spawn(move || {
             let mut last_report: Option<Instant> = None;
-            let result = models::download(&root, variant, |done, total| {
+            let result = models::download(&root, model, |done, total| {
                 let now = Instant::now();
                 let due = last_report.is_none_or(|last| now - last >= Duration::from_millis(500));
                 if due {

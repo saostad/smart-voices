@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use sherpa_onnx::{
     GenerationConfig, OfflineTts, OfflineTtsConfig, OfflineTtsKokoroModelConfig,
-    OfflineTtsModelConfig,
+    OfflineTtsModelConfig, OfflineTtsVitsModelConfig,
 };
 
 /// Downloadable model variant: full-precision (fast) or int8 (small).
@@ -77,6 +77,117 @@ impl ModelVariant {
             "dict",
             "lexicon-us-en.txt",
         ]
+    }
+}
+
+/// Persian Piper (VITS) voices, one downloadable model each.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PersianVoice {
+    /// `amir` (default).
+    #[default]
+    Amir,
+    /// `gyro`.
+    Gyro,
+    /// `reza_ibrahim`.
+    RezaIbrahim,
+    /// `ganji`.
+    Ganji,
+    /// `ganji_adabi`.
+    GanjiAdabi,
+}
+
+/// All Persian voices, in menu order.
+pub const PERSIAN_VOICES: [PersianVoice; 5] = [
+    PersianVoice::Amir,
+    PersianVoice::Gyro,
+    PersianVoice::RezaIbrahim,
+    PersianVoice::Ganji,
+    PersianVoice::GanjiAdabi,
+];
+
+impl PersianVoice {
+    /// Parse a CLI value or settings id (`"amir"`, `"gyro"`, `"reza_ibrahim"`,
+    /// `"ganji"`, `"ganji_adabi"`).
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "amir" => Some(Self::Amir),
+            "gyro" => Some(Self::Gyro),
+            "reza_ibrahim" => Some(Self::RezaIbrahim),
+            "ganji" => Some(Self::Ganji),
+            "ganji_adabi" => Some(Self::GanjiAdabi),
+            _ => None,
+        }
+    }
+
+    /// Short id used in settings, the CLI, and file names.
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Amir => "amir",
+            Self::Gyro => "gyro",
+            Self::RezaIbrahim => "reza_ibrahim",
+            Self::Ganji => "ganji",
+            Self::GanjiAdabi => "ganji_adabi",
+        }
+    }
+
+    /// Human-readable label for the Settings menu.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Amir => "Amir",
+            Self::Gyro => "Gyro",
+            Self::RezaIbrahim => "Reza Ibrahim",
+            Self::Ganji => "Ganji",
+            Self::GanjiAdabi => "Ganji Adabi",
+        }
+    }
+
+    /// Directory name under the models root.
+    pub fn dir_name(self) -> &'static str {
+        match self {
+            Self::Amir => "vits-piper-fa_IR-amir-medium",
+            Self::Gyro => "vits-piper-fa_IR-gyro-medium",
+            Self::RezaIbrahim => "vits-piper-fa_IR-reza_ibrahim-medium",
+            Self::Ganji => "vits-piper-fa_IR-ganji-medium",
+            Self::GanjiAdabi => "vits-piper-fa_IR-ganji_adabi-medium",
+        }
+    }
+
+    /// ONNX model file name inside the model dir.
+    pub fn model_file(self) -> &'static str {
+        match self {
+            Self::Amir => "fa_IR-amir-medium.onnx",
+            Self::Gyro => "fa_IR-gyro-medium.onnx",
+            Self::RezaIbrahim => "fa_IR-reza_ibrahim-medium.onnx",
+            Self::Ganji => "fa_IR-ganji-medium.onnx",
+            Self::GanjiAdabi => "fa_IR-ganji_adabi-medium.onnx",
+        }
+    }
+
+    /// Download URL of the `.tar.bz2` archive.
+    pub fn url(self) -> &'static str {
+        match self {
+            Self::Amir => {
+                "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-fa_IR-amir-medium.tar.bz2"
+            }
+            Self::Gyro => {
+                "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-fa_IR-gyro-medium.tar.bz2"
+            }
+            Self::RezaIbrahim => {
+                "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-fa_IR-reza_ibrahim-medium.tar.bz2"
+            }
+            Self::Ganji => {
+                "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-fa_IR-ganji-medium.tar.bz2"
+            }
+            Self::GanjiAdabi => {
+                "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-fa_IR-ganji_adabi-medium.tar.bz2"
+            }
+        }
+    }
+
+    /// Files and dirs that must exist inside the model dir (model file first).
+    pub fn required_files(self) -> [&'static str; 3] {
+        [self.model_file(), "tokens.txt", "espeak-ng-data"]
     }
 }
 
@@ -152,8 +263,10 @@ pub fn voice_display_name(id: &str) -> Option<String> {
 pub enum EngineError {
     /// A required model file or directory is missing.
     MissingModel(PathBuf),
-    /// The model files exist but sherpa-onnx refused to load them.
+    /// The Kokoro model files exist but sherpa-onnx refused to load them.
     LoadFailed(PathBuf),
+    /// The Persian model files exist but sherpa-onnx refused to load them.
+    PersianLoadFailed(PathBuf),
     /// The requested voice name is not in [`VOICES`].
     UnknownVoice(String),
     /// Synthesis returned no audio samples.
@@ -171,6 +284,11 @@ impl fmt::Display for EngineError {
             EngineError::LoadFailed(dir) => write!(
                 f,
                 "Couldn't load the Kokoro voice model from {}. The files may be damaged; delete the folder and run `smart-voices download` again.",
+                dir.display()
+            ),
+            EngineError::PersianLoadFailed(dir) => write!(
+                f,
+                "Couldn't load the Persian voice model from {}. The files may be damaged; delete the folder and run `smart-voices download --persian` again.",
                 dir.display()
             ),
             EngineError::UnknownVoice(name) => {
@@ -194,6 +312,24 @@ impl fmt::Display for EngineError {
 
 impl Error for EngineError {}
 
+/// Synthesis thread count shared by both engines: available parallelism
+/// clamped to 1..=8.
+fn thread_count() -> i32 {
+    std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
+        .clamp(1, 8) as i32
+}
+
+/// Clamp `speed` to 0.5..=2.0 (non-finite values become 1.0).
+fn clamp_speed(speed: f32) -> f32 {
+    if speed.is_finite() {
+        speed.clamp(0.5, 2.0)
+    } else {
+        1.0
+    }
+}
+
 /// Loaded Kokoro TTS engine.
 pub struct KokoroEngine {
     tts: OfflineTts,
@@ -213,10 +349,7 @@ impl KokoroEngine {
         }
 
         let path_string = |name: &str| dir.join(name).to_string_lossy().into_owned();
-        let num_threads = std::thread::available_parallelism()
-            .map(|n| n.get())
-            .unwrap_or(1)
-            .clamp(1, 8) as i32;
+        let num_threads = thread_count();
         let config = OfflineTtsConfig {
             model: OfflineTtsModelConfig {
                 kokoro: OfflineTtsKokoroModelConfig {
@@ -255,14 +388,85 @@ impl KokoroEngine {
         // The crate passes text through CString::new().unwrap(), which would
         // abort the process (panic = "abort") on an interior NUL.
         let text = text.replace('\0', "");
-        let speed = if speed.is_finite() {
-            speed.clamp(0.5, 2.0)
-        } else {
-            1.0
-        };
+        let speed = clamp_speed(speed);
         let gen_config = GenerationConfig {
             sid,
             speed,
+            ..Default::default()
+        };
+        let audio =
+            self.tts
+                .generate_with_config(&text, &gen_config, None::<fn(&[f32], f32) -> bool>);
+        match audio {
+            Some(audio) => {
+                let samples = audio.samples().to_vec();
+                if samples.is_empty() {
+                    Err(EngineError::NoAudio(text))
+                } else {
+                    Ok(samples)
+                }
+            }
+            None => Err(EngineError::NoAudio(text)),
+        }
+    }
+}
+
+/// Loaded Persian Piper (VITS) TTS engine. Each voice is its own single-speaker
+/// model, so synthesis always uses sid 0.
+pub struct PiperEngine {
+    tts: OfflineTts,
+}
+
+impl PiperEngine {
+    /// Load the Persian voice model from `models_root/<voice dir>`.
+    pub fn load(models_root: &Path, voice: PersianVoice) -> Result<Self, EngineError> {
+        let dir = models_root.join(voice.dir_name());
+        // The model file is checked first so a bare directory reports the
+        // most actionable missing path.
+        for name in voice.required_files() {
+            let path = dir.join(name);
+            if !path.exists() {
+                return Err(EngineError::MissingModel(path));
+            }
+        }
+
+        let path_string = |name: &str| dir.join(name).to_string_lossy().into_owned();
+        let config = OfflineTtsConfig {
+            model: OfflineTtsModelConfig {
+                vits: OfflineTtsVitsModelConfig {
+                    model: Some(path_string(voice.model_file())),
+                    tokens: Some(path_string("tokens.txt")),
+                    data_dir: Some(path_string("espeak-ng-data")),
+                    ..Default::default()
+                },
+                num_threads: thread_count(),
+                provider: Some("cpu".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        match OfflineTts::create(&config) {
+            Some(tts) => Ok(Self { tts }),
+            None => Err(EngineError::PersianLoadFailed(dir)),
+        }
+    }
+
+    /// Output sample rate in Hz.
+    pub fn sample_rate(&self) -> i32 {
+        self.tts.sample_rate()
+    }
+
+    /// Synthesize `text` at `speed`, returning mono samples.
+    ///
+    /// `speed` is clamped to 0.5..=2.0 (non-finite values become 1.0).
+    pub fn synthesize(&self, text: &str, speed: f32) -> Result<Vec<f32>, EngineError> {
+        // The crate passes text through CString::new().unwrap(), which would
+        // abort the process (panic = "abort") on an interior NUL.
+        let text = text.replace('\0', "");
+        let gen_config = GenerationConfig {
+            sid: 0,
+            speed: clamp_speed(speed),
             ..Default::default()
         };
         let audio =
@@ -390,6 +594,100 @@ mod tests {
         assert_eq!(
             err.to_string(),
             "Voice model file not found: /x/model.onnx. Run `smart-voices download` to get it."
+        );
+    }
+
+    #[test]
+    fn persian_voice_ids_labels_and_paths() {
+        let expected = [
+            (
+                PersianVoice::Amir,
+                "amir",
+                "Amir",
+                "vits-piper-fa_IR-amir-medium",
+                "fa_IR-amir-medium.onnx",
+            ),
+            (
+                PersianVoice::Gyro,
+                "gyro",
+                "Gyro",
+                "vits-piper-fa_IR-gyro-medium",
+                "fa_IR-gyro-medium.onnx",
+            ),
+            (
+                PersianVoice::RezaIbrahim,
+                "reza_ibrahim",
+                "Reza Ibrahim",
+                "vits-piper-fa_IR-reza_ibrahim-medium",
+                "fa_IR-reza_ibrahim-medium.onnx",
+            ),
+            (
+                PersianVoice::Ganji,
+                "ganji",
+                "Ganji",
+                "vits-piper-fa_IR-ganji-medium",
+                "fa_IR-ganji-medium.onnx",
+            ),
+            (
+                PersianVoice::GanjiAdabi,
+                "ganji_adabi",
+                "Ganji Adabi",
+                "vits-piper-fa_IR-ganji_adabi-medium",
+                "fa_IR-ganji_adabi-medium.onnx",
+            ),
+        ];
+        assert_eq!(PERSIAN_VOICES.len(), expected.len());
+        for (voice, id, label, dir, file) in expected {
+            assert!(PERSIAN_VOICES.contains(&voice), "{id}");
+            assert_eq!(voice.id(), id);
+            assert_eq!(PersianVoice::parse(id), Some(voice));
+            assert_eq!(voice.label(), label);
+            assert_eq!(voice.dir_name(), dir);
+            assert_eq!(voice.model_file(), file);
+            assert_eq!(
+                voice.required_files(),
+                [file, "tokens.txt", "espeak-ng-data"]
+            );
+            assert_eq!(
+                voice.url(),
+                format!(
+                    "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/{dir}.tar.bz2"
+                )
+            );
+        }
+        assert_eq!(PersianVoice::parse("sara"), None);
+        assert_eq!(PersianVoice::parse(""), None);
+        assert_eq!(PersianVoice::default(), PersianVoice::Amir);
+    }
+
+    #[test]
+    fn each_persian_voice_missing_model_names_its_onnx_path() {
+        for voice in PERSIAN_VOICES {
+            let dir = unique_temp_dir();
+            std::fs::create_dir_all(&dir).unwrap();
+            let result = PiperEngine::load(&dir, voice);
+            std::fs::remove_dir_all(&dir).unwrap();
+            match result {
+                Err(EngineError::MissingModel(path)) => {
+                    assert_eq!(
+                        path,
+                        dir.join(voice.dir_name()).join(voice.model_file()),
+                        "voice {voice:?}"
+                    );
+                }
+                Ok(_) => panic!("expected MissingModel, got Ok ({voice:?})"),
+                Err(other) => panic!("expected MissingModel, got {other} ({voice:?})"),
+            }
+        }
+    }
+
+    #[test]
+    fn persian_load_failed_names_dir_and_persian_download() {
+        let err =
+            EngineError::PersianLoadFailed(PathBuf::from("/models/vits-piper-fa_IR-amir-medium"));
+        assert_eq!(
+            err.to_string(),
+            "Couldn't load the Persian voice model from /models/vits-piper-fa_IR-amir-medium. The files may be damaged; delete the folder and run `smart-voices download --persian` again."
         );
     }
 }

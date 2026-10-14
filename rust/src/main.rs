@@ -7,7 +7,7 @@ use smart_voices::app;
 use smart_voices::audio::AudioSink;
 use smart_voices::clipboard::{self, ClipboardEvent, MIN_TEXT_LEN};
 use smart_voices::engine::{KokoroEngine, ModelVariant};
-use smart_voices::models::{self, ModelError};
+use smart_voices::models::{self, ModelError, ModelId};
 use smart_voices::pipeline::prepare;
 use smart_voices::player::{Player, PlayerConfig, PlayerEvent, Synth};
 use smart_voices::pronounce::{Pronunciations, pronunciations_path};
@@ -185,8 +185,8 @@ fn speak(args: &[String]) -> i32 {
     let speed = options.speed.unwrap_or(settings.speed);
     let model = options.model.unwrap_or(settings.model);
 
-    if !models::is_installed(&models_root, model)
-        && let Err(err) = download_with_progress(&models_root, model)
+    if !models::is_installed(&models_root, ModelId::Kokoro(model))
+        && let Err(err) = download_with_progress(&models_root, ModelId::Kokoro(model))
     {
         eprintln!("Error: {err}");
         return 1;
@@ -273,7 +273,7 @@ fn download_cmd(args: &[String]) -> i32 {
         );
         return 1;
     };
-    match download_with_progress(&models_root, model) {
+    match download_with_progress(&models_root, ModelId::Kokoro(model)) {
         Ok(dir) => {
             eprintln!("Voice model ready at {}", dir.display());
             0
@@ -433,8 +433,9 @@ impl LazyPlayer {
             "Couldn't find the models folder: SMART_VOICES_MODELS is not set and no data directory is available."
                 .to_string()
         })?;
-        if !models::is_installed(&models_root, self.model) {
-            download_with_progress(&models_root, self.model).map_err(|err| err.to_string())?;
+        if !models::is_installed(&models_root, ModelId::Kokoro(self.model)) {
+            download_with_progress(&models_root, ModelId::Kokoro(self.model))
+                .map_err(|err| err.to_string())?;
         }
         let sink = AudioSink::new().map_err(|err| err.to_string())?;
         let config = PlayerConfig {
@@ -464,14 +465,14 @@ impl LazyPlayer {
     }
 }
 
-/// Download `variant` unless already installed, with a one-line stderr
+/// Download `model` unless already installed, with a one-line stderr
 /// progress display. Returns the install dir.
-fn download_with_progress(root: &Path, variant: ModelVariant) -> Result<PathBuf, ModelError> {
-    if models::is_installed(root, variant) {
-        return Ok(models::model_dir(root, variant));
+fn download_with_progress(root: &Path, model: ModelId) -> Result<PathBuf, ModelError> {
+    if models::is_installed(root, model) {
+        return Ok(models::model_dir(root, model));
     }
-    let label = variant.label();
-    let result = models::download(root, variant, |done, total| {
+    let label = model.label();
+    let result = models::download(root, model, |done, total| {
         const MB: f64 = 1_000_000.0;
         match total {
             Some(total) => eprint!(

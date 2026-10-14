@@ -9,7 +9,52 @@ use std::time::{Duration, Instant};
 use bzip2::read::BzDecoder;
 use tar::Archive;
 
-use crate::engine::ModelVariant;
+use crate::engine::{ModelVariant, PersianVoice};
+
+/// A downloadable voice model: a Kokoro variant or a Persian Piper voice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelId {
+    Kokoro(ModelVariant),
+    Persian(PersianVoice),
+}
+
+impl ModelId {
+    /// Directory name under the models root.
+    pub fn dir_name(self) -> &'static str {
+        match self {
+            Self::Kokoro(variant) => variant.dir_name(),
+            Self::Persian(voice) => voice.dir_name(),
+        }
+    }
+
+    /// Download URL of the `.tar.bz2` archive.
+    pub fn url(self) -> &'static str {
+        match self {
+            Self::Kokoro(variant) => variant.url(),
+            Self::Persian(voice) => voice.url(),
+        }
+    }
+
+    /// Human-readable label for download progress.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Kokoro(variant) => variant.label(),
+            Self::Persian(PersianVoice::Amir) => "Persian voice (Amir)",
+            Self::Persian(PersianVoice::Gyro) => "Persian voice (Gyro)",
+            Self::Persian(PersianVoice::RezaIbrahim) => "Persian voice (Reza Ibrahim)",
+            Self::Persian(PersianVoice::Ganji) => "Persian voice (Ganji)",
+            Self::Persian(PersianVoice::GanjiAdabi) => "Persian voice (Ganji Adabi)",
+        }
+    }
+
+    /// Files and dirs that must exist inside the model dir (model file first).
+    pub fn required_files(self) -> Vec<&'static str> {
+        match self {
+            Self::Kokoro(variant) => variant.required_files().to_vec(),
+            Self::Persian(voice) => voice.required_files().to_vec(),
+        }
+    }
+}
 
 /// Minimum time between progress callback invocations (at most ~10×/s).
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
@@ -54,28 +99,28 @@ impl fmt::Display for ModelError {
 
 impl Error for ModelError {}
 
-/// Final install dir for a variant: `root/<dir_name>`.
-pub fn model_dir(root: &Path, variant: ModelVariant) -> PathBuf {
-    root.join(variant.dir_name())
+/// Final install dir for a model: `root/<dir_name>`.
+pub fn model_dir(root: &Path, model: ModelId) -> PathBuf {
+    root.join(model.dir_name())
 }
 
 /// True when every required file is present in the install dir.
-pub fn is_installed(root: &Path, variant: ModelVariant) -> bool {
-    let dir = model_dir(root, variant);
-    variant
+pub fn is_installed(root: &Path, model: ModelId) -> bool {
+    let dir = model_dir(root, model);
+    model
         .required_files()
         .iter()
         .all(|name| dir.join(name).exists())
 }
 
 /// Staging dir used while downloading: `root/.<dir_name>.partial`.
-fn partial_path(root: &Path, variant: ModelVariant) -> PathBuf {
-    root.join(format!(".{}.partial", variant.dir_name()))
+fn partial_path(root: &Path, model: ModelId) -> PathBuf {
+    root.join(format!(".{}.partial", model.dir_name()))
 }
 
 /// Remove any leftover staging dir and create a fresh empty one.
-fn prepare_partial_dir(root: &Path, variant: ModelVariant) -> Result<PathBuf, ModelError> {
-    let partial = partial_path(root, variant);
+fn prepare_partial_dir(root: &Path, model: ModelId) -> Result<PathBuf, ModelError> {
+    let partial = partial_path(root, model);
     let unpack_err = |err: std::io::Error| ModelError::Unpack {
         dir: partial.clone(),
         message: err.to_string(),
@@ -89,23 +134,23 @@ fn prepare_partial_dir(root: &Path, variant: ModelVariant) -> Result<PathBuf, Mo
     Ok(partial)
 }
 
-/// Download `variant` into `root`, reporting `(bytes_done, total_bytes)`
+/// Download `model` into `root`, reporting `(bytes_done, total_bytes)`
 /// progress. Streams the response through the bzip2 decoder straight into
 /// the tar extractor (nothing is fully buffered in memory), verifies the
 /// required files, then renames the tree into place. Any failure removes the
 /// staging dir, so a half-extracted tree is never left behind.
 pub fn download(
     root: &Path,
-    variant: ModelVariant,
+    model: ModelId,
     mut progress: impl FnMut(u64, Option<u64>),
 ) -> Result<PathBuf, ModelError> {
-    let final_dir = model_dir(root, variant);
-    let partial = prepare_partial_dir(root, variant)?;
+    let final_dir = model_dir(root, model);
+    let partial = prepare_partial_dir(root, model)?;
     let cleanup = |partial: &Path| {
         let _ = std::fs::remove_dir_all(partial);
     };
 
-    let url = variant.url();
+    let url = model.url();
     // Timeouts so a stalled connection can't hang forever; no overall
     // timeout since the file is ~350 MB. Proxy comes from the environment
     // (HTTP_PROXY/HTTPS_PROXY/ALL_PROXY, any case).
@@ -144,13 +189,13 @@ pub fn download(
 
     // The sherpa tarballs wrap everything in a top-level `<dir_name>/` dir;
     // accept a flat tarball too.
-    let nested = partial.join(variant.dir_name());
+    let nested = partial.join(model.dir_name());
     let source = if nested.is_dir() {
         nested
     } else {
         partial.clone()
     };
-    for name in variant.required_files() {
+    for name in model.required_files() {
         if !source.join(name).exists() {
             cleanup(&partial);
             return Err(ModelError::Incomplete {
@@ -236,9 +281,9 @@ mod tests {
     }
 
     /// Create stub files for every required entry (dirs as dirs).
-    fn stub_install(root: &Path, variant: ModelVariant) {
-        let dir = model_dir(root, variant);
-        for name in variant.required_files() {
+    fn stub_install(root: &Path, model: ModelId) {
+        let dir = model_dir(root, model);
+        for name in model.required_files() {
             let path = dir.join(name);
             if name == "espeak-ng-data" || name == "dict" {
                 std::fs::create_dir_all(&path).unwrap();
@@ -249,25 +294,39 @@ mod tests {
         }
     }
 
+    fn all_models() -> Vec<ModelId> {
+        let mut models = vec![
+            ModelId::Kokoro(ModelVariant::Fast),
+            ModelId::Kokoro(ModelVariant::Small),
+        ];
+        models.extend(
+            crate::engine::PERSIAN_VOICES
+                .iter()
+                .map(|voice| ModelId::Persian(*voice)),
+        );
+        models
+    }
+
     #[test]
     fn is_installed_false_on_empty_dir() {
-        for variant in [ModelVariant::Fast, ModelVariant::Small] {
+        for model in all_models() {
             let dir = unique_temp_dir();
             std::fs::create_dir_all(&dir).unwrap();
-            assert!(!is_installed(&dir, variant), "variant {variant:?}");
+            assert!(!is_installed(&dir, model), "model {model:?}");
             std::fs::remove_dir_all(&dir).unwrap();
         }
     }
 
     #[test]
     fn is_installed_true_with_stub_files() {
-        for variant in [ModelVariant::Fast, ModelVariant::Small] {
+        for model in all_models() {
             let dir = unique_temp_dir();
-            stub_install(&dir, variant);
-            assert!(is_installed(&dir, variant), "variant {variant:?}");
+            stub_install(&dir, model);
+            assert!(is_installed(&dir, model), "model {model:?}");
             // One missing file flips it back.
-            std::fs::remove_file(model_dir(&dir, variant).join(variant.model_file())).unwrap();
-            assert!(!is_installed(&dir, variant), "variant {variant:?}");
+            let first = model.required_files()[0];
+            std::fs::remove_file(model_dir(&dir, model).join(first)).unwrap();
+            assert!(!is_installed(&dir, model), "model {model:?}");
             std::fs::remove_dir_all(&dir).unwrap();
         }
     }
@@ -275,23 +334,20 @@ mod tests {
     #[test]
     fn prepare_partial_dir_removes_leftover() {
         let dir = unique_temp_dir();
-        let variant = ModelVariant::Fast;
+        let model = ModelId::Kokoro(ModelVariant::Fast);
         // Simulate a leftover from an interrupted run.
-        let leftover = partial_path(&dir, variant);
+        let leftover = partial_path(&dir, model);
         std::fs::create_dir_all(leftover.join("nested")).unwrap();
         std::fs::write(leftover.join("nested").join("junk.bin"), [1, 2, 3]).unwrap();
 
-        let partial = prepare_partial_dir(&dir, variant).unwrap();
-        assert_eq!(
-            partial,
-            dir.join(format!(".{}.partial", variant.dir_name()))
-        );
+        let partial = prepare_partial_dir(&dir, model).unwrap();
+        assert_eq!(partial, dir.join(format!(".{}.partial", model.dir_name())));
         assert!(partial.is_dir());
         assert_eq!(std::fs::read_dir(&partial).unwrap().count(), 0);
 
         // And it creates the dir when nothing was there.
         std::fs::remove_dir_all(&dir).unwrap();
-        let partial = prepare_partial_dir(&dir, variant).unwrap();
+        let partial = prepare_partial_dir(&dir, model).unwrap();
         assert!(partial.is_dir());
         std::fs::remove_dir_all(&dir).unwrap();
     }
