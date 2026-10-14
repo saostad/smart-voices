@@ -1,9 +1,11 @@
 //! Smart Voices: clipboard watcher that reads cleaned text aloud (Kokoro voice).
 
+pub mod app;
 pub mod audio;
 pub mod chunk;
 pub mod clipboard;
 pub mod engine;
+pub mod icon;
 pub mod models;
 pub mod pipeline;
 pub mod player;

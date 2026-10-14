@@ -21,6 +21,8 @@ ureq = "=2.12.1"
 bzip2 = "=0.5.2"
 tar = "=0.4.46"
 pulldown-cmark = { version = "=0.13.4", default-features = false }
+winit = { version = "0.30", default-features = false }
+tray-icon = { version = "=0.26.1", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "=0.6.5"
@@ -32,6 +34,8 @@ windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Syst
 
 [target.'cfg(target_os = "linux")'.dependencies]
 x11rb = { version = "=0.14.0", features = ["xfixes"] }
+winit = { version = "0.30", default-features = false, features = ["x11", "wayland", "wayland-dlopen"] }
+tray-icon = { version = "=0.26.1", default-features = false, features = ["ksni"] }
 
 [profile.release]
 opt-level = 3
