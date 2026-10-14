@@ -1,6 +1,2 @@
-.build/
-.swiftpm/
-build/
-*.xcodeproj/xcuserdata/
+/target/
 .DS_Store
-rust/target/
