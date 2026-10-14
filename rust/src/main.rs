@@ -1,10 +1,11 @@
 use std::path::{Path, PathBuf};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use smart_voices::audio::AudioOut;
-use smart_voices::engine::{EngineError, KokoroEngine, ModelVariant};
+use smart_voices::audio::AudioSink;
+use smart_voices::engine::{KokoroEngine, ModelVariant};
 use smart_voices::models::{self, ModelError};
 use smart_voices::pipeline::prepare;
+use smart_voices::player::{Player, PlayerConfig, PlayerEvent, Synth};
 use smart_voices::pronounce::{Pronunciations, pronunciations_path};
 use smart_voices::sanitize::SanitizerOptions;
 use smart_voices::settings::{Settings, settings_path};
@@ -123,89 +124,58 @@ fn speak(args: &[String]) -> i32 {
         return 1;
     }
 
+    let sink = match AudioSink::new() {
+        Ok(sink) => sink,
+        Err(err) => {
+            eprintln!("Error: {err}");
+            return 1;
+        }
+    };
+    let unload_after = if settings.unload_after_minutes == 0 {
+        None
+    } else {
+        Some(Duration::from_secs(
+            u64::from(settings.unload_after_minutes) * 60,
+        ))
+    };
+    let config = PlayerConfig {
+        voice,
+        speed,
+        unload_after,
+        sanitizer_options: SanitizerOptions::default(),
+        pronunciations,
+    };
+    let factory = move || -> Result<Box<dyn Synth>, String> {
+        match KokoroEngine::load(&models_root, model) {
+            Ok(engine) => Ok(Box::new(engine) as Box<dyn Synth>),
+            Err(err) => Err(err.to_string()),
+        }
+    };
+    let (player, events) = Player::spawn(config, Box::new(factory), sink);
     let started = Instant::now();
-    let engine = match KokoroEngine::load(&models_root, model) {
-        Ok(engine) => engine,
-        Err(err) => {
-            eprintln!("Error: {err}");
-            return 1;
-        }
-    };
-    eprintln!("Loaded voice model in {} ms", started.elapsed().as_millis());
-
-    let chunks = prepare(&options.text, &SanitizerOptions::default(), &pronunciations);
-    if chunks.is_empty() {
-        eprintln!("Error: {}", EngineError::NoAudio(options.text.clone()));
-        return 1;
-    }
-
-    let sample_rate = engine.sample_rate();
-    let rate = match u32::try_from(sample_rate) {
-        Ok(rate) => rate,
-        Err(_) => {
-            eprintln!("Error: The voice model reported an invalid sample rate: {sample_rate}.");
-            return 1;
-        }
-    };
-    let audio = match AudioOut::open() {
-        Ok(audio) => audio,
-        Err(err) => {
-            eprintln!("Error: {err}");
-            return 1;
-        }
-    };
-    // Simple sequential playback: synthesize each chunk (pronunciation applied
-    // to the chunk text at synthesis time), play it, then play the trailing
-    // pause as silence. The lookahead/playback controller is the next round.
-    let mut total_audio_secs = 0f32;
-    let mut total_synth = std::time::Duration::ZERO;
-    for chunk in &chunks {
-        let spoken = pronunciations.apply(&chunk.text);
-        let started = Instant::now();
-        let samples = match engine.synthesize(&spoken, &voice, speed) {
-            Ok(samples) => samples,
-            Err(err) => {
-                eprintln!("Error: {err}");
+    player.play(options.text);
+    let mut first_audio = true;
+    for event in events {
+        match event {
+            PlayerEvent::Chunk { text, .. } => {
+                if first_audio {
+                    eprintln!("First audio after {} ms", started.elapsed().as_millis());
+                    first_audio = false;
+                }
+                if options.verbose {
+                    eprintln!("{text}");
+                }
+            }
+            PlayerEvent::Finished => return 0,
+            PlayerEvent::Error(message) => {
+                eprintln!("Error: {message}");
                 return 1;
             }
-        };
-        let synth_elapsed = started.elapsed();
-        let seconds = samples.len() as f32 / sample_rate as f32;
-        total_audio_secs += seconds;
-        total_synth += synth_elapsed;
-        if options.verbose {
-            eprintln!(
-                "Synthesized {seconds:.2} s of audio in {} ms",
-                synth_elapsed.as_millis()
-            );
-            eprintln!(
-                "Real-time factor: {:.2}",
-                synth_elapsed.as_secs_f32() / seconds
-            );
-        }
-        if let Err(err) = audio.play_blocking(&samples, rate) {
-            eprintln!("Error: {err}");
-            return 1;
-        }
-        let silence = (chunk.pause_after.seconds() * f64::from(rate)) as usize;
-        if silence > 0
-            && let Err(err) = audio.play_blocking(&vec![0.0; silence], rate)
-        {
-            eprintln!("Error: {err}");
-            return 1;
+            PlayerEvent::State(_) => {}
         }
     }
-    eprintln!(
-        "Synthesized {total_audio_secs:.2} s of audio in {} ms",
-        total_synth.as_millis()
-    );
-    if total_audio_secs > 0.0 {
-        eprintln!(
-            "Real-time factor: {:.2}",
-            total_synth.as_secs_f32() / total_audio_secs
-        );
-    }
-    0
+    eprintln!("Error: The player stopped before finishing.");
+    1
 }
 
 fn parse_download(args: &[String]) -> Option<ModelVariant> {

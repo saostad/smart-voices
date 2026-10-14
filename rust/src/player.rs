@@ -154,7 +154,7 @@ impl Player {
         output.set_event_sender(sink_tx);
         // Merge sink events into the command channel so the controller blocks
         // on a single channel (`recv_timeout`, never polling). The forwarder
-        // sleeps in `recv` (zero idle CPU) and exits with the controller.
+        // idles in `recv` (zero idle CPU) and exits with the controller.
         let forward_tx = command_tx.clone();
         std::thread::spawn(move || {
             for event in sink_rx {
