@@ -2,6 +2,7 @@
 
 pub mod app;
 pub mod audio;
+pub mod autostart;
 pub mod chunk;
 pub mod clipboard;
 pub mod engine;

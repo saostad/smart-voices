@@ -22,6 +22,7 @@ use winit::platform::macos::{ActivationPolicy, EventLoopBuilderExtMacOS};
 use winit::window::WindowId;
 
 use crate::audio::AudioSink;
+use crate::autostart;
 use crate::clipboard::{self, ClipboardEvent, MIN_TEXT_LEN};
 use crate::engine::{
     KokoroEngine, ModelVariant, PERSIAN_VOICES, PersianVoice, PiperEngine, VOICES,
@@ -227,6 +228,7 @@ struct App {
     stop_item: Option<MenuItem>,
     prev_item: Option<MenuItem>,
     next_item: Option<MenuItem>,
+    launch_at_login_item: Option<CheckMenuItem>,
     watch_item: Option<CheckMenuItem>,
     autoread_item: Option<CheckMenuItem>,
     voice_items: Vec<(String, CheckMenuItem)>,
@@ -284,6 +286,7 @@ impl App {
             stop_item: None,
             prev_item: None,
             next_item: None,
+            launch_at_login_item: None,
             watch_item: None,
             autoread_item: None,
             voice_items: Vec::new(),
@@ -359,6 +362,9 @@ impl App {
             menu_accelerator(&shortcuts.previous),
         );
         let next_item = MenuItem::new("Next Sentence", false, menu_accelerator(&shortcuts.next));
+        // The real OS state, read fresh (not a stored setting).
+        let launch_at_login_item =
+            CheckMenuItem::new("Launch at Login", true, autostart::is_enabled(), None);
         let watch_item = CheckMenuItem::new(
             "Watch the Clipboard",
             true,
@@ -453,6 +459,9 @@ impl App {
 
         let settings_menu = Submenu::new("Settings", true);
         settings_menu
+            .append(&launch_at_login_item)
+            .map_err(menu_build_error)?;
+        settings_menu
             .append(&watch_item)
             .map_err(menu_build_error)?;
         settings_menu
@@ -521,6 +530,7 @@ impl App {
         self.stop_item = Some(stop_item);
         self.prev_item = Some(prev_item);
         self.next_item = Some(next_item);
+        self.launch_at_login_item = Some(launch_at_login_item);
         self.watch_item = Some(watch_item);
         self.autoread_item = Some(autoread_item);
         self.voice_items = voice_items;
@@ -880,6 +890,12 @@ impl App {
             if let Some(player) = &self.player {
                 player.next();
             }
+        } else if self
+            .launch_at_login_item
+            .as_ref()
+            .is_some_and(|item| id == item.id())
+        {
+            self.on_launch_at_login_toggled();
         } else if self.watch_item.as_ref().is_some_and(|item| id == item.id()) {
             self.on_watch_toggled();
         } else if self
@@ -951,6 +967,23 @@ impl App {
                 player.stop();
             }
             event_loop.exit();
+        }
+    }
+
+    /// The Launch at Login check already holds its new state (muda flips
+    /// it on click). It mirrors the real OS state, so after a failure the
+    /// check is re-synced to what the OS actually has.
+    fn on_launch_at_login_toggled(&mut self) {
+        let checked = self
+            .launch_at_login_item
+            .as_ref()
+            .is_some_and(CheckMenuItem::is_checked);
+        if let Err(err) = autostart::set_enabled(checked) {
+            self.show_error(&err.to_string());
+        }
+        let enabled = autostart::is_enabled();
+        if let Some(item) = &self.launch_at_login_item {
+            item.set_checked(enabled);
         }
     }
 
