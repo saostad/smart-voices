@@ -12,3 +12,4 @@ pub mod player;
 pub mod pronounce;
 pub mod sanitize;
 pub mod settings;
+pub mod shortcuts;

@@ -4,11 +4,12 @@
 //! events are forwarded into it from small forwarder threads and the
 //! tray/menu global handlers. All UI updates run on the main thread.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
+use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
@@ -19,13 +20,14 @@ use winit::window::WindowId;
 
 use crate::audio::AudioSink;
 use crate::clipboard::{self, ClipboardEvent, MIN_TEXT_LEN};
-use crate::engine::{KokoroEngine, ModelVariant};
+use crate::engine::{KokoroEngine, ModelVariant, VOICES, voice_display_name};
 use crate::icon;
 use crate::models;
 use crate::player::{Player, PlayerConfig, PlayerEvent, PlayerState, Synth};
 use crate::pronounce::{Pronunciations, pronunciations_path};
 use crate::sanitize::SanitizerOptions;
 use crate::settings::{Settings, settings_path};
+use crate::shortcuts::format_binding;
 
 /// Events forwarded into the event loop from worker threads and the
 /// tray/menu global handlers.
@@ -49,6 +51,59 @@ fn truncate_status(text: &str) -> String {
         return text.to_string();
     }
     text.chars().take(MAX_STATUS_CHARS).collect()
+}
+
+/// Speed choices in the Settings menu (a custom value from the file shows no
+/// check but is kept).
+const SPEEDS: [f32; 6] = [0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
+
+/// Idle-unload choices in the Settings menu: `unload_after_minutes` + label.
+const UNLOAD_OPTIONS: [(u32, &str); 5] = [
+    (1, "After 1 minute"),
+    (5, "After 5 minutes"),
+    (15, "After 15 minutes"),
+    (60, "After 1 hour"),
+    (0, "Never"),
+];
+
+/// Menu label for a speed (`1.0` → `"1×"`, `1.25` → `"1.25×"`).
+fn speed_label(speed: f32) -> String {
+    format!("{speed}×")
+}
+
+/// Player idle timeout for `unload_after_minutes` (0 = keep loaded).
+fn unload_duration(minutes: u32) -> Option<Duration> {
+    if minutes == 0 {
+        None
+    } else {
+        Some(Duration::from_secs(u64::from(minutes) * 60))
+    }
+}
+
+fn menu_build_error(err: tray_icon::menu::Error) -> String {
+    format!("Couldn't build the tray menu: {err}.")
+}
+
+/// OS default-editor opener for a file (no shell string).
+fn open_command(path: &Path) -> Command {
+    #[cfg(target_os = "macos")]
+    {
+        let mut command = Command::new("open");
+        command.arg("-t").arg(path);
+        command
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let mut command = Command::new("cmd");
+        command.arg("/C").arg("start").arg("").arg(path);
+        command
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let mut command = Command::new("xdg-open");
+        command.arg(path);
+        command
+    }
 }
 
 /// Run the tray app. Returns the process exit code.
@@ -148,6 +203,13 @@ struct App {
     next_item: Option<MenuItem>,
     watch_item: Option<CheckMenuItem>,
     autoread_item: Option<CheckMenuItem>,
+    voice_items: Vec<(String, CheckMenuItem)>,
+    speed_items: Vec<(f32, CheckMenuItem)>,
+    model_items: Vec<(ModelVariant, CheckMenuItem)>,
+    unload_items: Vec<(u32, CheckMenuItem)>,
+    edit_pron_item: Option<MenuItem>,
+    open_settings_item: Option<MenuItem>,
+    change_shortcuts_item: Option<MenuItem>,
     quit_item: Option<MenuItem>,
     /// Reading or paused (transport items enabled).
     active: bool,
@@ -193,6 +255,13 @@ impl App {
             next_item: None,
             watch_item: None,
             autoread_item: None,
+            voice_items: Vec::new(),
+            speed_items: Vec::new(),
+            model_items: Vec::new(),
+            unload_items: Vec::new(),
+            edit_pron_item: None,
+            open_settings_item: None,
+            change_shortcuts_item: None,
             quit_item: None,
             active: false,
             last_chunk: None,
@@ -260,19 +329,119 @@ impl App {
             None,
         );
         let quit_item = MenuItem::new("Quit Smart Voices", true, None);
-        menu.append(&status_item)
-            .and_then(|()| menu.append(&PredefinedMenuItem::separator()))
-            .and_then(|()| menu.append(&read_item))
-            .and_then(|()| menu.append(&pause_item))
-            .and_then(|()| menu.append(&stop_item))
-            .and_then(|()| menu.append(&prev_item))
-            .and_then(|()| menu.append(&next_item))
-            .and_then(|()| menu.append(&PredefinedMenuItem::separator()))
-            .and_then(|()| menu.append(&watch_item))
-            .and_then(|()| menu.append(&autoread_item))
-            .and_then(|()| menu.append(&PredefinedMenuItem::separator()))
-            .and_then(|()| menu.append(&quit_item))
-            .map_err(|err| format!("Couldn't build the tray menu: {err}."))?;
+
+        let voice_menu = Submenu::new("Voice", true);
+        let mut voice_items = Vec::with_capacity(VOICES.len());
+        for id in VOICES {
+            let label = voice_display_name(id).unwrap_or_else(|| id.to_string());
+            let item = CheckMenuItem::new(label, true, id == self.settings.voice, None);
+            voice_menu.append(&item).map_err(menu_build_error)?;
+            voice_items.push((id.to_string(), item));
+        }
+
+        let speed_menu = Submenu::new("Speed", true);
+        let mut speed_items = Vec::with_capacity(SPEEDS.len());
+        for speed in SPEEDS {
+            let item =
+                CheckMenuItem::new(speed_label(speed), true, speed == self.settings.speed, None);
+            speed_menu.append(&item).map_err(menu_build_error)?;
+            speed_items.push((speed, item));
+        }
+
+        let model_menu = Submenu::new("Voice Model", true);
+        let mut model_items = Vec::with_capacity(2);
+        for variant in [ModelVariant::Fast, ModelVariant::Small] {
+            let item = CheckMenuItem::new(variant.label(), true, variant == self.model, None);
+            model_menu.append(&item).map_err(menu_build_error)?;
+            model_items.push((variant, item));
+        }
+
+        let unload_menu = Submenu::new("Unload Voice When Idle", true);
+        let mut unload_items = Vec::with_capacity(UNLOAD_OPTIONS.len());
+        for (minutes, label) in UNLOAD_OPTIONS {
+            let item = CheckMenuItem::new(
+                label,
+                true,
+                minutes == self.settings.unload_after_minutes,
+                None,
+            );
+            unload_menu.append(&item).map_err(menu_build_error)?;
+            unload_items.push((minutes, item));
+        }
+
+        let edit_pron_item = MenuItem::new("Edit Pronunciations…", true, None);
+        let open_settings_item = MenuItem::new("Open Settings File…", true, None);
+
+        let shortcuts = &self.settings.shortcuts;
+        let shortcuts_menu = Submenu::new("Shortcuts", true);
+        for label in [
+            format!("Read / Pause: {}", format_binding(&shortcuts.read_or_pause)),
+            format!("Stop: {}", format_binding(&shortcuts.stop)),
+            format!("Next Sentence: {}", format_binding(&shortcuts.next)),
+            format!("Previous Sentence: {}", format_binding(&shortcuts.previous)),
+        ] {
+            shortcuts_menu
+                .append(&MenuItem::new(label, false, None))
+                .map_err(menu_build_error)?;
+        }
+        let change_shortcuts_item = MenuItem::new("Change Shortcuts…", true, None);
+        shortcuts_menu
+            .append(&change_shortcuts_item)
+            .map_err(menu_build_error)?;
+        shortcuts_menu
+            .append(&MenuItem::new(
+                "Edit settings.toml, then restart to apply",
+                false,
+                None,
+            ))
+            .map_err(menu_build_error)?;
+
+        let settings_menu = Submenu::new("Settings", true);
+        settings_menu
+            .append(&watch_item)
+            .map_err(menu_build_error)?;
+        settings_menu
+            .append(&autoread_item)
+            .map_err(menu_build_error)?;
+        settings_menu
+            .append(&voice_menu)
+            .map_err(menu_build_error)?;
+        settings_menu
+            .append(&speed_menu)
+            .map_err(menu_build_error)?;
+        settings_menu
+            .append(&model_menu)
+            .map_err(menu_build_error)?;
+        settings_menu
+            .append(&unload_menu)
+            .map_err(menu_build_error)?;
+        settings_menu
+            .append(&PredefinedMenuItem::separator())
+            .map_err(menu_build_error)?;
+        settings_menu
+            .append(&edit_pron_item)
+            .map_err(menu_build_error)?;
+        settings_menu
+            .append(&open_settings_item)
+            .map_err(menu_build_error)?;
+        settings_menu
+            .append(&shortcuts_menu)
+            .map_err(menu_build_error)?;
+
+        menu.append(&status_item).map_err(menu_build_error)?;
+        menu.append(&PredefinedMenuItem::separator())
+            .map_err(menu_build_error)?;
+        menu.append(&read_item).map_err(menu_build_error)?;
+        menu.append(&pause_item).map_err(menu_build_error)?;
+        menu.append(&stop_item).map_err(menu_build_error)?;
+        menu.append(&prev_item).map_err(menu_build_error)?;
+        menu.append(&next_item).map_err(menu_build_error)?;
+        menu.append(&PredefinedMenuItem::separator())
+            .map_err(menu_build_error)?;
+        menu.append(&settings_menu).map_err(menu_build_error)?;
+        menu.append(&PredefinedMenuItem::separator())
+            .map_err(menu_build_error)?;
+        menu.append(&quit_item).map_err(menu_build_error)?;
         let icon = tray_icon(&icon::speaker())
             .ok_or_else(|| "Couldn't build the tray icon: invalid image data.".to_string())?;
         let builder = TrayIconBuilder::new()
@@ -296,6 +465,13 @@ impl App {
         self.next_item = Some(next_item);
         self.watch_item = Some(watch_item);
         self.autoread_item = Some(autoread_item);
+        self.voice_items = voice_items;
+        self.speed_items = speed_items;
+        self.model_items = model_items;
+        self.unload_items = unload_items;
+        self.edit_pron_item = Some(edit_pron_item);
+        self.open_settings_item = Some(open_settings_item);
+        self.change_shortcuts_item = Some(change_shortcuts_item);
         self.quit_item = Some(quit_item);
         self.tray = Some(tray);
         if let Some(err) = self.startup_error.take() {
@@ -385,6 +561,7 @@ impl App {
     }
 
     fn play_text(&mut self, text: String) {
+        self.reload_pronunciations();
         if !models::is_installed(&self.models_root, self.model) {
             // Download on a worker thread, then play; a newer request while
             // a download runs replaces the pending text.
@@ -448,6 +625,24 @@ impl App {
         }
     }
 
+    /// Re-read the pronunciations file at the start of every reading so
+    /// edits apply without restarting. An invalid file shows a status-line
+    /// error and the built-in list is used.
+    fn reload_pronunciations(&mut self) {
+        let Some(path) = pronunciations_path() else {
+            return;
+        };
+        let (dict, err) = Pronunciations::load(&path);
+        if let Some(err) = err {
+            self.show_error(&err.to_string());
+        }
+        self.pronunciations = dict.clone();
+        // Queued before `play`, so it applies from the first new chunk.
+        if let Some(player) = &self.player {
+            player.set_pronunciations(dict);
+        }
+    }
+
     /// Create the audio sink and player on first use (and retry after a
     /// failure, e.g. no audio device at startup).
     fn ensure_player(&mut self) -> Result<(), String> {
@@ -455,13 +650,7 @@ impl App {
             return Ok(());
         }
         let sink = AudioSink::new().map_err(|err| err.to_string())?;
-        let unload_after = if self.settings.unload_after_minutes == 0 {
-            None
-        } else {
-            Some(Duration::from_secs(
-                u64::from(self.settings.unload_after_minutes) * 60,
-            ))
-        };
+        let unload_after = unload_duration(self.settings.unload_after_minutes);
         let config = PlayerConfig {
             voice: self.settings.voice.clone(),
             speed: self.settings.speed,
@@ -620,6 +809,52 @@ impl App {
                 .is_some_and(CheckMenuItem::is_checked);
             self.settings.auto_read = checked;
             self.save_settings();
+        } else if let Some(voice) = self
+            .voice_items
+            .iter()
+            .find(|(_, item)| id == item.id())
+            .map(|(voice, _)| voice.clone())
+        {
+            self.on_voice_selected(&voice);
+        } else if let Some(speed) = self
+            .speed_items
+            .iter()
+            .find(|(_, item)| id == item.id())
+            .map(|(speed, _)| *speed)
+        {
+            self.on_speed_selected(speed);
+        } else if let Some(variant) = self
+            .model_items
+            .iter()
+            .find(|(_, item)| id == item.id())
+            .map(|(variant, _)| *variant)
+        {
+            self.on_model_selected(variant);
+        } else if let Some(minutes) = self
+            .unload_items
+            .iter()
+            .find(|(_, item)| id == item.id())
+            .map(|(minutes, _)| *minutes)
+        {
+            self.on_unload_selected(minutes);
+        } else if self
+            .edit_pron_item
+            .as_ref()
+            .is_some_and(|item| id == item.id())
+        {
+            self.open_pronunciations();
+        } else if self
+            .open_settings_item
+            .as_ref()
+            .is_some_and(|item| id == item.id())
+            || self
+                .change_shortcuts_item
+                .as_ref()
+                .is_some_and(|item| id == item.id())
+        {
+            // Change Shortcuts… opens the settings file too: shortcuts apply
+            // on the next launch.
+            self.open_settings_file();
         } else if self.quit_item.as_ref().is_some_and(|item| id == item.id()) {
             if let Some(player) = &self.player {
                 player.stop();
@@ -656,6 +891,120 @@ impl App {
             watcher.set_enabled(false);
         }
         self.save_settings();
+    }
+
+    /// A voice item was clicked (muda already flipped its check; re-sync all
+    /// of them so exactly one stays checked).
+    fn on_voice_selected(&mut self, voice: &str) {
+        self.settings.voice = voice.to_string();
+        if let Some(player) = &self.player {
+            player.set_voice(voice);
+        }
+        self.update_voice_checks();
+        self.save_settings();
+    }
+
+    fn update_voice_checks(&self) {
+        for (voice, item) in &self.voice_items {
+            item.set_checked(*voice == self.settings.voice);
+        }
+    }
+
+    fn on_speed_selected(&mut self, speed: f32) {
+        self.settings.speed = speed;
+        if let Some(player) = &self.player {
+            player.set_speed(speed);
+        }
+        self.update_speed_checks();
+        self.save_settings();
+    }
+
+    fn update_speed_checks(&self) {
+        for (speed, item) in &self.speed_items {
+            item.set_checked(*speed == self.settings.speed);
+        }
+    }
+
+    fn on_model_selected(&mut self, variant: ModelVariant) {
+        if variant != self.model {
+            if let Some(player) = &self.player {
+                player.stop();
+            }
+            // Dropping the player shuts down its controller thread, freeing
+            // the old engine; the new variant loads on the next play (and
+            // downloads first if it isn't installed, via the existing flow).
+            self.player = None;
+            self.model = variant;
+            self.settings.model = variant;
+            self.active = false;
+            self.last_chunk = None;
+            self.paused = false;
+            self.set_status("Ready");
+            self.update_transport();
+            self.save_settings();
+        }
+        self.update_model_checks();
+    }
+
+    fn update_model_checks(&self) {
+        for (variant, item) in &self.model_items {
+            item.set_checked(*variant == self.model);
+        }
+    }
+
+    fn on_unload_selected(&mut self, minutes: u32) {
+        self.settings.unload_after_minutes = minutes;
+        if let Some(player) = &self.player {
+            player.set_unload_after(unload_duration(minutes));
+        }
+        self.update_unload_checks();
+        self.save_settings();
+    }
+
+    fn update_unload_checks(&self) {
+        for (minutes, item) in &self.unload_items {
+            item.set_checked(*minutes == self.settings.unload_after_minutes);
+        }
+    }
+
+    /// Open `pronunciations.toml` in the OS default editor, creating it first
+    /// if it doesn't exist yet.
+    fn open_pronunciations(&mut self) {
+        let Some(path) = pronunciations_path() else {
+            self.show_error(
+                "Couldn't open the pronunciations file: no settings path is available.",
+            );
+            return;
+        };
+        if !path.exists()
+            && let Err(err) = self.pronunciations.save(&path)
+        {
+            self.show_error(&err.to_string());
+            return;
+        }
+        self.open_in_editor(&path);
+    }
+
+    /// Open `settings.toml` in the OS default editor, writing the current
+    /// settings first if the file is missing.
+    fn open_settings_file(&mut self) {
+        let Some(path) = self.settings_path.clone() else {
+            self.show_error("Couldn't open the settings file: no settings path is available.");
+            return;
+        };
+        if !path.exists()
+            && let Err(err) = self.settings.save(&path)
+        {
+            self.show_error(&err.to_string());
+            return;
+        }
+        self.open_in_editor(&path);
+    }
+
+    fn open_in_editor(&mut self, path: &Path) {
+        if let Err(err) = open_command(path).spawn() {
+            self.show_error(&format!("Couldn't open {}: {err}", path.display()));
+        }
     }
 }
 
@@ -728,6 +1077,23 @@ mod tests {
         let cut = truncate_status(&text);
         assert_eq!(cut.chars().count(), 80);
         assert!(cut.starts_with("Error: é"));
+    }
+
+    #[test]
+    fn speed_labels_use_multiplier_sign() {
+        assert_eq!(speed_label(0.75), "0.75×");
+        assert_eq!(speed_label(1.0), "1×");
+        assert_eq!(speed_label(1.25), "1.25×");
+        assert_eq!(speed_label(1.5), "1.5×");
+        assert_eq!(speed_label(1.75), "1.75×");
+        assert_eq!(speed_label(2.0), "2×");
+    }
+
+    #[test]
+    fn unload_duration_maps_zero_to_keep_loaded() {
+        assert_eq!(unload_duration(0), None);
+        assert_eq!(unload_duration(5), Some(Duration::from_secs(300)));
+        assert_eq!(unload_duration(60), Some(Duration::from_secs(3600)));
     }
 
     #[test]

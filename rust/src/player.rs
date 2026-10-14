@@ -129,6 +129,7 @@ enum Command {
     SetVoice(String),
     SetSpeed(f32),
     SetUnloadAfter(Option<Duration>),
+    SetPronunciations(Pronunciations),
     Shutdown,
     Sink(SinkEvent),
 }
@@ -218,6 +219,10 @@ impl Player {
 
     pub fn set_unload_after(&self, after: Option<Duration>) {
         self.send(Command::SetUnloadAfter(after));
+    }
+
+    pub fn set_pronunciations(&self, pronunciations: Pronunciations) {
+        self.send(Command::SetPronunciations(pronunciations));
     }
 
     pub fn shutdown(&self) {
@@ -372,6 +377,7 @@ impl<O: Output> Controller<O> {
             Command::SetVoice(voice) => self.voice = voice,
             Command::SetSpeed(speed) => self.speed = speed,
             Command::SetUnloadAfter(after) => self.unload_after = after,
+            Command::SetPronunciations(pronunciations) => self.pronunciations = pronunciations,
             Command::Shutdown => {}
             Command::Sink(SinkEvent::ItemFinished(id)) => self.item_finished(id),
             Command::Sink(SinkEvent::Error(message)) => self.fail(message),
@@ -1273,6 +1279,38 @@ mod tests {
         FakeOutput::finish(&shared, ids[2]);
         assert_eq!(next_event(&events), PlayerEvent::Finished);
         assert_eq!(next_event(&events), PlayerEvent::State(PlayerState::Idle));
+        player.shutdown();
+    }
+
+    #[test]
+    fn set_pronunciations_applies_from_next_chunk() {
+        use crate::pronounce::PronunciationEntry;
+        let synth = FakeSynth {
+            delay: Duration::from_millis(200),
+            ..FakeSynth::new()
+        };
+        let (player, events, shared, _, synth) = spawn_player(None, synth);
+        player.play("SQL one. SQL two. SQL three.");
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Loading)
+        );
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Playing)
+        );
+        // The test config starts with an empty dictionary; install the SQL
+        // rule after the second chunk's synth has started.
+        wait_for_calls(&synth, 2);
+        player.set_pronunciations(Pronunciations::new(vec![PronunciationEntry::new(
+            "SQL", "sequel",
+        )]));
+        wait_for_enqueued(&shared, 3);
+        let calls = synth.calls.lock().unwrap();
+        assert_eq!(calls.len(), 3);
+        assert_eq!(calls[0].0, "SQL one.");
+        assert_eq!(calls[1].0, "SQL two.");
+        assert_eq!(calls[2].0, "sequel three.");
         player.shutdown();
     }
 }

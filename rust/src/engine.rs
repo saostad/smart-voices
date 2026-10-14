@@ -120,6 +120,33 @@ pub fn voice_id(name: &str) -> Option<i32> {
     VOICES.iter().position(|v| *v == name).map(|i| i as i32)
 }
 
+/// Human-readable name for a Kokoro voice id (`"af_heart"` →
+/// `"Heart — American female"`), or `None` if the id is invalid. Port of
+/// Swift's `KokoroVoiceCatalog.displayName`.
+pub fn voice_display_name(id: &str) -> Option<String> {
+    let mut chars = id.chars();
+    let first = chars.next()?;
+    let second = chars.next()?;
+    if chars.next() != Some('_') {
+        return None;
+    }
+    let (region, gender) = match (first, second) {
+        ('a', 'f') => ("American", "female"),
+        ('a', 'm') => ("American", "male"),
+        ('b', 'f') => ("British", "female"),
+        ('b', 'm') => ("British", "male"),
+        _ => return None,
+    };
+    let suffix: String = chars.collect();
+    if suffix.is_empty() {
+        return None;
+    }
+    let mut suffix_chars = suffix.chars();
+    let capitalized: String = suffix_chars.next()?.to_uppercase().collect();
+    let rest: String = suffix_chars.collect();
+    Some(format!("{capitalized}{rest} — {region} {gender}"))
+}
+
 /// Errors from loading the model or synthesizing speech.
 #[derive(Debug)]
 pub enum EngineError {
@@ -321,6 +348,39 @@ mod tests {
                 Ok(_) => panic!("expected MissingModel, got Ok ({variant:?})"),
                 Err(other) => panic!("expected MissingModel, got {other} ({variant:?})"),
             }
+        }
+    }
+
+    #[test]
+    fn voice_display_names_match_catalog_rule() {
+        assert_eq!(
+            voice_display_name("af_heart").as_deref(),
+            Some("Heart — American female")
+        );
+        assert_eq!(
+            voice_display_name("am_adam").as_deref(),
+            Some("Adam — American male")
+        );
+        assert_eq!(
+            voice_display_name("bf_alice").as_deref(),
+            Some("Alice — British female")
+        );
+        assert_eq!(
+            voice_display_name("bm_lewis").as_deref(),
+            Some("Lewis — British male")
+        );
+        // Every bundled voice id has a display name.
+        for voice in VOICES {
+            assert!(voice_display_name(voice).is_some(), "{voice}");
+        }
+    }
+
+    #[test]
+    fn voice_display_name_rejects_invalid_ids() {
+        for id in [
+            "", "af", "af_", "afheart", "xf_heart", "ax_heart", "a_heart",
+        ] {
+            assert_eq!(voice_display_name(id), None, "{id}");
         }
     }
 
