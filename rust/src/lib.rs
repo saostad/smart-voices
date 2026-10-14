@@ -2,6 +2,7 @@
 
 pub mod audio;
 pub mod chunk;
+pub mod clipboard;
 pub mod engine;
 pub mod models;
 pub mod pipeline;
