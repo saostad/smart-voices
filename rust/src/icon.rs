@@ -1,5 +1,5 @@
-//! Tray icons drawn in code (no image files): a 32×32 RGBA speaker with
-//! sound waves, plus a variant with a "new copy" badge dot.
+//! Tray icon drawn in code (no image files): a 32×32 RGBA speaker with
+//! sound waves.
 //!
 //! The glyph is white with alpha: on macOS the icon is installed as a template
 //! image so the system recolors it for light/dark menu bars; on Windows/Linux
@@ -8,22 +8,17 @@
 /// Icon edge length in pixels.
 pub const SIZE: u32 = 32;
 
-/// RGBA bytes for the plain speaker icon.
+/// RGBA bytes for the speaker icon.
 pub fn speaker() -> Vec<u8> {
-    draw(false)
+    draw()
 }
 
-/// RGBA bytes for the speaker icon with a "new copy" badge dot.
-pub fn speaker_badged() -> Vec<u8> {
-    draw(true)
-}
-
-fn draw(badged: bool) -> Vec<u8> {
+fn draw() -> Vec<u8> {
     let mut pixels = vec![0u8; (SIZE * SIZE * 4) as usize];
     let center = 15.5f64;
     for y in 0..SIZE {
         for x in 0..SIZE {
-            let alpha = glyph_alpha(x, y, center, badged);
+            let alpha = glyph_alpha(x, y, center);
             let i = ((y * SIZE + x) * 4) as usize;
             pixels[i] = 255;
             pixels[i + 1] = 255;
@@ -35,7 +30,7 @@ fn draw(badged: bool) -> Vec<u8> {
 }
 
 /// Coverage (0–255) of the glyph at a pixel.
-fn glyph_alpha(x: u32, y: u32, center: f64, badged: bool) -> u8 {
+fn glyph_alpha(x: u32, y: u32, center: f64) -> u8 {
     let (x, y) = (f64::from(x), f64::from(y));
     // Speaker body: vertical bar on the left.
     let in_body = (4.0..10.0).contains(&x) && (y - center).abs() <= 3.5;
@@ -49,9 +44,7 @@ fn glyph_alpha(x: u32, y: u32, center: f64, badged: bool) -> u8 {
     let in_arc = dx > 1.0
         && dy.abs() <= dx * 1.3 + 1.0
         && ((dist - 5.5).abs() <= 1.2 || (dist - 10.0).abs() <= 1.2);
-    // Badge: filled dot at the bottom right.
-    let in_badge = badged && (x - 25.0).hypot(y - 25.0) <= 4.0;
-    u8::from(in_body || in_cone || in_arc || in_badge) * 255
+    u8::from(in_body || in_cone || in_arc) * 255
 }
 
 #[cfg(test)]
@@ -62,20 +55,9 @@ mod tests {
         pixels[((y * SIZE + x) * 4 + 3) as usize]
     }
 
-    fn opaque_count(pixels: &[u8]) -> usize {
-        pixels
-            .iter()
-            .skip(3)
-            .step_by(4)
-            .filter(|alpha| **alpha > 0)
-            .count()
-    }
-
     #[test]
-    fn icons_have_the_right_size() {
-        for icon in [speaker(), speaker_badged()] {
-            assert_eq!(icon.len(), (SIZE * SIZE * 4) as usize);
-        }
+    fn icon_has_the_right_size() {
+        assert_eq!(speaker().len(), (SIZE * SIZE * 4) as usize);
     }
 
     #[test]
@@ -86,11 +68,10 @@ mod tests {
         assert_eq!(alpha_at(&icon, 17, 16), 255, "inner wave");
         assert_eq!(alpha_at(&icon, 21, 16), 255, "outer wave");
         assert_eq!(alpha_at(&icon, 0, 0), 0, "corner stays transparent");
-        assert_eq!(alpha_at(&icon, 25, 25), 0, "no badge in the plain icon");
     }
 
     #[test]
-    fn plain_icon_is_vertically_symmetric() {
+    fn icon_is_vertically_symmetric() {
         let icon = speaker();
         for y in 0..SIZE / 2 {
             for x in 0..SIZE {
@@ -101,31 +82,5 @@ mod tests {
                 );
             }
         }
-    }
-
-    #[test]
-    fn badge_only_adds_the_dot() {
-        let plain = speaker();
-        let badged = speaker_badged();
-        // The badge dot is fully inside this box; everything outside it is
-        // identical between the two icons.
-        for y in 0..SIZE {
-            for x in 0..SIZE {
-                let inside = (20..=30).contains(&x) && (20..=30).contains(&y);
-                if inside {
-                    continue;
-                }
-                assert_eq!(
-                    alpha_at(&plain, x, y),
-                    alpha_at(&badged, x, y),
-                    "pixel ({x}, {y}) outside the badge box"
-                );
-            }
-        }
-        assert_eq!(alpha_at(&badged, 25, 25), 255, "badge dot center");
-        assert!(
-            opaque_count(&badged) > opaque_count(&plain),
-            "the badge adds opaque pixels"
-        );
     }
 }

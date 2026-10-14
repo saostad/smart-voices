@@ -93,7 +93,7 @@ impl Default for Settings {
             model: ModelVariant::Fast,
             persian_voice: PersianVoice::Amir,
             watch_clipboard: true,
-            auto_read: false,
+            auto_read: true,
             unload_after_minutes: 15,
             shortcuts: Shortcuts::default(),
         }

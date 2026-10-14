@@ -1760,6 +1760,47 @@ mod tests {
     }
 
     #[test]
+    fn play_while_paused_interrupts_and_resumes_with_new_text() {
+        let (player, events, shared, _, _) = spawn_player(None, FakeSynth::new());
+        player.play("One. Two. Three.");
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Loading)
+        );
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Playing)
+        );
+        assert_eq!(next_event(&events), chunk(0, 3, "One."));
+        wait_for_enqueued(&shared, 3);
+        let old_ids = FakeOutput::enqueued_ids(&shared);
+        player.pause();
+        assert_eq!(next_event(&events), PlayerEvent::State(PlayerState::Paused));
+        // A new copy while paused interrupts and resumes with the new text.
+        player.play("Alpha. Beta.");
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Playing)
+        );
+        assert_eq!(next_event(&events), chunk(0, 2, "Alpha."));
+        wait_for_enqueued(&shared, 5);
+        assert_eq!(shared.lock().unwrap().pauses, 1);
+        assert_eq!(shared.lock().unwrap().resumes, 1);
+        // Stale finishes of the old reading produce nothing.
+        for id in old_ids {
+            FakeOutput::finish(&shared, id);
+        }
+        expect_no_event(&events);
+        let new_ids: Vec<u64> = FakeOutput::enqueued_ids(&shared)[3..].to_vec();
+        FakeOutput::finish(&shared, new_ids[0]);
+        assert_eq!(next_event(&events), chunk(1, 2, "Beta."));
+        FakeOutput::finish(&shared, new_ids[1]);
+        assert_eq!(next_event(&events), PlayerEvent::Finished);
+        assert_eq!(next_event(&events), PlayerEvent::State(PlayerState::Idle));
+        player.shutdown();
+    }
+
+    #[test]
     fn prewarm_is_noop_when_loaded_or_busy() {
         let (player, events, shared, factory_count, _) = spawn_player(None, FakeSynth::new());
         player.prewarm();

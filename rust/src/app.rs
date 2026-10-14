@@ -13,7 +13,7 @@ use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 use tray_icon::menu::{
     CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu, accelerator::Accelerator,
 };
-use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
+use tray_icon::{Icon, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
@@ -252,7 +252,6 @@ struct App {
     /// Whether the status line currently shows an error (kept until the next
     /// action; the `Idle` state right after an `Error` must not clear it).
     showing_error: bool,
-    badged: bool,
     /// A model download is running on a worker thread.
     downloading: bool,
     /// Text to play once the running download finishes.
@@ -304,7 +303,6 @@ impl App {
             last_chunk: None,
             paused: false,
             showing_error: false,
-            badged: false,
             downloading: false,
             pending_text: None,
             exit_code: 0,
@@ -372,8 +370,8 @@ impl App {
             None,
         );
         let autoread_item = CheckMenuItem::new(
-            "Read New Copies Automatically",
-            true,
+            "Read Copied Text Automatically",
+            self.settings.watch_clipboard,
             self.settings.auto_read,
             None,
         );
@@ -465,9 +463,6 @@ impl App {
             .append(&watch_item)
             .map_err(menu_build_error)?;
         settings_menu
-            .append(&autoread_item)
-            .map_err(menu_build_error)?;
-        settings_menu
             .append(&voice_menu)
             .map_err(menu_build_error)?;
         settings_menu
@@ -496,6 +491,7 @@ impl App {
             .map_err(menu_build_error)?;
 
         menu.append(&status_item).map_err(menu_build_error)?;
+        menu.append(&autoread_item).map_err(menu_build_error)?;
         menu.append(&PredefinedMenuItem::separator())
             .map_err(menu_build_error)?;
         menu.append(&read_item).map_err(menu_build_error)?;
@@ -514,7 +510,7 @@ impl App {
         let builder = TrayIconBuilder::new()
             .with_menu(Box::new(menu))
             .with_tooltip("Smart Voices")
-            .with_menu_on_left_click(false);
+            .with_menu_on_left_click(true);
         // macOS draws the icon as a template so it adapts to light/dark menu
         // bars; elsewhere the white glyph suits the usual dark trays.
         #[cfg(target_os = "macos")]
@@ -580,37 +576,8 @@ impl App {
         }
     }
 
-    /// Switch between the plain and "new copy" badge icons.
-    fn set_badged(&mut self, badged: bool) {
-        if badged == self.badged {
-            return;
-        }
-        self.badged = badged;
-        let Some(tray) = &self.tray else {
-            return;
-        };
-        let bytes = if badged {
-            icon::speaker_badged()
-        } else {
-            icon::speaker()
-        };
-        match tray_icon(&bytes) {
-            Some(icon) => {
-                #[cfg(target_os = "macos")]
-                let result = tray.set_icon_templated(Some(icon));
-                #[cfg(not(target_os = "macos"))]
-                let result = tray.set_icon(Some(icon));
-                if let Err(err) = result {
-                    eprintln!("Error: Couldn't switch the tray icon: {err}.");
-                }
-            }
-            None => eprintln!("Error: Couldn't switch the tray icon: invalid image data."),
-        }
-    }
-
-    /// Read the clipboard aloud (left click or the menu item).
+    /// Read the clipboard aloud (the menu item or a shortcut).
     fn read_clipboard(&mut self) {
-        self.set_badged(false);
         let text = match clipboard::read_text() {
             Ok(Some(text)) if text.chars().count() >= MIN_TEXT_LEN => text,
             Ok(Some(_)) => {
@@ -839,7 +806,6 @@ impl App {
                 if self.settings.auto_read {
                     self.read_clipboard();
                 } else {
-                    self.set_badged(true);
                     // Warm the voice in the background so the manual read is
                     // fast. A failure here (e.g. no audio device) stays silent;
                     // the manual read reports it.
@@ -859,19 +825,9 @@ impl App {
         }
     }
 
-    fn on_tray_event(&mut self, event: TrayIconEvent) {
-        // Left click reads the clipboard; the menu opens on right click.
-        // (On Linux/ksni a left-click activation arrives here the same way.)
-        if matches!(
-            event,
-            TrayIconEvent::Click {
-                button: MouseButton::Left,
-                button_state: MouseButtonState::Up,
-                ..
-            }
-        ) {
-            self.read_clipboard();
-        }
+    fn on_tray_event(&mut self, _event: TrayIconEvent) {
+        // The menu opens on either click, like other tray apps; actions run
+        // from the menu items and shortcuts.
     }
 
     fn on_menu_event(&mut self, event_loop: &ActiveEventLoop, event: MenuEvent) {
@@ -1021,6 +977,10 @@ impl App {
             }
         } else if let Some(watcher) = &self.watcher {
             watcher.set_enabled(false);
+        }
+        // Auto-read needs the watcher; disable the switch while off.
+        if let Some(autoread) = &self.autoread_item {
+            autoread.set_enabled(self.settings.watch_clipboard);
         }
         self.save_settings();
     }
