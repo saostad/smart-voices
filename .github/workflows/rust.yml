@@ -1,0 +1,93 @@
+name: Rust
+
+on:
+  push:
+    branches: [rust-port]
+    paths: ['rust/**', '.github/workflows/rust.yml']
+  pull_request:
+    paths: ['rust/**', '.github/workflows/rust.yml']
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: rust
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-14]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      - name: Install Linux audio dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+
+      - name: Check formatting
+        if: runner.os == 'Linux'
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test
+
+      - name: Build release
+        run: cargo build --release
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p dist
+          cp target/release/smart-voices dist/
+          cp packaging/linux/smart-voices.desktop packaging/linux/README-linux.txt dist/
+          tar -czf smart-voices-linux-x86_64.tar.gz -C dist smart-voices smart-voices.desktop README-linux.txt
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path target/release/smart-voices.exe -DestinationPath smart-voices-windows-x86_64.zip
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          scripts/bundle-macos.sh
+          ditto -c -k --keepParent "target/Smart Voices.app" smart-voices-macos-arm64.zip
+
+      - name: Upload artifact (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: smart-voices-linux-x86_64
+          path: rust/smart-voices-linux-x86_64.tar.gz
+          retention-days: 14
+
+      - name: Upload artifact (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: smart-voices-windows-x86_64
+          path: rust/smart-voices-windows-x86_64.zip
+          retention-days: 14
+
+      - name: Upload artifact (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: smart-voices-macos-arm64
+          path: rust/smart-voices-macos-arm64.zip
+          retention-days: 14
