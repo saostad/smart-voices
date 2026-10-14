@@ -6,6 +6,14 @@ hear it read like a person would — headings, lists, tables, and code are spoke
 naturally instead of reading the markup. Everything runs 100% on your Mac; no
 text ever leaves your computer.
 
+## Linux and Windows
+
+A cross-platform port is in progress in [`rust/`](rust/README.md): the same
+clipboard-to-speech loop (Markdown cleanup, Kokoro English voice plus Persian
+Piper voices) as a tiny tray app for Linux, Windows, and macOS. See
+[`rust/README.md`](rust/README.md) for downloads, settings, and building from
+source.
+
 ## Features
 
 - **Clipboard reading** — copy text, click the menu-bar icon (or press play) to

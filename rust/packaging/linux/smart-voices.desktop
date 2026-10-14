@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Smart Voices
+Comment=Read copied text aloud
+Exec=smart-voices
+Icon=audio-volume-high
+Categories=Utility;Accessibility;
+Terminal=false
+X-GNOME-Autostart-enabled=true

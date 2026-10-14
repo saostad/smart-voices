@@ -1,0 +1,48 @@
+[package]
+name = "smart-voices"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "smart_voices"
+path = "src/lib.rs"
+
+[[bin]]
+name = "smart-voices"
+path = "src/main.rs"
+
+[dependencies]
+sherpa-onnx = "=1.13.8"
+cpal = "=0.18.2"
+dirs = "=7.0.0"
+serde = { version = "=1.0.229", features = ["derive"] }
+toml = "=0.8.2"
+ureq = "=2.12.1"
+bzip2 = "=0.5.2"
+tar = "=0.4.46"
+pulldown-cmark = { version = "=0.13.4", default-features = false }
+winit = { version = "0.30", default-features = false }
+tray-icon = { version = "=0.26.1", default-features = false }
+global-hotkey = "=0.8.0"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "=0.6.5"
+objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "NSString", "NSArray"] }
+objc2-app-kit = { version = "=0.3.2", default-features = false, features = ["std", "NSPasteboard", "NSWorkspace", "NSRunningApplication"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_UI_WindowsAndMessaging", "Win32_System_LibraryLoader", "Win32_Graphics_Gdi", "Win32_System_Threading", "Win32_System_Diagnostics_Debug", "Win32_System_Ole", "Win32_System_Console", "Win32_System_Registry"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+x11rb = { version = "=0.14.0", features = ["xfixes"] }
+ashpd = { version = "=0.13.13", default-features = false, features = ["async-io", "global_shortcuts"] }
+async-io = "=2.6.0"
+winit = { version = "0.30", default-features = false, features = ["x11", "wayland", "wayland-dlopen"] }
+tray-icon = { version = "=0.26.1", default-features = false, features = ["ksni"] }
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = true
+panic = "abort"

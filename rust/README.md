@@ -1,0 +1,134 @@
+# Smart Voices (Rust)
+
+Smart Voices for Linux, Windows, and macOS, written in Rust. Copy text
+anywhere, click the tray icon, and hear it read aloud — like the
+[macOS app](../README.md), but cross-platform, tiny (about 20 MB), and using
+almost no CPU or memory when idle.
+
+How it works: the app watches your clipboard, cleans up Markdown for speech
+(tables read row by row, lists with ordinals, code announced instead of
+spelled out, links shortened to site names, emoji removed), and reads it with
+an on-device voice. English uses the Kokoro voice; Persian text automatically
+switches to a Persian Piper voice. Everything runs on your computer — no text
+ever leaves it.
+
+## Downloads
+
+There are no installer releases yet. Until then, grab the latest build from
+the green **Rust** workflow run on the
+[Actions page](https://github.com/saostad/smart-voices/actions):
+
+- Linux: `smart-voices-linux-x86_64.tar.gz`
+- Windows: `smart-voices-windows-x86_64.zip`
+- macOS (Apple Silicon): `smart-voices-macos-arm64.zip` (contains
+  `Smart Voices.app`)
+
+On first launch the app sits in your tray (menu bar on macOS). The first
+reading downloads the voice model (see sizes below), then plays.
+
+## First run: voice downloads
+
+Models download automatically when first needed:
+
+| Model | Size | When |
+|---|---|---|
+| Fast (default English voice) | ~350 MB | First English reading |
+| Small (slower, low-memory English) | ~130 MB | Only if you pick it in Settings |
+| Persian voice | ~67 MB | First Persian reading (English-only use never downloads it) |
+
+You can also pre-download from a terminal:
+`smart-voices download`, `smart-voices download --model small`, or
+`smart-voices download --persian`.
+
+## The tray menu
+
+Click the tray icon (left-click) to read the clipboard. Right-click opens the
+menu: a status line (`Ready`, `Reading 3 of 12`, `Paused`, …), `Read
+Clipboard`, `Pause`/`Resume`, `Stop`, `Previous`/`Next Sentence`, the
+`Settings` submenu, and `Quit`.
+
+The `Settings` submenu holds everything customizable:
+
+- `Launch at Login` — start with your computer (reflects the real system
+  state).
+- `Watch the Clipboard` and `Read New Copies Automatically`.
+- `Voice` — 28 English voices (`Heart — American female`, …).
+- `Persian Voice` — Amir, Gyro, Reza Ibrahim, Ganji, Ganji Adabi.
+- `Speed` — 0.75× to 2×.
+- `Voice Model` — Fast or Small (switching reloads the voice).
+- `Unload Voice When Idle` — free the voice memory after 1–60 minutes, or
+  `Never`.
+- `Edit Pronunciations…` / `Open Settings File…` — teach the app words
+  (SQL → "sequel"); edits apply on the next reading.
+- `Shortcuts` — shows the current bindings; change them in `settings.toml`
+  and restart.
+
+## Shortcuts
+
+Global shortcuts work everywhere, even when another app is focused:
+
+| Action | macOS | Linux / Windows |
+|---|---|---|
+| Read / Pause | ⌃⌥Space | Ctrl+Alt+Space |
+| Stop | ⌃⌥. | Ctrl+Alt+. |
+| Next Sentence | ⌃⌥→ | Ctrl+Alt+→ |
+| Previous Sentence | ⌃⌥← | Ctrl+Alt+← |
+
+Set a binding to `""` in `settings.toml` to disable it.
+
+## Where things live
+
+| | macOS | Linux | Windows |
+|---|---|---|---|
+| Settings | `~/Library/Application Support/smart-voices/settings.toml` | `~/.config/smart-voices/settings.toml` | `%APPDATA%\smart-voices\settings.toml` |
+| Pronunciations | same folder, `pronunciations.toml` | same folder | same folder |
+| Voice models | `~/Library/Application Support/smart-voices/models/` | `~/.local/share/smart-voices/models/` | `%APPDATA%\smart-voices\models\` |
+
+Override the settings file with the `SMART_VOICES_CONFIG` environment
+variable (full file path) and the models folder with `SMART_VOICES_MODELS`.
+
+## Linux notes
+
+- On GNOME, install the "AppIndicator and KStatusNotifierItem Support"
+  extension to see the tray icon. Copy `smart-voices` to `~/.local/bin` and
+  the `.desktop` file from the download to `~/.local/share/applications` (and
+  to `~/.config/autostart` to start at login).
+- Clipboard watching needs X11 or XWayland. On pure Wayland without XWayland,
+  use the tray icon / shortcuts to read instead.
+- Global shortcuts use the XDG GlobalShortcuts portal on Wayland sessions
+  (your desktop may ask you to confirm them once; needs GNOME 48+, KDE 6, or
+  similar) and a classic key grab on X11.
+
+## Building from source
+
+You need a Rust toolchain (stable). From this folder:
+
+```sh
+cargo build --release
+```
+
+The binary lands at `target/release/smart-voices` (about 20 MB,
+self-contained). On Linux, install the audio headers first:
+`sudo apt-get install libasound2-dev pkg-config`. On macOS,
+`scripts/bundle-macos.sh` wraps the binary in `Smart Voices.app`.
+
+## Command line
+
+Running `smart-voices` with no arguments starts the tray app. It also has
+headless commands (handy for scripts and testing):
+
+- `smart-voices speak "<text>"` — read text aloud (`--voice`, `--speed`,
+  `--model fast|small`, `--persian-voice`, `--verbose`).
+- `smart-voices clean [<file>]` — print how text would be cleaned for speech,
+  one chunk per line (reads stdin without a file).
+- `smart-voices download` — fetch voice models up front (`--model`,
+  `--persian`).
+- `smart-voices watch` — print each copy and, with `--auto-read`, read it
+  aloud (Ctrl+C quits).
+
+## Performance
+
+Measured on an M1 Pro Mac: idle tray uses about 11–50 MB and 0% CPU (the
+voice unloads after a few idle minutes); synthesis runs at about 0.2×
+real-time (5× faster than playback), and the first audio starts about 1
+second after you press play.
