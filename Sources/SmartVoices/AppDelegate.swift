@@ -212,6 +212,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         readClipboardAndPlay()
     }
 
+    @objc func toggleWatchClipboard(_ sender: Any?) {
+        settings.watchClipboard.toggle()
+    }
+
+    @objc func toggleAutoReadClipboard(_ sender: Any?) {
+        settings.autoReadClipboard.toggle()
+    }
+
     @objc func replayHistory(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String,
             let item = history.items.first(where: { $0.id.uuidString == id })

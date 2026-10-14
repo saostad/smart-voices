@@ -59,6 +59,47 @@ struct ClipboardMonitorTests {
         monitor.isEnabled = true
         monitor.poll()
         #expect(monitor.hasUnreadContent == false)
+        fake.changeCount = 2
+        monitor.poll()
+        #expect(monitor.hasUnreadContent == true)
+        #expect(fake.stringCalls == 0)
+    }
+
+    @Test func disablingClearsPendingCopy() {
+        let fake = FakePasteboard()
+        let monitor = ClipboardMonitor(source: fake)
+        fake.changeCount = 1
+        monitor.poll()
+        #expect(monitor.hasUnreadContent == true)
+
+        monitor.isEnabled = false
+        #expect(monitor.hasUnreadContent == false)
+        #expect(
+            !AutoReadPolicy.shouldRead(
+                autoReadEnabled: true, hasUnreadContent: monitor.hasUnreadContent, isExporting: false))
+        #expect(fake.stringCalls == 0)
+    }
+
+    @Test func unchangedEnabledStateDoesNotLoseNewCopy() {
+        let fake = FakePasteboard()
+        let monitor = ClipboardMonitor(source: fake)
+        fake.changeCount = 1
+        monitor.isEnabled = true
+        monitor.poll()
+        #expect(monitor.hasUnreadContent == true)
+    }
+
+    @Test func manualReadStillWorksWhenDisabled() {
+        let fake = FakePasteboard()
+        fake.text = "Read this copy manually."
+        let monitor = ClipboardMonitor(source: fake)
+        monitor.isEnabled = false
+        fake.changeCount = 1
+        monitor.poll()
+        #expect(monitor.hasUnreadContent == false)
+        #expect(fake.stringCalls == 0)
+        #expect(monitor.readText() == .text("Read this copy manually."))
+        #expect(fake.stringCalls == 1)
     }
 
     @Test func readClears() {

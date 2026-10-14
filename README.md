@@ -54,9 +54,14 @@ scripts/build-app.sh && open "build/Smart Voices.app"
 Every push to `main` automatically builds and publishes a new DMG release.
 
 Click the menu-bar icon to read the clipboard. Right-click (or Control-click)
-for the menu: Read Clipboard (⌘R), Read File… (⌘O), Recent, Pause/Resume, Stop,
+for the menu: Watch the Clipboard, Read New Copies Automatically,
+Read Clipboard (⌘R), Read File… (⌘O), Recent, Pause/Resume, Stop,
 Previous/Next Sentence, Show Reading Panel (⌘P), Export Clipboard as Audio…,
 Speed, Sleep Timer, Voice, Engine, Settings… (⌘,), Quit (⌘Q).
+
+The two clipboard checkboxes stay in sync with Settings → General. Uncheck
+Watch the Clipboard to stop watching new copies, or Read New Copies
+Automatically to keep watching without starting playback automatically.
 
 Default global shortcuts (change them in Settings → Shortcuts):
 

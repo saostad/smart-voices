@@ -35,11 +35,13 @@ public final class ClipboardMonitor {
     public var frontmostAppProvider: () -> String?
     public var isEnabled = true {
         didSet {
+            guard isEnabled != oldValue else { return }
             if isEnabled {
                 lastChangeCount = source.changeCount
                 startTimer()
             } else {
                 stopTimer()
+                hasUnreadContent = false
             }
         }
     }

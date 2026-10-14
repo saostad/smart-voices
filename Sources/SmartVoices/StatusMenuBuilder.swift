@@ -9,6 +9,20 @@ extension AppDelegate {
         let isPaused = playback.state == .paused
         let isActive = !isIdle
 
+        let watchClipboard = NSMenuItem(
+            title: "Watch the Clipboard", action: #selector(toggleWatchClipboard(_:)), keyEquivalent: "")
+        watchClipboard.target = self
+        watchClipboard.state = settings.watchClipboard ? .on : .off
+        menu.addItem(watchClipboard)
+
+        let autoReadClipboard = NSMenuItem(
+            title: "Read New Copies Automatically", action: #selector(toggleAutoReadClipboard(_:)), keyEquivalent: "")
+        autoReadClipboard.target = self
+        autoReadClipboard.state = settings.autoReadClipboard ? .on : .off
+        menu.addItem(autoReadClipboard)
+
+        menu.addItem(.separator())
+
         let read = NSMenuItem(title: "Read Clipboard", action: #selector(readClipboard(_:)), keyEquivalent: "r")
         read.target = self
         read.isEnabled = isIdle
