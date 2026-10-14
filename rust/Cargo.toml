@@ -16,6 +16,7 @@ sherpa-onnx = "=1.13.8"
 cpal = "=0.18.2"
 dirs = "=7.0.0"
 serde = { version = "=1.0.229", features = ["derive"] }
+toml = "=0.8.2"
 
 [profile.release]
 opt-level = 3

@@ -2,7 +2,8 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use smart_voices::audio::AudioOut;
-use smart_voices::engine::{DEFAULT_VOICE, KokoroEngine, ModelVariant};
+use smart_voices::engine::{KokoroEngine, ModelVariant};
+use smart_voices::settings::{Settings, settings_path};
 
 const USAGE: &str =
     "Usage: smart-voices speak \"<text>\" [--voice <name>] [--speed <f>] [--model fast|small]";
@@ -24,30 +25,30 @@ fn run() -> i32 {
 
 struct SpeakOptions {
     text: String,
-    voice: String,
-    speed: f32,
-    model: ModelVariant,
+    voice: Option<String>,
+    speed: Option<f32>,
+    model: Option<ModelVariant>,
 }
 
 fn parse_speak(args: &[String]) -> Option<SpeakOptions> {
     let mut text: Option<String> = None;
-    let mut voice = DEFAULT_VOICE.to_string();
-    let mut speed = 1.0;
-    let mut model = ModelVariant::Fast;
+    let mut voice: Option<String> = None;
+    let mut speed: Option<f32> = None;
+    let mut model: Option<ModelVariant> = None;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
             "--voice" => {
                 i += 1;
-                voice = args.get(i)?.to_string();
+                voice = Some(args.get(i)?.to_string());
             }
             "--speed" => {
                 i += 1;
-                speed = args.get(i)?.parse::<f32>().ok()?;
+                speed = Some(args.get(i)?.parse::<f32>().ok()?);
             }
             "--model" => {
                 i += 1;
-                model = ModelVariant::parse(args.get(i)?)?;
+                model = Some(ModelVariant::parse(args.get(i)?)?);
             }
             flag if flag.starts_with("--") => return None,
             positional => {
@@ -88,9 +89,18 @@ fn speak(args: &[String]) -> i32 {
         );
         return 1;
     };
+    let (settings, settings_err) = settings_path()
+        .map(|path| Settings::load(&path))
+        .unwrap_or((Settings::default(), None));
+    if let Some(err) = &settings_err {
+        eprintln!("Warning: {err}");
+    }
+    let voice = options.voice.unwrap_or(settings.voice);
+    let speed = options.speed.unwrap_or(settings.speed);
+    let model = options.model.unwrap_or(settings.model);
 
     let started = Instant::now();
-    let engine = match KokoroEngine::load(&models_root, options.model) {
+    let engine = match KokoroEngine::load(&models_root, model) {
         Ok(engine) => engine,
         Err(err) => {
             eprintln!("Error: {err}");
@@ -100,7 +110,7 @@ fn speak(args: &[String]) -> i32 {
     eprintln!("Loaded voice model in {} ms", started.elapsed().as_millis());
 
     let started = Instant::now();
-    let samples = match engine.synthesize(&options.text, &options.voice, options.speed) {
+    let samples = match engine.synthesize(&options.text, &voice, speed) {
         Ok(samples) => samples,
         Err(err) => {
             eprintln!("Error: {err}");
