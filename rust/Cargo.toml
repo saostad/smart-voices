@@ -20,6 +20,7 @@ toml = "=0.8.2"
 ureq = "=2.12.1"
 bzip2 = "=0.5.2"
 tar = "=0.4.46"
+pulldown-cmark = { version = "=0.13.4", default-features = false }
 
 [profile.release]
 opt-level = 3

@@ -3,4 +3,5 @@
 pub mod audio;
 pub mod engine;
 pub mod models;
+pub mod sanitize;
 pub mod settings;
