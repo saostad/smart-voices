@@ -73,6 +73,8 @@ struct ReaderView: View {
             Divider()
             footer
         }
+        // This panel draws its own header instead of the hidden native title bar.
+        .ignoresSafeArea(.container, edges: .top)
         .onDrop(of: [.fileURL, .plainText], isTargeted: nil) { providers in
             handleDrop(providers)
             return true

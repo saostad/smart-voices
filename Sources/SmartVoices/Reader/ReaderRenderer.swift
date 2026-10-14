@@ -22,7 +22,7 @@ private final class ReaderStubOutput: AudioOutput {
     func stop() {}
 }
 
-/// Render the reading panel view at 440×300 in light and dark mode.
+/// Render the reading panel's default window size in light and dark mode.
 /// `<png>` gains a `-light`/`-dark` suffix before its extension.
 @MainActor
 func renderReader(to png: String) -> Int32 {
@@ -46,7 +46,6 @@ func renderReader(to png: String) -> Int32 {
             onJump: { _ in }, onTogglePlayPause: {}, onNext: {}, onPrevious: {},
             onSpeed: { _ in }, onClose: {}, onDropURLs: { _ in }, onDropText: { _ in },
             previewWordIndex: 3)
-            .frame(width: 440, height: 300)
         let hosting = NSHostingView(rootView: view)
         hosting.translatesAutoresizingMaskIntoConstraints = false
         // Same composition as the real panel: SwiftUI over popover material,
@@ -61,19 +60,19 @@ func renderReader(to png: String) -> Int32 {
             hosting.topAnchor.constraint(equalTo: effect.topAnchor),
             hosting.bottomAnchor.constraint(equalTo: effect.bottomAnchor),
         ])
-        effect.frame = NSRect(x: 0, y: 0, width: 440, height: 300)
+        effect.wantsLayer = true
+        effect.layer?.cornerRadius = 16
+        effect.layer?.masksToBounds = true
         let appearance = NSAppearance(named: appearanceName)
         hosting.appearance = appearance
         effect.appearance = appearance
-        let window = NSWindow(
-            contentRect: NSRect(x: -10000, y: -10000, width: 440, height: 300),
-            styleMask: [.titled],
-            backing: .buffered,
-            defer: false)
+        let window = ReaderPanelController.makePanel(contentView: effect)
+        window.setFrameOrigin(NSPoint(x: -10000, y: -10000))
         window.appearance = appearance
-        window.contentView = effect
+        window.orderFront(nil)
         window.layoutIfNeeded()
         effect.layoutSubtreeIfNeeded()
+        hosting.layoutSubtreeIfNeeded()
         guard let rep = effect.bitmapImageRepForCachingDisplay(in: effect.bounds) else {
             writeStderr("SmartVoices: cannot render reading panel (\(suffix))")
             return 1
@@ -90,6 +89,7 @@ func renderReader(to png: String) -> Int32 {
             writeStderr("SmartVoices: cannot write \(path): \(error.localizedDescription)")
             return 1
         }
+        window.orderOut(nil)
         print(path)
     }
     return 0

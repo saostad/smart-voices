@@ -72,29 +72,8 @@ final class ReaderPanelController {
                 hosting.topAnchor.constraint(equalTo: effect.topAnchor),
                 hosting.bottomAnchor.constraint(equalTo: effect.bottomAnchor),
             ])
-            let panel = NSPanel(
-                contentRect: NSRect(x: 0, y: 0, width: 440, height: 300),
-                styleMask: [
-                    .nonactivatingPanel, .titled, .closable, .resizable, .fullSizeContentView,
-                ],
-                backing: .buffered,
-                defer: false)
-            panel.isFloatingPanel = true
-            panel.level = .floating
-            panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-            panel.titlebarAppearsTransparent = true
-            panel.titleVisibility = .hidden
-            panel.standardWindowButton(.closeButton)?.isHidden = true
-            panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
-            panel.standardWindowButton(.zoomButton)?.isHidden = true
-            panel.isOpaque = false
-            panel.backgroundColor = .clear
-            panel.isMovableByWindowBackground = true
-            panel.becomesKeyOnlyIfNeeded = true
-            panel.hidesOnDeactivate = false
-            panel.minSize = NSSize(width: 320, height: 220)
+            let panel = Self.makePanel(contentView: effect)
             panel.setFrameAutosaveName("SmartVoicesReader")
-            panel.contentView = effect
             panel.center()
             self.panel = panel
         }
@@ -103,5 +82,32 @@ final class ReaderPanelController {
 
     func hide() {
         panel?.orderOut(nil)
+    }
+
+    /// Shared by the live panel and its renderer so previews include window insets.
+    static func makePanel(contentView: NSView) -> NSPanel {
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 440, height: 300),
+            styleMask: [
+                .nonactivatingPanel, .titled, .closable, .resizable, .fullSizeContentView,
+            ],
+            backing: .buffered,
+            defer: false)
+        panel.isFloatingPanel = true
+        panel.level = .floating
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.titlebarAppearsTransparent = true
+        panel.titleVisibility = .hidden
+        panel.standardWindowButton(.closeButton)?.isHidden = true
+        panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
+        panel.standardWindowButton(.zoomButton)?.isHidden = true
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.isMovableByWindowBackground = true
+        panel.becomesKeyOnlyIfNeeded = true
+        panel.hidesOnDeactivate = false
+        panel.minSize = NSSize(width: 320, height: 220)
+        panel.contentView = contentView
+        return panel
     }
 }
