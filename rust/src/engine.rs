@@ -14,10 +14,34 @@ const MODEL_DIR_NAME: &str = "kokoro-int8-multi-lang-v1_0";
 
 /// English Kokoro voices in speaker-id order (sid = index).
 pub const VOICES: [&str; 28] = [
-    "af_alloy", "af_aoede", "af_bella", "af_heart", "af_jessica", "af_kore", "af_nicole",
-    "af_nova", "af_river", "af_sarah", "af_sky", "am_adam", "am_echo", "am_eric", "am_fenrir",
-    "am_liam", "am_michael", "am_onyx", "am_puck", "am_santa", "bf_alice", "bf_emma",
-    "bf_isabella", "bf_lily", "bm_daniel", "bm_fable", "bm_george", "bm_lewis",
+    "af_alloy",
+    "af_aoede",
+    "af_bella",
+    "af_heart",
+    "af_jessica",
+    "af_kore",
+    "af_nicole",
+    "af_nova",
+    "af_river",
+    "af_sarah",
+    "af_sky",
+    "am_adam",
+    "am_echo",
+    "am_eric",
+    "am_fenrir",
+    "am_liam",
+    "am_michael",
+    "am_onyx",
+    "am_puck",
+    "am_santa",
+    "bf_alice",
+    "bf_emma",
+    "bf_isabella",
+    "bf_lily",
+    "bm_daniel",
+    "bm_fable",
+    "bm_george",
+    "bm_lewis",
 ];
 
 /// Default voice.
@@ -25,10 +49,7 @@ pub const DEFAULT_VOICE: &str = "af_heart";
 
 /// Look up a voice name, returning its speaker id (index into [`VOICES`]).
 pub fn voice_id(name: &str) -> Option<i32> {
-    VOICES
-        .iter()
-        .position(|v| *v == name)
-        .map(|i| i as i32)
+    VOICES.iter().position(|v| *v == name).map(|i| i as i32)
 }
 
 /// Errors from loading the model or synthesizing speech.
@@ -58,7 +79,11 @@ impl fmt::Display for EngineError {
                 dir.display()
             ),
             EngineError::UnknownVoice(name) => {
-                write!(f, "Unknown voice '{name}'. Available voices: {}.", VOICES.join(", "))
+                write!(
+                    f,
+                    "Unknown voice '{name}'. Available voices: {}.",
+                    VOICES.join(", ")
+                )
             }
             EngineError::NoAudio(text) => {
                 let preview: String = text.chars().take(60).collect();
@@ -138,12 +163,7 @@ impl KokoroEngine {
     /// Synthesize `text` with `voice` at `speed`, returning mono samples.
     ///
     /// `speed` is clamped to 0.5..=2.0 (non-finite values become 1.0).
-    pub fn synthesize(
-        &self,
-        text: &str,
-        voice: &str,
-        speed: f32,
-    ) -> Result<Vec<f32>, EngineError> {
+    pub fn synthesize(&self, text: &str, voice: &str, speed: f32) -> Result<Vec<f32>, EngineError> {
         let sid = voice_id(voice).ok_or_else(|| EngineError::UnknownVoice(voice.to_string()))?;
         // The crate passes text through CString::new().unwrap(), which would
         // abort the process (panic = "abort") on an interior NUL.
@@ -158,9 +178,9 @@ impl KokoroEngine {
             speed,
             ..Default::default()
         };
-        let audio = self
-            .tts
-            .generate_with_config(&text, &gen_config, None::<fn(&[f32], f32) -> bool>);
+        let audio =
+            self.tts
+                .generate_with_config(&text, &gen_config, None::<fn(&[f32], f32) -> bool>);
         match audio {
             Some(audio) => {
                 let samples = audio.samples().to_vec();
