@@ -75,14 +75,53 @@ struct QueuedItem {
     pos: usize,
 }
 
+/// How many finished items the audio callback can park in [`SinkState::spent`]
+/// before it must drop them (rare; frees on the real-time thread as before).
+const SPENT_CAPACITY: usize = 8;
+
 /// State shared with the cpal data callback.
 struct SinkState {
     queue: VecDeque<QueuedItem>,
+    /// Finished items parked by the audio callback instead of dropped there:
+    /// dropping a `QueuedItem` frees its sample `Vec`, which must not happen
+    /// on the real-time thread. The controller side frees them via
+    /// [`SinkState::drain_spent`].
+    spent: Vec<QueuedItem>,
     /// Output silence instead of queued audio (pause fallback for hosts that
     /// refuse to pause the stream).
     silence: bool,
     /// Completion/error notifications; set by the controller before playback.
     events: Option<mpsc::Sender<SinkEvent>>,
+}
+
+impl SinkState {
+    fn new() -> Self {
+        Self {
+            queue: VecDeque::new(),
+            spent: Vec::with_capacity(SPENT_CAPACITY),
+            silence: false,
+            events: None,
+        }
+    }
+
+    /// Move the finished head item off the queue into `spent` and return its
+    /// id. Runs on the audio callback: it never frees sample buffers unless
+    /// `spent` is full (rare). Returns `None` when the queue is empty.
+    fn retire_finished_head(&mut self) -> Option<u64> {
+        let done = self.queue.pop_front()?;
+        let id = done.id;
+        if self.spent.len() < self.spent.capacity() {
+            self.spent.push(done);
+        }
+        // Else: `spent` is full; drop `done` here as before.
+        Some(id)
+    }
+
+    /// Free sample buffers retired by the audio callback. Runs only on the
+    /// controller side, from `enqueue`, `clear` and `close_if_idle`.
+    fn drain_spent(&mut self) {
+        self.spent.clear();
+    }
 }
 
 /// Persistent audio sink: at most one cpal output stream, opened lazily on the
@@ -114,11 +153,7 @@ impl AudioSink {
             device,
             channels: supported.channels(),
             sample_rate: supported.sample_rate(),
-            state: Arc::new(Mutex::new(SinkState {
-                queue: VecDeque::new(),
-                silence: false,
-                events: None,
-            })),
+            state: Arc::new(Mutex::new(SinkState::new())),
             stream: None,
             dead: Arc::new(AtomicBool::new(false)),
             paused: false,
@@ -146,15 +181,13 @@ impl AudioSink {
     ) -> Result<(), AudioError> {
         let mono = resample_to_rate(samples, sample_rate, self.sample_rate)?;
         self.ensure_stream()?;
-        self.state
-            .lock()
-            .unwrap_or_else(|err| err.into_inner())
-            .queue
-            .push_back(QueuedItem {
-                id,
-                samples: mono,
-                pos: 0,
-            });
+        let mut state = self.state.lock().unwrap_or_else(|err| err.into_inner());
+        state.drain_spent();
+        state.queue.push_back(QueuedItem {
+            id,
+            samples: mono,
+            pos: 0,
+        });
         Ok(())
     }
 
@@ -189,11 +222,9 @@ impl AudioSink {
 
     /// Drop all queued items immediately; stale audio never plays after this.
     pub fn clear(&mut self) {
-        self.state
-            .lock()
-            .unwrap_or_else(|err| err.into_inner())
-            .queue
-            .clear();
+        let mut state = self.state.lock().unwrap_or_else(|err| err.into_inner());
+        state.queue.clear();
+        state.drain_spent();
     }
 
     /// Drop the stream when the queue is empty (the controller calls this once
@@ -203,13 +234,9 @@ impl AudioSink {
             self.stream = None;
             self.dead.store(false, Ordering::SeqCst);
         }
-        let empty = self
-            .state
-            .lock()
-            .unwrap_or_else(|err| err.into_inner())
-            .queue
-            .is_empty();
-        if empty {
+        let mut state = self.state.lock().unwrap_or_else(|err| err.into_inner());
+        state.drain_spent();
+        if state.queue.is_empty() {
             self.stream = None;
         }
     }
@@ -286,13 +313,15 @@ impl AudioSink {
                                     break;
                                 }
                                 None => {
-                                    // The head item is done: report it and
-                                    // fill this frame from the next item.
-                                    // Sending on an mpsc channel doesn't block.
-                                    if let Some(done) = state.queue.pop_front()
+                                    // The head item is done: park it in
+                                    // `spent` (no free on this thread),
+                                    // report it, and fill this frame from
+                                    // the next item. Sending on an mpsc
+                                    // channel doesn't block.
+                                    if let Some(id) = state.retire_finished_head()
                                         && let Some(events) = &state.events
                                     {
-                                        let _ = events.send(SinkEvent::ItemFinished(done.id));
+                                        let _ = events.send(SinkEvent::ItemFinished(id));
                                     }
                                 }
                             }
@@ -316,5 +345,65 @@ impl AudioSink {
         }
         self.stream = Some(stream);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn queued(id: u64) -> QueuedItem {
+        QueuedItem {
+            id,
+            samples: vec![0.0; 16],
+            pos: 16,
+        }
+    }
+
+    #[test]
+    fn spent_starts_empty_with_capacity() {
+        let state = SinkState::new();
+        assert!(state.spent.is_empty());
+        assert_eq!(state.spent.capacity(), SPENT_CAPACITY);
+    }
+
+    #[test]
+    fn retire_parks_head_and_drain_frees_it() {
+        let mut state = SinkState::new();
+        state.queue.push_back(queued(7));
+        state.queue.push_back(queued(8));
+
+        assert_eq!(state.retire_finished_head(), Some(7));
+        assert_eq!(state.queue.len(), 1);
+        assert_eq!(state.spent.len(), 1);
+        assert_eq!(state.spent[0].id, 7);
+
+        state.drain_spent();
+        assert!(state.spent.is_empty());
+        // Draining keeps the reservation (no realloc on the next retire).
+        assert_eq!(state.spent.capacity(), SPENT_CAPACITY);
+        // The live queue is untouched.
+        assert_eq!(state.queue.len(), 1);
+        assert_eq!(state.queue[0].id, 8);
+
+        assert_eq!(state.retire_finished_head(), Some(8));
+        assert_eq!(state.retire_finished_head(), None);
+    }
+
+    #[test]
+    fn retire_drops_when_spent_is_full() {
+        let mut state = SinkState::new();
+        for id in 0..SPENT_CAPACITY as u64 {
+            state.queue.push_back(queued(id));
+            assert_eq!(state.retire_finished_head(), Some(id));
+        }
+        assert_eq!(state.spent.len(), SPENT_CAPACITY);
+
+        // Full: the item is dropped instead of growing `spent`, but its id is
+        // still reported so completion signalling is unchanged.
+        state.queue.push_back(queued(99));
+        assert_eq!(state.retire_finished_head(), Some(99));
+        assert_eq!(state.spent.len(), SPENT_CAPACITY);
+        assert_eq!(state.spent.capacity(), SPENT_CAPACITY);
     }
 }
