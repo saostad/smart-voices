@@ -1,0 +1,24 @@
+[package]
+name = "smart-voices"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "smart_voices"
+path = "src/lib.rs"
+
+[[bin]]
+name = "smart-voices"
+path = "src/main.rs"
+
+[dependencies]
+sherpa-onnx = "=1.13.8"
+cpal = "=0.18.2"
+dirs = "=7.0.0"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = true
+panic = "abort"
