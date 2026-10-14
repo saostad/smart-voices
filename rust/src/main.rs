@@ -224,6 +224,7 @@ fn speak(args: &[String]) -> i32 {
         sanitizer_options: SanitizerOptions::default(),
         pronunciations,
         persian_voice,
+        debug_latency: false,
     };
     let persian_root = models_root.clone();
     let factory = move || -> Result<Box<dyn Synth>, String> {
@@ -259,7 +260,7 @@ fn speak(args: &[String]) -> i32 {
                 eprintln!("Error: {message}");
                 return 1;
             }
-            PlayerEvent::State(_) => {}
+            PlayerEvent::State(_) | PlayerEvent::Latency { .. } => {}
         }
     }
     eprintln!("Error: The player stopped before finishing.");
@@ -511,6 +512,7 @@ impl LazyPlayer {
             sanitizer_options: SanitizerOptions::default(),
             pronunciations: self.pronunciations.clone(),
             persian_voice,
+            debug_latency: false,
         };
         let model = self.model;
         let persian_root = models_root.clone();

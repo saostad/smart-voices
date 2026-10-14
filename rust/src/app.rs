@@ -183,7 +183,16 @@ pub fn run() -> i32 {
         let _ = shortcut_proxy.send_event(AppEvent::Shortcut(event));
     }));
 
-    let mut app = App::new(proxy, settings, settings_file, pronunciations, models_root);
+    // Checked once at startup; the latency probe is zero-cost when off.
+    let debug_latency = std::env::var("SMART_VOICES_DEBUG").is_ok_and(|v| v == "1");
+    let mut app = App::new(
+        proxy,
+        settings,
+        settings_file,
+        pronunciations,
+        models_root,
+        debug_latency,
+    );
     // The clipboard watcher runs on its own thread; its events are forwarded
     // into the loop. A failure here (e.g. Wayland without X11) still shows
     // the tray so manual Read Clipboard keeps working.
@@ -257,6 +266,12 @@ struct App {
     /// Text to play once the running download finishes.
     pending_text: Option<String>,
     exit_code: i32,
+    /// Latency probe (`SMART_VOICES_DEBUG=1`, checked once at startup).
+    debug_latency: bool,
+    /// When the last copy event arrived (only when debugging latency).
+    last_copy_time: Option<Instant>,
+    /// Copy→read time for the reading awaiting its first audio.
+    pending_copy_to_read_ms: Option<u64>,
 }
 
 impl App {
@@ -266,6 +281,7 @@ impl App {
         settings_path: Option<PathBuf>,
         pronunciations: Pronunciations,
         models_root: PathBuf,
+        debug_latency: bool,
     ) -> Self {
         let model = settings.model;
         Self {
@@ -306,6 +322,9 @@ impl App {
             downloading: false,
             pending_text: None,
             exit_code: 0,
+            debug_latency,
+            last_copy_time: None,
+            pending_copy_to_read_ms: None,
         }
     }
 
@@ -623,6 +642,14 @@ impl App {
             return;
         }
         if let Some(player) = &self.player {
+            if self.debug_latency {
+                let copy_ms = self
+                    .last_copy_time
+                    .map(|start| start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64)
+                    .unwrap_or(0);
+                self.pending_copy_to_read_ms = Some(copy_ms);
+                self.last_copy_time = None;
+            }
             player.play(text);
         }
     }
@@ -710,6 +737,7 @@ impl App {
             sanitizer_options: SanitizerOptions::default(),
             pronunciations: self.pronunciations.clone(),
             persian_voice,
+            debug_latency: self.debug_latency,
         };
         let models_root = self.models_root.clone();
         let model = self.model;
@@ -789,7 +817,21 @@ impl App {
                 self.active = false;
                 self.last_chunk = None;
                 self.paused = false;
+                self.pending_copy_to_read_ms = None;
                 self.show_error(&message);
+            }
+            PlayerEvent::Latency {
+                read_to_first_ms,
+                load_ms,
+                synth_ms,
+                chars,
+            } => {
+                if self.debug_latency {
+                    let copy_ms = self.pending_copy_to_read_ms.take().unwrap_or(0);
+                    eprintln!(
+                        "latency: copy→read {copy_ms} ms, read→first audio {read_to_first_ms} ms (load {load_ms} ms, synth {synth_ms} ms, {chars} chars)"
+                    );
+                }
             }
         }
         self.update_transport();
@@ -802,6 +844,9 @@ impl App {
                 // flight; ignore it.
                 if !self.settings.watch_clipboard {
                     return;
+                }
+                if self.debug_latency {
+                    self.last_copy_time = Some(Instant::now());
                 }
                 if self.settings.auto_read {
                     self.read_clipboard();

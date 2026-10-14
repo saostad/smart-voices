@@ -138,6 +138,8 @@ pub struct PlayerConfig {
     pub sanitizer_options: SanitizerOptions,
     pub pronunciations: Pronunciations,
     pub persian_voice: PersianVoice,
+    /// Emit a [`PlayerEvent::Latency`] per reading (off by default).
+    pub debug_latency: bool,
 }
 
 /// Playback state (see [`PlayerEvent::State`]).
@@ -162,6 +164,15 @@ pub enum PlayerEvent {
     Finished,
     /// Always the full message (engine load errors verbatim).
     Error(String),
+    /// First-audio timing for a reading (only when `debug_latency` is set):
+    /// milliseconds from `play` to chunk 1 enqueued, engine load and chunk 1
+    /// synth time within it, and chunk 1's char count.
+    Latency {
+        read_to_first_ms: u64,
+        load_ms: u64,
+        synth_ms: u64,
+        chars: usize,
+    },
 }
 
 /// Commands sent to the controller thread.
@@ -321,6 +332,7 @@ struct Controller<O: Output> {
     sanitizer_options: SanitizerOptions,
     pronunciations: Pronunciations,
     persian_voice: PersianVoice,
+    debug_latency: bool,
     factory: Box<dyn FnMut() -> Result<Box<dyn Synth>, String> + Send>,
     persian_factory: Box<dyn FnMut() -> Result<Box<dyn Synth>, String> + Send>,
     output: O,
@@ -348,6 +360,11 @@ struct Controller<O: Output> {
     /// When the player entered idle (schedules stream close + engine unload).
     idle_since: Option<Instant>,
     stream_closed: bool,
+    /// Latency probe for the current reading (only when `debug_latency`).
+    latency_play_start: Option<Instant>,
+    latency_load: Duration,
+    latency_synth: Option<Duration>,
+    latency_pending: bool,
 }
 
 impl<O: Output> Controller<O> {
@@ -366,6 +383,7 @@ impl<O: Output> Controller<O> {
             sanitizer_options: config.sanitizer_options,
             pronunciations: config.pronunciations,
             persian_voice: config.persian_voice,
+            debug_latency: config.debug_latency,
             factory,
             persian_factory,
             output,
@@ -384,6 +402,10 @@ impl<O: Output> Controller<O> {
             output_paused: false,
             idle_since: None,
             stream_closed: true,
+            latency_play_start: None,
+            latency_load: Duration::ZERO,
+            latency_synth: None,
+            latency_pending: false,
         }
     }
 
@@ -474,6 +496,12 @@ impl<O: Output> Controller<O> {
     /// Interrupt anything playing and read `text`.
     fn play(&mut self, text: String) {
         self.reset_playlist();
+        if self.debug_latency {
+            self.latency_play_start = Some(Instant::now());
+            self.latency_load = Duration::ZERO;
+            self.latency_synth = None;
+            self.latency_pending = true;
+        }
         self.chunks = prepare(&text, &self.sanitizer_options, &self.pronunciations);
         self.cursor = 0;
         self.idle_since = None;
@@ -491,7 +519,12 @@ impl<O: Output> Controller<O> {
             .any(|chunk| chunk_language(&chunk.text) == Lang::English);
         if needs_english && self.english.is_none() {
             self.set_state(PlayerState::Loading);
-            match (self.factory)() {
+            let load_start = self.debug_latency.then(Instant::now);
+            let created = (self.factory)();
+            if let Some(start) = load_start {
+                self.latency_load += start.elapsed();
+            }
+            match created {
                 Ok(engine) => self.english = Some(engine),
                 Err(message) => {
                     self.fail(message);
@@ -539,6 +572,9 @@ impl<O: Output> Controller<O> {
         self.pending_synth = None;
         self.chunks.clear();
         self.synth_next = 0;
+        self.latency_play_start = None;
+        self.latency_synth = None;
+        self.latency_pending = false;
     }
 
     fn next(&mut self) {
@@ -636,10 +672,14 @@ impl<O: Output> Controller<O> {
         }
         let resume_state = self.state;
         self.set_state(PlayerState::Loading);
+        let load_start = (self.debug_latency && self.latency_pending).then(Instant::now);
         let created = match lang {
             Lang::English => (self.factory)(),
             Lang::Persian => (self.persian_factory)(),
         };
+        if let Some(start) = load_start {
+            self.latency_load += start.elapsed();
+        }
         match created {
             Ok(engine) => {
                 match lang {
@@ -673,6 +713,8 @@ impl<O: Output> Controller<O> {
             Lang::Persian => self.persian_voice.id().to_string(),
         };
         let speed = self.speed;
+        let time_synth = self.debug_latency && self.latency_pending && index == 0;
+        let synth_start = time_synth.then(Instant::now);
         let engine = match lang {
             Lang::English => self.english.as_mut(),
             Lang::Persian => self.persian.as_mut(),
@@ -680,6 +722,9 @@ impl<O: Output> Controller<O> {
         if let Some(engine) = engine {
             match engine.synthesize(&spoken, &voice, speed) {
                 Ok(audio) => {
+                    if let Some(start) = synth_start {
+                        self.latency_synth = Some(start.elapsed());
+                    }
                     let mut samples = audio.samples;
                     let rate = audio.sample_rate;
                     let silence = (chunk.pause_after.seconds() * f64::from(rate)) as usize;
@@ -709,6 +754,26 @@ impl<O: Output> Controller<O> {
                 let was_empty = self.inflight.is_empty();
                 self.inflight.push_back(Inflight { id, index });
                 self.synth_next = index + 1;
+                if self.debug_latency && self.latency_pending && index == 0 {
+                    self.latency_pending = false;
+                    let read_to_first_ms = self
+                        .latency_play_start
+                        .map(|start| start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64)
+                        .unwrap_or(0);
+                    let chars = self
+                        .chunks
+                        .first()
+                        .map_or(0, |chunk| chunk.text.chars().count());
+                    self.emit(PlayerEvent::Latency {
+                        read_to_first_ms,
+                        load_ms: self.latency_load.as_millis().min(u128::from(u64::MAX)) as u64,
+                        synth_ms: self
+                            .latency_synth
+                            .map(|d| d.as_millis().min(u128::from(u64::MAX)) as u64)
+                            .unwrap_or(0),
+                        chars,
+                    });
+                }
                 if was_empty && let Some(chunk) = self.chunks.get(index) {
                     // Became the head: it starts playing now.
                     self.cursor = index;
@@ -923,6 +988,7 @@ mod tests {
             sanitizer_options: SanitizerOptions::default(),
             pronunciations: Pronunciations::new(Vec::new()),
             persian_voice: PersianVoice::Amir,
+            debug_latency: false,
         }
     }
 
@@ -1824,6 +1890,44 @@ mod tests {
         player.prewarm();
         expect_no_event(&events);
         assert_eq!(factory_count.load(Ordering::SeqCst), 1);
+        player.shutdown();
+    }
+
+    #[test]
+    fn latency_event_reports_first_audio_timing_when_enabled() {
+        let (output, shared) = FakeOutput::new();
+        let mut config = test_config(None);
+        config.debug_latency = true;
+        let (player, events) = Player::spawn(
+            config,
+            counting_factory(FakeSynth::new(), Arc::new(AtomicUsize::new(0))),
+            counting_factory(FakeSynth::new(), Arc::new(AtomicUsize::new(0))),
+            output,
+        );
+        player.play("Hello world. Second.");
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Loading)
+        );
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Playing)
+        );
+        // Latency arrives with the first enqueue, before its Chunk event.
+        match next_event(&events) {
+            PlayerEvent::Latency {
+                read_to_first_ms,
+                load_ms: _,
+                synth_ms: _,
+                chars,
+            } => {
+                assert_eq!(chars, "Hello world.".chars().count());
+                assert!(read_to_first_ms < 5000, "{read_to_first_ms}");
+            }
+            event => panic!("expected Latency, got {event:?}"),
+        }
+        assert_eq!(next_event(&events), chunk(0, 2, "Hello world."));
+        wait_for_enqueued(&shared, 2);
         player.shutdown();
     }
 }
