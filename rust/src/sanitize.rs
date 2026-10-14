@@ -324,7 +324,15 @@ fn parse_item(events: &[Event], pos: &mut usize, options: &SanitizerOptions) -> 
                     .push(collect_inline(events, pos, &TagEnd::Paragraph, options));
             }
             Event::Start(Tag::List(_)) => parse_list(events, pos, options, &mut item.nested),
-            Event::Start(_) => parse_block(events, pos, options, &mut item.nested),
+            Event::Start(_) => {
+                if ends_item_inline(&events[*pos]) {
+                    parse_block(events, pos, options, &mut item.nested);
+                } else {
+                    // Span-level tag directly under the item: inline content.
+                    item.paragraphs
+                        .push(collect_inline_until(events, pos, None, options));
+                }
+            }
             Event::End(_) => {
                 *pos += 1;
             }
@@ -1481,4 +1489,510 @@ fn is_footnote_definition(line: &str) -> bool {
         return false;
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Instant;
+
+    fn sanitize_default(text: &str) -> Vec<SpeechSegment> {
+        sanitize(text, &SanitizerOptions::default())
+    }
+
+    fn seg(text: &str, pause: SpeechPause) -> SpeechSegment {
+        SpeechSegment {
+            text: text.to_string(),
+            pause,
+        }
+    }
+
+    #[test]
+    fn heading_and_paragraph_pauses() {
+        let result = sanitize_default("# Title\n\nBody text");
+        assert_eq!(
+            result,
+            [
+                seg("Title.", SpeechPause::Long),
+                seg("Body text.", SpeechPause::Medium),
+            ]
+        );
+    }
+
+    #[test]
+    fn inline_formatting_strips_to_text() {
+        let result = sanitize_default("Hello **bold** and *italic* and ~~gone~~.");
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].text, "Hello bold and italic and gone.");
+    }
+
+    #[test]
+    fn inline_code_and_link_and_image() {
+        let result = sanitize_default(
+            "Use `print()` and a [link text](https://example.com) plus ![alt](img.png) done.",
+        );
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].text, "Use print() and a link text plus done.");
+    }
+
+    #[test]
+    fn soft_and_hard_breaks_become_spaces() {
+        let soft = sanitize_default("one\ntwo");
+        assert_eq!(soft[0].text, "one two.");
+        let hard = sanitize_default("one  \ntwo");
+        assert_eq!(hard[0].text, "one two.");
+    }
+
+    #[test]
+    fn bare_url_becomes_link_to_host() {
+        let result = sanitize_default("See https://www.example.com/page for details.");
+        assert_eq!(result[0].text, "See link to example.com for details.");
+    }
+
+    #[test]
+    fn bare_url_skip_removes() {
+        let options = SanitizerOptions {
+            bare_urls: BareUrls::Skip,
+            ..SanitizerOptions::default()
+        };
+        let result = sanitize("See https://example.com/page for details.", &options);
+        assert_eq!(result[0].text, "See for details.");
+    }
+
+    #[test]
+    fn autolink_becomes_link_to_host() {
+        let result = sanitize_default("See <https://example.com/x>.");
+        assert_eq!(result[0].text, "See link to example.com.");
+    }
+
+    #[test]
+    fn unordered_list_pauses() {
+        let result = sanitize_default("- Apples\n- Oranges\n- Bananas");
+        assert_eq!(
+            result,
+            [
+                seg("Apples.", SpeechPause::Short),
+                seg("Oranges.", SpeechPause::Short),
+                seg("Bananas.", SpeechPause::Medium),
+            ]
+        );
+    }
+
+    #[test]
+    fn ordered_list_prefixes() {
+        let md = (1..=11)
+            .map(|n| format!("{n}. Item {n}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let result = sanitize_default(&md);
+        assert_eq!(result.len(), 11);
+        assert_eq!(result[0].text, "First, item 1.");
+        assert_eq!(result[1].text, "Second, item 2.");
+        assert_eq!(result[9].text, "Tenth, item 10.");
+        assert_eq!(result[10].text, "Number 11, item 11.");
+        assert_eq!(result[10].pause, SpeechPause::Medium);
+        assert_eq!(result[0].pause, SpeechPause::Short);
+    }
+
+    #[test]
+    fn citation_before_punctuation_leaves_no_gap() {
+        assert_eq!(sanitize_default("citation [2].")[0].text, "citation.");
+        assert_eq!(sanitize_default("Text[^1].")[0].text, "Text.");
+        assert_eq!(
+            sanitize_default("Hello [1], world.")[0].text,
+            "Hello, world."
+        );
+    }
+
+    #[test]
+    fn ordered_prefix_lowercases_unless_acronym() {
+        let result = sanitize_default("1. Download files\n2. API keys");
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].text, "First, download files.");
+        assert_eq!(result[1].text, "Second, API keys.");
+    }
+
+    #[test]
+    fn footnote_definitions_stripped() {
+        let result = sanitize_default("Text.\n\n[^1]: Footnote text.\n\nMore.");
+        assert_eq!(
+            result,
+            [
+                seg("Text.", SpeechPause::Medium),
+                seg("More.", SpeechPause::Medium),
+            ]
+        );
+        assert_eq!(
+            sanitize_default("  [^12]: indented def.\nBody."),
+            [seg("Body.", SpeechPause::Medium)]
+        );
+    }
+
+    #[test]
+    fn tilde_before_digit_becomes_about() {
+        assert_eq!(sanitize_default("~300MB")[0].text, "about 300MB.");
+        assert_eq!(
+            sanitize_default("Costs ~300 dollars.")[0].text,
+            "Costs about 300 dollars."
+        );
+    }
+
+    #[test]
+    fn task_items_prefixes() {
+        let result = sanitize_default("- [x] Ship it\n- [ ] Write docs");
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].text, "Done: Ship it.");
+        assert_eq!(result[1].text, "To do: Write docs.");
+    }
+
+    #[test]
+    fn nested_lists_flatten_in_order() {
+        let md = "- Item 1\n  - Nested A\n  - Nested B\n- Item 2";
+        let result = sanitize_default(md);
+        let texts: Vec<&str> = result.iter().map(|s| s.text.as_str()).collect();
+        assert_eq!(texts, ["Item 1.", "Nested A.", "Nested B.", "Item 2."]);
+    }
+
+    #[test]
+    fn list_item_multiple_paragraphs_join() {
+        let md = "- First para.\n\n  Second para.";
+        let result = sanitize_default(md);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].text, "First para. Second para.");
+    }
+
+    #[test]
+    fn blockquote_uses_normal_rules() {
+        let result = sanitize_default("> Quoted **bold** text.");
+        assert_eq!(result, [seg("Quoted bold text.", SpeechPause::Medium)]);
+    }
+
+    #[test]
+    fn code_block_announce_default() {
+        let result = sanitize_default("```\nlet x = 1\n```");
+        assert_eq!(result, [seg("Here's a code snippet.", SpeechPause::Medium)]);
+    }
+
+    #[test]
+    fn code_block_language_mapping() {
+        let cases = [
+            ("py", "Here's a Python code snippet."),
+            ("python", "Here's a Python code snippet."),
+            ("js", "Here's a JavaScript code snippet."),
+            ("ts", "Here's a TypeScript code snippet."),
+            ("sh", "Here's a shell code snippet."),
+            ("swift", "Here's a Swift code snippet."),
+            ("json", "Here's a JSON code snippet."),
+            ("yaml", "Here's a YAML code snippet."),
+            ("sql", "Here's a SQL code snippet."),
+            ("rust", "Here's a rust code snippet."),
+            ("mermaid", "Here's a diagram."),
+        ];
+        for (lang, expected) in cases {
+            let result = sanitize_default(&format!("```{lang}\ncode\n```"));
+            assert_eq!(result.len(), 1, "{lang}");
+            assert_eq!(
+                result.first().map(|s| s.text.as_str()),
+                Some(expected),
+                "{lang}"
+            );
+        }
+    }
+
+    #[test]
+    fn code_block_read_full_and_skip() {
+        let options = SanitizerOptions {
+            code_blocks: CodeBlocks::ReadFull,
+            ..SanitizerOptions::default()
+        };
+        let full = sanitize("```\nline one\n\nline two\n```", &options);
+        assert_eq!(
+            full,
+            [
+                seg("line one.", SpeechPause::Short),
+                seg("line two.", SpeechPause::Medium),
+            ]
+        );
+        let options = SanitizerOptions {
+            code_blocks: CodeBlocks::Skip,
+            ..SanitizerOptions::default()
+        };
+        assert_eq!(sanitize("```\ncode\n```", &options), []);
+    }
+
+    #[test]
+    fn table_read_rows() {
+        let md = "| Name | Age |\n| --- | --- |\n| Alice | 30 |\n| Bob | 25 |";
+        let result = sanitize_default(md);
+        assert_eq!(
+            result,
+            [
+                seg("A table with 2 rows.", SpeechPause::Medium),
+                seg("Alice: Age 30.", SpeechPause::Medium),
+                seg("Bob: Age 25.", SpeechPause::Medium),
+            ]
+        );
+    }
+
+    #[test]
+    fn table_single_row_singular() {
+        let md = "| Name | Age |\n| --- | --- |\n| Alice | 30 |";
+        let result = sanitize_default(md);
+        assert_eq!(result[0].text, "A table with 1 row.");
+    }
+
+    #[test]
+    fn table_empty_headers_join_with_commas() {
+        let md = "| | |\n| --- | --- |\n| a | b |";
+        let result = sanitize_default(md);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[1].text, "a, b.");
+    }
+
+    #[test]
+    fn table_announce_and_skip_and_max_rows() {
+        let md = "| A | B | C |\n| --- | --- | --- |\n| 1 | 2 | 3 |";
+        let options = SanitizerOptions {
+            tables: Tables::Announce,
+            ..SanitizerOptions::default()
+        };
+        let announced = sanitize(md, &options);
+        assert_eq!(
+            announced,
+            [seg(
+                "A table with 1 row and 3 columns, comparing A, B and C.",
+                SpeechPause::Medium
+            )]
+        );
+        let options = SanitizerOptions {
+            tables: Tables::Skip,
+            ..SanitizerOptions::default()
+        };
+        assert_eq!(sanitize(md, &options), []);
+        let options = SanitizerOptions {
+            tables: Tables::ReadRows,
+            max_table_rows_to_read: 0,
+            ..SanitizerOptions::default()
+        };
+        let limited = sanitize(md, &options);
+        assert_eq!(limited.len(), 1);
+        assert!(limited[0].text.contains("A table with 1 row and 3 columns"));
+    }
+
+    #[test]
+    fn table_announce_omits_comparing_when_headers_empty() {
+        let md = "| | |\n| --- | --- |\n| a | b |";
+        let options = SanitizerOptions {
+            tables: Tables::Announce,
+            ..SanitizerOptions::default()
+        };
+        let result = sanitize(md, &options);
+        assert_eq!(result[0].text, "A table with 1 row and 2 columns.");
+    }
+
+    #[test]
+    fn thematic_break_sets_previous_pause_long() {
+        let result = sanitize_default("First para.\n\n---\n\nSecond para.");
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], seg("First para.", SpeechPause::Long));
+        assert_eq!(result[1], seg("Second para.", SpeechPause::Medium));
+    }
+
+    #[test]
+    fn html_block_and_inline() {
+        let block = sanitize_default("<div>Hello<br>world</div>");
+        assert_eq!(block.len(), 1);
+        assert_eq!(block[0].text, "Hello world.");
+        let inline = sanitize_default("a <b>bold</b> c");
+        assert_eq!(inline[0].text, "a bold c.");
+        let empty = sanitize_default("<div></div>");
+        assert_eq!(empty, []);
+    }
+
+    #[test]
+    fn footnotes_and_citations_removed() {
+        assert_eq!(sanitize_default("Text[^1] more.")[0].text, "Text more.");
+        assert_eq!(sanitize_default("Claim [1] done.")[0].text, "Claim done.");
+        assert_eq!(sanitize_default("Claim [12] done.")[0].text, "Claim done.");
+        assert_eq!(
+            sanitize_default("Claim [1, 2] done.")[0].text,
+            "Claim done."
+        );
+        assert_eq!(sanitize_default("Claim [1-3] done.")[0].text, "Claim done.");
+    }
+
+    #[test]
+    fn emoji_removed_but_digits_hash_kept() {
+        let result = sanitize_default("Hi 👋 there 123 # done.");
+        assert_eq!(result[0].text, "Hi there 123 # done.");
+    }
+
+    #[test]
+    fn persian_text_kept() {
+        let result = sanitize_default("سلام دنیا 👋");
+        assert_eq!(result.len(), 1);
+        assert!(result[0].text.contains("سلام دنیا"));
+        assert!(!result[0].text.contains("👋"));
+    }
+
+    #[test]
+    fn word_replacements() {
+        assert_eq!(
+            sanitize_default("Apples e.g. oranges.")[0].text,
+            "Apples for example oranges."
+        );
+        assert_eq!(
+            sanitize_default("Apples i.e. oranges.")[0].text,
+            "Apples that is oranges."
+        );
+        assert_eq!(
+            sanitize_default("Apples etc. done.")[0].text,
+            "Apples et cetera done."
+        );
+        assert_eq!(
+            sanitize_default("Cats vs. dogs.")[0].text,
+            "Cats versus dogs."
+        );
+        assert_eq!(
+            sanitize_default("Cats vs dogs.")[0].text,
+            "Cats versus dogs."
+        );
+        assert_eq!(sanitize_default("A → B.")[0].text, "A to B.");
+        assert_eq!(sanitize_default("A -> B.")[0].text, "A to B.");
+        assert_eq!(sanitize_default("Fish & chips.")[0].text, "Fish and chips.");
+        assert_eq!(sanitize_default("Tea w/ sugar.")[0].text, "Tea with sugar.");
+    }
+
+    #[test]
+    fn leftover_markup_removed_and_terminal_punctuation() {
+        assert_eq!(sanitize_default("Hello")[0].text, "Hello.");
+        assert_eq!(sanitize_default("Hello!")[0].text, "Hello!");
+        assert_eq!(sanitize_default("**Hello**")[0].text, "Hello.");
+        assert_eq!(sanitize_default("a | b")[0].text, "a b.");
+        assert_eq!(
+            sanitize_default("keep file_name here.")[0].text,
+            "keep file_name here."
+        );
+    }
+
+    #[test]
+    fn realistic_chat_gpt_answer() {
+        let md = "# Morning Briefing\n\
+            \n\
+            Hello **world**, this is a *test* with `code` and a [link](https://example.com) plus emoji 🎉 and more.\n\
+            \n\
+            - Apples\n\
+            - Oranges\n\
+            - Bananas\n\
+            \n\
+            | Name | Age | City |\n\
+            | ---- | --- | ---- |\n\
+            | Alice | 30 | Paris |\n\
+            | Bob | 25 | Rome |\n\
+            | Cara | 28 | Madrid |\n\
+            \n\
+            ```python\n\
+            print(\"hi\")\n\
+            ```\n\
+            \n\
+            Visit https://www.example.com/page for more.\n\
+            \n\
+            ---\n";
+        let result = sanitize_default(md);
+        let expected = [
+            seg("Morning Briefing.", SpeechPause::Long),
+            seg(
+                "Hello world, this is a test with code and a link plus emoji and more.",
+                SpeechPause::Medium,
+            ),
+            seg("Apples.", SpeechPause::Short),
+            seg("Oranges.", SpeechPause::Short),
+            seg("Bananas.", SpeechPause::Medium),
+            seg("A table with 3 rows.", SpeechPause::Medium),
+            seg("Alice: Age 30, City Paris.", SpeechPause::Medium),
+            seg("Bob: Age 25, City Rome.", SpeechPause::Medium),
+            seg("Cara: Age 28, City Madrid.", SpeechPause::Medium),
+            seg("Here's a Python code snippet.", SpeechPause::Medium),
+            seg("Visit link to example.com for more.", SpeechPause::Long),
+        ];
+        assert_eq!(result, expected);
+        for segment in &result {
+            assert!(!segment.text.contains("#"));
+            assert!(!segment.text.contains("*"));
+            assert!(!segment.text.contains("|"));
+            assert!(!segment.text.contains("`"));
+            assert!(!segment.text.contains("http"));
+        }
+    }
+
+    #[test]
+    fn plain_text_passes_through() {
+        let result = sanitize_default("Just plain text");
+        assert_eq!(result, [seg("Just plain text.", SpeechPause::Medium)]);
+    }
+
+    #[test]
+    fn hashtag_mid_sentence_kept() {
+        let result = sanitize_default("Trend #hashtag here.");
+        assert_eq!(result[0].text, "Trend #hashtag here.");
+    }
+
+    #[test]
+    fn empty_input_returns_empty() {
+        assert_eq!(sanitize_default(""), []);
+        assert_eq!(sanitize_default("   \n  "), []);
+    }
+
+    #[test]
+    fn large_document_under_half_second() {
+        let mut lines = Vec::new();
+        for index in 0..2000 {
+            lines.push(format!(
+                "Paragraph {index} with **bold** and a [link](https://example.com) plus emoji 🎉."
+            ));
+        }
+        let md = lines.join("\n\n");
+        let start = Instant::now();
+        let result = sanitize_default(&md);
+        let elapsed = start.elapsed();
+        assert_eq!(result.len(), 2000);
+        assert!(elapsed.as_secs_f64() < 0.5, "took {elapsed:?}");
+    }
+
+    #[test]
+    fn mixed_unicode_input_does_not_panic() {
+        let md = "Emoji 🎉👋 test سلام دنیا 中文テスト\n\
+            Combining: e\u{301} a\u{308} o\u{303} and ZWJ \u{200d} done.\n\
+            \n\
+            | Héllo | 世界 |\n\
+            | --- | --- |\n\
+            | één [1] | ~42 |\n\
+            \n\
+            Unbalanced **bold and `code and ~~strike plus *star* run___\n\
+            \n\
+            - Item with `tick and **star\n\
+            - [x] Toोड़ो test\n\
+            \n\
+            Visit https://example.com/üser?q=🎉 for <b>bold</b> &amp; more.\n";
+        let options = SanitizerOptions::default();
+        let result = sanitize(md, &options);
+        assert!(!result.is_empty());
+        for segment in &result {
+            assert!(!segment.text.is_empty());
+        }
+        // Every option combination must survive it too.
+        for code_blocks in [CodeBlocks::Announce, CodeBlocks::Skip, CodeBlocks::ReadFull] {
+            for tables in [Tables::ReadRows, Tables::Announce, Tables::Skip] {
+                for bare_urls in [BareUrls::DomainOnly, BareUrls::Skip] {
+                    let options = SanitizerOptions {
+                        code_blocks,
+                        tables,
+                        bare_urls,
+                        max_table_rows_to_read: 1,
+                    };
+                    let _ = sanitize(md, &options);
+                }
+            }
+        }
+    }
 }

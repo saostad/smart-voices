@@ -4,9 +4,10 @@ use std::time::Instant;
 use smart_voices::audio::AudioOut;
 use smart_voices::engine::{KokoroEngine, ModelVariant};
 use smart_voices::models::{self, ModelError};
+use smart_voices::sanitize::{SanitizerOptions, sanitize};
 use smart_voices::settings::{Settings, settings_path};
 
-const USAGE: &str = "Usage: smart-voices speak \"<text>\" [--voice <name>] [--speed <f>] [--model fast|small]\n       smart-voices download [--model fast|small]";
+const USAGE: &str = "Usage: smart-voices speak \"<text>\" [--voice <name>] [--speed <f>] [--model fast|small]\n       smart-voices download [--model fast|small]\n       smart-voices clean [<file>]";
 
 fn main() {
     std::process::exit(run());
@@ -17,6 +18,7 @@ fn run() -> i32 {
     match args.first().map(String::as_str) {
         Some("speak") => speak(&args[1..]),
         Some("download") => download_cmd(&args[1..]),
+        Some("clean") => clean(&args[1..]),
         _ => {
             eprintln!("{USAGE}");
             2
@@ -197,6 +199,35 @@ fn download_cmd(args: &[String]) -> i32 {
             1
         }
     }
+}
+
+/// Read Markdown from `file` (or stdin) and print one line per
+/// sanitized segment as `<pause>\t<text>`.
+fn clean(args: &[String]) -> i32 {
+    let text = match args.len() {
+        0 => match std::io::read_to_string(std::io::stdin()) {
+            Ok(text) => text,
+            Err(err) => {
+                eprintln!("Error: Couldn't read from standard input: {err}.");
+                return 1;
+            }
+        },
+        1 => match std::fs::read_to_string(&args[0]) {
+            Ok(text) => text,
+            Err(err) => {
+                eprintln!("Error: Couldn't read {}: {err}.", args[0]);
+                return 1;
+            }
+        },
+        _ => {
+            eprintln!("{USAGE}");
+            return 2;
+        }
+    };
+    for segment in sanitize(&text, &SanitizerOptions::default()) {
+        println!("{}\t{}", segment.pause.label(), segment.text);
+    }
+    0
 }
 
 /// Download `variant` unless already installed, with a one-line stderr
