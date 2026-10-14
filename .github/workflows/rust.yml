@@ -3,6 +3,7 @@ name: Rust
 on:
   push:
     branches: [rust-port]
+    tags: ['rust-v*']
     paths: ['rust/**', '.github/workflows/rust.yml']
   pull_request:
     paths: ['rust/**', '.github/workflows/rust.yml']
@@ -91,3 +92,39 @@ jobs:
           name: smart-voices-macos-arm64
           path: rust/smart-voices-macos-arm64.zip
           retention-days: 14
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/rust-v')
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Linux build
+        uses: actions/download-artifact@v4
+        with:
+          name: smart-voices-linux-x86_64
+          path: rust/dist
+
+      - name: Download Windows build
+        uses: actions/download-artifact@v4
+        with:
+          name: smart-voices-windows-x86_64
+          path: rust/dist
+
+      - name: Download macOS build
+        uses: actions/download-artifact@v4
+        with:
+          name: smart-voices-macos-arm64
+          path: rust/dist
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$GITHUB_REF_NAME"
+          dist/smart-voices-linux-x86_64.tar.gz
+          dist/smart-voices-windows-x86_64.zip
+          dist/smart-voices-macos-arm64.zip
+          --title "Smart Voices (Rust) $GITHUB_REF_NAME"
+          --notes "Tray app for Linux, Windows and macOS (see rust/README.md). The first reading downloads the voice model (~350 MB)."
