@@ -1,7 +1,8 @@
 //! Windows clipboard watcher: event-driven, no timer. A message-only window
-//! (`HWND_MESSAGE`) with `AddClipboardFormatListener` receives
-//! `WM_CLIPBOARDUPDATE`; the watcher thread's `GetMessageW` loop observes it
-//! directly. Contents are never read by the watcher, only by [`read_text`].
+//! (`HWND_MESSAGE`) of a registered listener class with `AddClipboardFormatListener`
+//! receives `WM_CLIPBOARDUPDATE` in its own `wndproc`; the watcher thread runs a
+//! plain `GetMessageW` dispatch loop. Contents are never read by the watcher,
+//! only by [`read_text`].
 //!
 //! Note: compile-unknown on macOS/Linux (needs the Windows target); kept
 //! small and written against `windows-sys` 0.61 signatures.
@@ -12,16 +13,21 @@ use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use windows_sys::Win32::Foundation::{GetLastError, HWND};
+use windows_sys::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::System::DataExchange::{
     AddClipboardFormatListener, CloseClipboard, GetClipboardData, IsClipboardFormatAvailable,
     OpenClipboard, RegisterClipboardFormatW, RemoveClipboardFormatListener,
 };
+use windows_sys::Win32::System::Diagnostics::Debug::{
+    FORMAT_MESSAGE_FROM_SYSTEM, FORMAT_MESSAGE_IGNORE_INSERTS, FormatMessageW,
+};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
+use windows_sys::Win32::System::Ole::CF_UNICODETEXT;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DestroyWindow, DispatchMessageW, GetMessageW, HWND_MESSAGE, MSG, PostMessageW,
-    PostQuitMessage, TranslateMessage, WM_CLIPBOARDUPDATE, WM_CLOSE,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GWLP_USERDATA, GetMessageW,
+    GetWindowLongPtrW, HWND_MESSAGE, MSG, PostMessageW, PostQuitMessage, RegisterClassW,
+    SetWindowLongPtrW, TranslateMessage, WM_CLIPBOARDUPDATE, WM_CLOSE, WM_NCDESTROY, WNDCLASSW,
 };
 
 use super::{
@@ -29,9 +35,9 @@ use super::{
     windows_should_notify,
 };
 
-/// `CF_UNICODETEXT` (13). It lives in `Win32_System_Ole`, which this crate
-/// deliberately doesn't pull in, so the SDK value is spelled out here.
-const CF_UNICODETEXT: u32 = 13;
+/// `CF_UNICODETEXT` as the `u32` the clipboard APIs take
+/// (`CLIPBOARD_FORMAT` itself is a `u16`).
+const CF_TEXT: u32 = CF_UNICODETEXT as u32;
 
 /// Open attempts for [`read_text`]: another app may hold the clipboard open.
 const OPEN_RETRIES: u32 = 5;
@@ -52,7 +58,7 @@ impl Watcher {
 
 impl Drop for Watcher {
     fn drop(&mut self) {
-        // Wake the `GetMessageW` loop; it destroys the window and quits.
+        // Wake the `GetMessageW` loop; `wndproc` quits on `WM_CLOSE`.
         unsafe {
             PostMessageW(self.hwnd, WM_CLOSE, 0, 0);
         }
@@ -101,12 +107,68 @@ struct FormatIds {
     history: u32,
 }
 
+/// State shared with `wndproc`, owned by the window: stored in
+/// `GWLP_USERDATA` after creation, reclaimed on `WM_NCDESTROY`.
+struct ListenerState {
+    events: mpsc::Sender<ClipboardEvent>,
+    enabled: Arc<AtomicBool>,
+    formats: FormatIds,
+}
+
+/// Window procedure for the listener window: announce new text on
+/// `WM_CLIPBOARDUPDATE` (formats only, never contents), quit on `WM_CLOSE`.
+unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    // SAFETY: `hwnd` is our listener window; `GWLP_USERDATA` holds a
+    // `Box<ListenerState>` from creation until `WM_NCDESTROY`.
+    let state = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const ListenerState };
+    match msg {
+        WM_NCDESTROY => {
+            if !state.is_null() {
+                unsafe {
+                    drop(Box::from_raw(state as *mut ListenerState));
+                    SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+                }
+            }
+            unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+        }
+        WM_CLIPBOARDUPDATE => {
+            if !state.is_null() {
+                let state = unsafe { &*state };
+                if state.enabled.load(Ordering::Relaxed) && should_announce(&state.formats) {
+                    let _ = state
+                        .events
+                        .send(ClipboardEvent::Changed { source_app: None });
+                }
+            }
+            0
+        }
+        WM_CLOSE => {
+            // Stop request from `Drop`: quit the message loop. The window is
+            // destroyed by `run_loop` after the loop exits.
+            unsafe {
+                PostQuitMessage(0);
+            }
+            0
+        }
+        _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
+    }
+}
+
 fn run_loop(
     events: mpsc::Sender<ClipboardEvent>,
     enabled: Arc<AtomicBool>,
     ready: mpsc::Sender<Result<HWND, ClipboardError>>,
 ) {
-    let hwnd = match create_listener_window() {
+    let state = Box::new(ListenerState {
+        events: events.clone(),
+        enabled,
+        formats: FormatIds {
+            exclude: register_format(WINDOWS_SECRET_FORMATS[0]),
+            ignore: register_format(WINDOWS_SECRET_FORMATS[1]),
+            history: register_format(WINDOWS_HISTORY_OPT_OUT),
+        },
+    });
+    let hwnd = match create_listener_window(state) {
         Ok(hwnd) => hwnd,
         Err(err) => {
             let _ = ready.send(Err(err));
@@ -121,25 +183,15 @@ fn run_loop(
         let _ = ready.send(Err(err));
         return;
     }
-    let formats = FormatIds {
-        exclude: register_format(WINDOWS_SECRET_FORMATS[0]),
-        ignore: register_format(WINDOWS_SECRET_FORMATS[1]),
-        history: register_format(WINDOWS_HISTORY_OPT_OUT),
-    };
     let _ = ready.send(Ok(hwnd));
-    message_loop(hwnd, &formats, &events, &enabled);
+    message_loop(&events);
     unsafe {
         RemoveClipboardFormatListener(hwnd);
         DestroyWindow(hwnd);
     }
 }
 
-fn message_loop(
-    hwnd: HWND,
-    formats: &FormatIds,
-    events: &mpsc::Sender<ClipboardEvent>,
-    enabled: &AtomicBool,
-) {
+fn message_loop(events: &mpsc::Sender<ClipboardEvent>) {
     // SAFETY: `GetMessageW` writes a full `MSG` for this thread's windows;
     // `msg` starts zeroed and is only read after a positive return.
     let mut msg = MSG::default();
@@ -154,24 +206,6 @@ fn message_loop(
             ));
             break;
         }
-        if msg.message == WM_CLOSE && msg.hwnd == hwnd {
-            // Stop request from `Drop`: destroy the window and quit. The
-            // message is consumed here, not dispatched.
-            unsafe {
-                PostQuitMessage(0);
-            }
-            continue;
-        }
-        if msg.message == WM_CLIPBOARDUPDATE && enabled.load(Ordering::Relaxed) {
-            // The watcher checks formats only, never contents.
-            if should_announce(formats)
-                && events
-                    .send(ClipboardEvent::Changed { source_app: None })
-                    .is_err()
-            {
-                break;
-            }
-        }
         unsafe {
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
@@ -179,27 +213,38 @@ fn message_loop(
     }
 }
 
-/// Create the message-only listener window. The system class `STATIC` is
-/// pre-registered for every process; using it avoids `RegisterClass`, whose
-/// `WNDCLASS` structs would pull in the `Win32_Graphics_Gdi` feature.
-/// `WM_CLIPBOARDUPDATE` is observed directly in the message loop, so no custom
-/// window procedure is needed (unhandled messages go to `DefWindowProcW`).
-fn create_listener_window() -> Result<HWND, ClipboardError> {
-    let class = wide("STATIC");
+/// Register the listener window class and create its message-only window.
+/// Ownership of `state` moves to the window (`GWLP_USERDATA`); it is freed on
+/// `WM_NCDESTROY`, or here if creation fails.
+fn create_listener_window(state: Box<ListenerState>) -> Result<HWND, ClipboardError> {
+    let class_name = wide("SmartVoicesClipboardListener");
     // SAFETY: null module name queries the current module; the returned
-    // handle is only passed to `CreateWindowExW`.
+    // handle is only passed to `RegisterClassW`/`CreateWindowExW`.
     let instance = unsafe { GetModuleHandleW(std::ptr::null()) };
     if instance.is_null() {
         return Err(last_error(
             "Couldn't get the module handle for the clipboard listener",
         ));
     }
-    // SAFETY: all pointers are valid (class name is NUL-terminated) or null;
+    let class = WNDCLASSW {
+        lpfnWndProc: Some(wndproc),
+        hInstance: instance,
+        lpszClassName: class_name.as_ptr(),
+        ..Default::default()
+    };
+    // SAFETY: `class` is fully initialized and `lpszClassName` is alive for
+    // the call; the system copies the name.
+    if unsafe { RegisterClassW(&class) } == 0 {
+        return Err(last_error(
+            "Couldn't register the clipboard listener window class",
+        ));
+    }
+    // SAFETY: all pointers are valid (class name is registered) or null;
     // `HWND_MESSAGE` makes a message-only window.
     let hwnd = unsafe {
         CreateWindowExW(
             0,
-            class.as_ptr(),
+            class_name.as_ptr(),
             std::ptr::null(),
             0,
             0,
@@ -215,6 +260,12 @@ fn create_listener_window() -> Result<HWND, ClipboardError> {
     if hwnd.is_null() {
         return Err(last_error("Couldn't create the clipboard listener window"));
     }
+    // SAFETY: hands `state` to the window; `wndproc` reclaims it exactly once
+    // on `WM_NCDESTROY`. No `WM_CLIPBOARDUPDATE` can arrive before the
+    // listener is added after this returns, and `wndproc` null-checks anyway.
+    unsafe {
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, Box::into_raw(state) as isize);
+    }
     Ok(hwnd)
 }
 
@@ -224,7 +275,7 @@ fn create_listener_window() -> Result<HWND, ClipboardError> {
 fn should_announce(formats: &FormatIds) -> bool {
     let available = |format: u32| format != 0 && unsafe { IsClipboardFormatAvailable(format) } != 0;
     // SAFETY: pure availability queries, no clipboard ownership needed.
-    let has_text = unsafe { IsClipboardFormatAvailable(CF_UNICODETEXT) } != 0;
+    let has_text = unsafe { IsClipboardFormatAvailable(CF_TEXT) } != 0;
     let mut present = Vec::with_capacity(3);
     if available(formats.exclude) {
         present.push(WINDOWS_SECRET_FORMATS[0]);
@@ -283,7 +334,7 @@ unsafe fn clipboard_bytes(format: u32) -> Option<Vec<u8>> {
 
 pub(super) fn read_text() -> Result<Option<String>, ClipboardError> {
     // SAFETY: pure availability query, no clipboard ownership needed.
-    if unsafe { IsClipboardFormatAvailable(CF_UNICODETEXT) } == 0 {
+    if unsafe { IsClipboardFormatAvailable(CF_TEXT) } == 0 {
         return Ok(None);
     }
     open_clipboard()?;
@@ -314,7 +365,7 @@ fn read_unicode_text() -> Result<Option<String>, ClipboardError> {
     // SAFETY: the caller holds the clipboard open (see `read_text`); the
     // handle's bytes are valid between lock and unlock.
     unsafe {
-        let handle = GetClipboardData(CF_UNICODETEXT);
+        let handle = GetClipboardData(CF_TEXT);
         if handle.is_null() {
             return Err(last_error("Couldn't read text from the clipboard"));
         }
@@ -343,7 +394,34 @@ fn wide(text: &str) -> Vec<u16> {
 
 fn last_error(step: &str) -> ClipboardError {
     // SAFETY: `GetLastError` takes no arguments and is always valid to call.
-    ClipboardError::Backend(format!("{step}: Windows error {}.", unsafe {
-        GetLastError()
-    }))
+    let code = unsafe { GetLastError() };
+    match os_error_text(code) {
+        Some(text) => ClipboardError::Backend(format!("{step}: {text} (code {code}).")),
+        None => ClipboardError::Backend(format!("{step}: Windows error {code}.")),
+    }
+}
+
+/// Render a Win32 error code as text (`FormatMessageW`); `None` when the
+/// system has no message for the code.
+fn os_error_text(code: u32) -> Option<String> {
+    let mut buffer = [0u16; 512];
+    // SAFETY: the buffer is valid for its length in UTF-16 units; system
+    // message table, no inserts, neutral language.
+    let len = unsafe {
+        FormatMessageW(
+            FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+            std::ptr::null(),
+            code,
+            0,
+            buffer.as_mut_ptr(),
+            buffer.len() as u32,
+            std::ptr::null(),
+        )
+    };
+    if len == 0 {
+        return None;
+    }
+    let text = String::from_utf16_lossy(&buffer[..len as usize]);
+    let text = text.trim().to_string();
+    if text.is_empty() { None } else { Some(text) }
 }

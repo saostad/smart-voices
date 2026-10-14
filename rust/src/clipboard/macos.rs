@@ -6,7 +6,9 @@ use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
+use objc2::rc::Retained;
 use objc2::rc::autoreleasepool;
+use objc2::{class, msg_send};
 use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString, NSWorkspace};
 use objc2_foundation::NSInteger;
 
@@ -14,6 +16,19 @@ use super::{ClipboardError, ClipboardEvent, macos_should_notify};
 
 /// Poll cadence (same as Swift's 0.5 s timer).
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
+
+/// Error when the system returns no pasteboard (seen in sandboxes without a
+/// pasteboard service).
+const NO_PASTEBOARD: &str = "Couldn't access the clipboard (the system returned no pasteboard).";
+
+/// The general pasteboard, or `None` when the system returns NULL.
+/// The generated `NSPasteboard::generalPasteboard()` binding aborts the
+/// process on NULL, so this calls the selector directly instead.
+fn general_pasteboard() -> Option<Retained<NSPasteboard>> {
+    // SAFETY: `+generalPasteboard` takes no arguments; a NULL return becomes
+    // `None` instead of aborting.
+    unsafe { msg_send![class!(NSPasteboard), generalPasteboard] }
+}
 
 /// Commands for the watcher thread; `recv_timeout(POLL_INTERVAL)` doubles as
 /// the poll timer, so there is no separate timer.
@@ -61,7 +76,10 @@ pub(super) fn watch(events: mpsc::Sender<ClipboardEvent>) -> Result<Watcher, Cli
 
 fn run_loop(events: mpsc::Sender<ClipboardEvent>, control: mpsc::Receiver<Control>) {
     let mut enabled = true;
-    let mut last = change_count();
+    let Some(mut last) = change_count() else {
+        let _ = events.send(ClipboardEvent::Error(NO_PASTEBOARD.to_string()));
+        return;
+    };
     loop {
         match control.recv_timeout(POLL_INTERVAL) {
             Ok(Control::Stop) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
@@ -70,17 +88,27 @@ fn run_loop(events: mpsc::Sender<ClipboardEvent>, control: mpsc::Receiver<Contro
                 if enabled {
                     // Don't report copies made while paused (Swift parity:
                     // `isEnabled` resets `lastChangeCount` on enable).
-                    last = change_count();
+                    // A NULL pasteboard here is reported by the next poll.
+                    if let Some(current) = change_count() {
+                        last = current;
+                    }
                 }
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 if !enabled {
                     continue;
                 }
-                if let Some(event) = poll(&mut last)
-                    && events.send(event).is_err()
-                {
-                    break;
+                match poll(&mut last) {
+                    Ok(Some(event)) => {
+                        if events.send(event).is_err() {
+                            break;
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(err) => {
+                        let _ = events.send(ClipboardEvent::Error(err.to_string()));
+                        break;
+                    }
                 }
             }
         }
@@ -89,12 +117,14 @@ fn run_loop(events: mpsc::Sender<ClipboardEvent>, control: mpsc::Receiver<Contro
 
 /// Check for a reportable change, updating `last`. All pasteboard reads run in
 /// an autoreleasepool, as required off the main thread.
-fn poll(last: &mut NSInteger) -> Option<ClipboardEvent> {
+fn poll(last: &mut NSInteger) -> Result<Option<ClipboardEvent>, ClipboardError> {
     autoreleasepool(|_| {
-        let pasteboard = NSPasteboard::generalPasteboard();
+        let Some(pasteboard) = general_pasteboard() else {
+            return Err(ClipboardError::Backend(NO_PASTEBOARD.to_string()));
+        };
         let current = pasteboard.changeCount();
         if current == *last {
-            return None;
+            return Ok(None);
         }
         *last = current;
         let types: Vec<String> = pasteboard
@@ -103,16 +133,16 @@ fn poll(last: &mut NSInteger) -> Option<ClipboardEvent> {
             .unwrap_or_default();
         let refs: Vec<&str> = types.iter().map(String::as_str).collect();
         if !macos_should_notify(&refs) {
-            return None;
+            return Ok(None);
         }
-        Some(ClipboardEvent::Changed {
+        Ok(Some(ClipboardEvent::Changed {
             source_app: frontmost_app_name(),
-        })
+        }))
     })
 }
 
-fn change_count() -> NSInteger {
-    autoreleasepool(|_| NSPasteboard::generalPasteboard().changeCount())
+fn change_count() -> Option<NSInteger> {
+    autoreleasepool(|_| general_pasteboard().map(|pasteboard| pasteboard.changeCount()))
 }
 
 fn frontmost_app_name() -> Option<String> {
@@ -124,13 +154,15 @@ fn frontmost_app_name() -> Option<String> {
 }
 
 pub(super) fn read_text() -> Result<Option<String>, ClipboardError> {
-    Ok(autoreleasepool(|_| {
-        let pasteboard = NSPasteboard::generalPasteboard();
+    autoreleasepool(|_| {
+        let Some(pasteboard) = general_pasteboard() else {
+            return Err(ClipboardError::Backend(NO_PASTEBOARD.to_string()));
+        };
         // SAFETY: copying the global string-type constant out of its `extern`
         // static; the constant is always valid.
         let string_type = unsafe { NSPasteboardTypeString };
-        pasteboard
+        Ok(pasteboard
             .stringForType(string_type)
-            .map(|text| text.to_string())
-    }))
+            .map(|text| text.to_string()))
+    })
 }
