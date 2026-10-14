@@ -1,6 +1,9 @@
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use smart_voices::app;
 use smart_voices::audio::AudioSink;
 use smart_voices::clipboard::{self, ClipboardEvent, MIN_TEXT_LEN};
 use smart_voices::engine::{KokoroEngine, ModelVariant};
@@ -11,7 +14,7 @@ use smart_voices::pronounce::{Pronunciations, pronunciations_path};
 use smart_voices::sanitize::SanitizerOptions;
 use smart_voices::settings::{Settings, settings_path};
 
-const USAGE: &str = "Usage: smart-voices speak \"<text>\" [--voice <name>] [--speed <f>] [--model fast|small] [--verbose]\n       smart-voices download [--model fast|small]\n       smart-voices clean [<file>]\n       smart-voices watch [--auto-read]";
+const USAGE: &str = "Usage: smart-voices (starts the tray app)\n       smart-voices speak \"<text>\" [--voice <name>] [--speed <f>] [--model fast|small] [--verbose]\n       smart-voices download [--model fast|small]\n       smart-voices clean [<file>]\n       smart-voices watch [--auto-read]";
 
 fn main() {
     std::process::exit(run());
@@ -19,7 +22,26 @@ fn main() {
 
 fn run() -> i32 {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // Release Windows builds run without a console; CLI commands attach to
+    // the parent console so their output is still visible.
+    #[cfg(windows)]
+    if !args.is_empty() {
+        attach_parent_console();
+    }
     match args.first().map(String::as_str) {
+        None => match acquire_instance_lock() {
+            InstanceLock::Held(held) => {
+                // Held until the app exits.
+                let _held = held;
+                app::run()
+            }
+            InstanceLock::AlreadyRunning => {
+                println!("Smart Voices is already running.");
+                0
+            }
+            // Best effort: a missing lock must not stop the app.
+            InstanceLock::Unavailable => app::run(),
+        },
         Some("speak") => speak(&args[1..]),
         Some("download") => download_cmd(&args[1..]),
         Some("clean") => clean(&args[1..]),
@@ -28,6 +50,50 @@ fn run() -> i32 {
             eprintln!("{USAGE}");
             2
         }
+    }
+}
+
+#[cfg(windows)]
+fn attach_parent_console() {
+    use windows_sys::Win32::System::Console::{ATTACH_PARENT_PROCESS, AttachConsole};
+    // SAFETY: `AttachConsole` with the parent pseudo-handle only affects this
+    // process's console attachment; failure (no parent console) is ignored.
+    unsafe {
+        AttachConsole(ATTACH_PARENT_PROCESS);
+    }
+}
+
+/// Single-instance lock state for a bare (tray-app) launch.
+enum InstanceLock {
+    /// This launch holds the lock; the file must stay alive.
+    Held(std::fs::File),
+    /// Another instance already holds the lock.
+    AlreadyRunning,
+    /// The lock couldn't be used (no data dir, permissions); run anyway.
+    Unavailable,
+}
+
+/// Take the single-instance lock in the data dir (exclusive, non-blocking).
+fn acquire_instance_lock() -> InstanceLock {
+    let Some(dir) = dirs::data_dir().map(|dir| dir.join("smart-voices")) else {
+        return InstanceLock::Unavailable;
+    };
+    if std::fs::create_dir_all(&dir).is_err() {
+        return InstanceLock::Unavailable;
+    }
+    let file = match std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(dir.join("app.lock"))
+    {
+        Ok(file) => file,
+        Err(_) => return InstanceLock::Unavailable,
+    };
+    match file.try_lock() {
+        Ok(()) => InstanceLock::Held(file),
+        Err(std::fs::TryLockError::WouldBlock) => InstanceLock::AlreadyRunning,
+        Err(_) => InstanceLock::Unavailable,
     }
 }
 
