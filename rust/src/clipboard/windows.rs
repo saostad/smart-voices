@@ -44,8 +44,15 @@ const OPEN_RETRIES: u32 = 5;
 /// Delay between open attempts (bounded wait, not a poll loop).
 const OPEN_RETRY_DELAY: Duration = Duration::from_millis(20);
 
+/// A window handle that may be used from any thread: we only post messages to it
+/// (PostMessageW is thread-safe), never touch window state off its thread.
+#[derive(Clone, Copy)]
+struct SendHwnd(HWND);
+// SAFETY: see above.
+unsafe impl Send for SendHwnd {}
+
 pub(super) struct Watcher {
-    hwnd: HWND,
+    hwnd: SendHwnd,
     enabled: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
@@ -60,7 +67,7 @@ impl Drop for Watcher {
     fn drop(&mut self) {
         // Wake the `GetMessageW` loop; `wndproc` quits on `WM_CLOSE`.
         unsafe {
-            PostMessageW(self.hwnd, WM_CLOSE, 0, 0);
+            PostMessageW(self.hwnd.0, WM_CLOSE, 0, 0);
         }
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
@@ -157,7 +164,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
 fn run_loop(
     events: mpsc::Sender<ClipboardEvent>,
     enabled: Arc<AtomicBool>,
-    ready: mpsc::Sender<Result<HWND, ClipboardError>>,
+    ready: mpsc::Sender<Result<SendHwnd, ClipboardError>>,
 ) {
     let state = Box::new(ListenerState {
         events: events.clone(),
@@ -183,7 +190,7 @@ fn run_loop(
         let _ = ready.send(Err(err));
         return;
     }
-    let _ = ready.send(Ok(hwnd));
+    let _ = ready.send(Ok(SendHwnd(hwnd)));
     message_loop(&events);
     unsafe {
         RemoveClipboardFormatListener(hwnd);
