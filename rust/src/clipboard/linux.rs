@@ -250,12 +250,7 @@ fn is_secret(
     };
     // Compare raw bytes: correct regardless of the server's byte order.
     let hint = atoms.hint.to_ne_bytes();
-    if !targets
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .any(|chunk| *chunk == hint)
-    {
+    if !targets.as_chunks::<4>().0.contains(&hint) {
         return Ok(false);
     }
     let value = match request_selection(conn, window, atoms, atoms.hint, stashed)? {
