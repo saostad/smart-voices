@@ -178,6 +178,7 @@ enum Command {
     SetUnloadAfter(Option<Duration>),
     SetPronunciations(Pronunciations),
     SetPersianVoice(PersianVoice),
+    Prewarm,
     Shutdown,
     Sink(SinkEvent),
 }
@@ -287,6 +288,13 @@ impl Player {
     /// Persian synth is dropped when the voice changed).
     pub fn set_persian_voice(&self, voice: PersianVoice) {
         self.send(Command::SetPersianVoice(voice));
+    }
+
+    /// Load the English engine in the background when idle and unloaded, so
+    /// the next reading starts fast. No-op when already loaded or busy;
+    /// emits `Loading`→`Idle` only when it actually loaded.
+    pub fn prewarm(&self) {
+        self.send(Command::Prewarm);
     }
 
     pub fn shutdown(&self) {
@@ -456,6 +464,7 @@ impl<O: Output> Controller<O> {
                     self.persian = None;
                 }
             }
+            Command::Prewarm => self.prewarm(),
             Command::Shutdown => {}
             Command::Sink(SinkEvent::ItemFinished(id)) => self.item_finished(id),
             Command::Sink(SinkEvent::Error(message)) => self.fail(message),
@@ -495,6 +504,24 @@ impl<O: Output> Controller<O> {
             self.output_paused = false;
         }
         self.set_state(PlayerState::Playing);
+    }
+
+    /// Load the English engine while idle so the next reading starts fast.
+    /// No-op when already loaded or not idle; on success emits
+    /// `Loading`→`Idle` and arms the unload timer, on failure the error.
+    fn prewarm(&mut self) {
+        if self.state != PlayerState::Idle || self.english.is_some() {
+            return;
+        }
+        self.set_state(PlayerState::Loading);
+        match (self.factory)() {
+            Ok(engine) => {
+                self.english = Some(engine);
+                self.set_state(PlayerState::Idle);
+                self.note_idle();
+            }
+            Err(message) => self.fail(message),
+        }
     }
 
     fn stop(&mut self) {
@@ -1708,6 +1735,54 @@ mod tests {
         assert_eq!(calls[0].0, "SQL one.");
         assert_eq!(calls[1].0, "SQL two.");
         assert_eq!(calls[2].0, "sequel three.");
+        player.shutdown();
+    }
+
+    #[test]
+    fn prewarm_loads_when_idle_and_unloaded() {
+        let (player, events, _, factory_count, _) = spawn_player(None, FakeSynth::new());
+        player.prewarm();
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Loading)
+        );
+        assert_eq!(next_event(&events), PlayerEvent::State(PlayerState::Idle));
+        assert_eq!(factory_count.load(Ordering::SeqCst), 1);
+        // The next play reuses the warmed engine (no Loading).
+        player.play("Hi.");
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Playing)
+        );
+        assert_eq!(next_event(&events), chunk(0, 1, "Hi."));
+        assert_eq!(factory_count.load(Ordering::SeqCst), 1);
+        player.shutdown();
+    }
+
+    #[test]
+    fn prewarm_is_noop_when_loaded_or_busy() {
+        let (player, events, shared, factory_count, _) = spawn_player(None, FakeSynth::new());
+        player.prewarm();
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Loading)
+        );
+        assert_eq!(next_event(&events), PlayerEvent::State(PlayerState::Idle));
+        // Already loaded: silent.
+        player.prewarm();
+        expect_no_event(&events);
+        assert_eq!(factory_count.load(Ordering::SeqCst), 1);
+        // Busy: silent too.
+        player.play("One. Two. Three.");
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Playing)
+        );
+        assert_eq!(next_event(&events), chunk(0, 3, "One."));
+        wait_for_enqueued(&shared, 3);
+        player.prewarm();
+        expect_no_event(&events);
+        assert_eq!(factory_count.load(Ordering::SeqCst), 1);
         player.shutdown();
     }
 }

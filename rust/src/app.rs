@@ -840,6 +840,14 @@ impl App {
                     self.read_clipboard();
                 } else {
                     self.set_badged(true);
+                    // Warm the voice in the background so the manual read is
+                    // fast. A failure here (e.g. no audio device) stays silent;
+                    // the manual read reports it.
+                    if self.ensure_player().is_ok()
+                        && let Some(player) = &self.player
+                    {
+                        player.prewarm();
+                    }
                 }
             }
             ClipboardEvent::Error(message) => {

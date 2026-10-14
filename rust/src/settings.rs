@@ -94,7 +94,7 @@ impl Default for Settings {
             persian_voice: PersianVoice::Amir,
             watch_clipboard: true,
             auto_read: false,
-            unload_after_minutes: 5,
+            unload_after_minutes: 15,
             shortcuts: Shortcuts::default(),
         }
     }

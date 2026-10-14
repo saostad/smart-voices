@@ -1,4 +1,4 @@
-//! macOS clipboard watcher: `NSPasteboard.changeCount` checked every 500 ms
+//! macOS clipboard watcher: `NSPasteboard.changeCount` checked every 150 ms
 //! (AppKit offers no change notification; this is the one allowed timer).
 //! Contents are never read by the watcher, only by [`read_text`].
 
@@ -14,8 +14,9 @@ use objc2_foundation::NSInteger;
 
 use super::{ClipboardError, ClipboardEvent, macos_should_notify};
 
-/// Poll cadence (same as Swift's 0.5 s timer).
-const POLL_INTERVAL: Duration = Duration::from_millis(500);
+/// Poll cadence (150 ms for fast copy detection; one lightweight
+/// `changeCount` call, still ~0 % CPU).
+const POLL_INTERVAL: Duration = Duration::from_millis(150);
 
 /// Error when the system returns no pasteboard (seen in sandboxes without a
 /// pasteboard service).
