@@ -117,14 +117,19 @@ impl AudioOut {
             .build_output_stream(
                 config,
                 move |data: &mut [f32], _info: &cpal::OutputCallbackInfo| {
+                    // Claim the whole buffer with one atomic op; this callback
+                    // is the only writer to `next`.
+                    let frames = data.len().div_ceil(channels);
+                    let claimed = writer.next.fetch_add(frames, Ordering::Relaxed);
+                    let start = claimed.min(writer.samples.len());
+                    let end = claimed.saturating_add(frames).min(writer.samples.len());
+                    let mut samples = writer.samples[start..end].iter().copied();
                     for frame in data.chunks_mut(channels) {
-                        let i = writer.next.fetch_add(1, Ordering::SeqCst);
-                        let sample = writer.samples.get(i).copied().unwrap_or(0.0);
-                        frame.fill(sample);
+                        frame.fill(samples.next().unwrap_or(0.0));
                     }
                     // Once every sample was handed to the device, play a short
                     // silence tail so queued buffers drain, then signal.
-                    if writer.next.load(Ordering::SeqCst) >= writer.samples.len() {
+                    if writer.next.load(Ordering::Relaxed) >= writer.samples.len() {
                         count_down(&writer.tail_left, data.len() / channels);
                         if writer.tail_left.load(Ordering::SeqCst) == 0 {
                             writer.drained.store(true, Ordering::SeqCst);
