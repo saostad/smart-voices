@@ -35,6 +35,33 @@ impl fmt::Display for SettingsError {
 
 impl Error for SettingsError {}
 
+/// Global shortcut bindings, in `global_hotkey::hotkey::HotKey::from_str`
+/// syntax (e.g. `"ctrl+alt+Space"`). An empty string disables that shortcut.
+/// They apply on the next launch.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Shortcuts {
+    /// Read the clipboard when idle, pause/resume while reading.
+    pub read_or_pause: String,
+    /// Stop reading.
+    pub stop: String,
+    /// Jump to the next chunk.
+    pub next: String,
+    /// Jump to the previous chunk.
+    pub previous: String,
+}
+
+impl Default for Shortcuts {
+    fn default() -> Self {
+        Self {
+            read_or_pause: "ctrl+alt+Space".to_string(),
+            stop: "ctrl+alt+Period".to_string(),
+            next: "ctrl+alt+ArrowRight".to_string(),
+            previous: "ctrl+alt+ArrowLeft".to_string(),
+        }
+    }
+}
+
 /// User settings. Missing file entries fall back to [`Settings::default`];
 /// unknown entries are ignored.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -52,6 +79,8 @@ pub struct Settings {
     pub auto_read: bool,
     /// Minutes of idleness before unloading the model (0 = keep loaded).
     pub unload_after_minutes: u32,
+    /// Global shortcut bindings (`[shortcuts]` table).
+    pub shortcuts: Shortcuts,
 }
 
 impl Default for Settings {
@@ -63,6 +92,7 @@ impl Default for Settings {
             watch_clipboard: true,
             auto_read: false,
             unload_after_minutes: 5,
+            shortcuts: Shortcuts::default(),
         }
     }
 }
@@ -156,6 +186,11 @@ mod tests {
             watch_clipboard: false,
             auto_read: true,
             unload_after_minutes: 0,
+            shortcuts: Shortcuts {
+                read_or_pause: String::new(),
+                stop: "ctrl+alt+Q".to_string(),
+                ..Shortcuts::default()
+            },
         };
         settings.save(&path).unwrap();
         let (loaded, err) = Settings::load(&path);
@@ -225,6 +260,37 @@ mod tests {
                 model: ModelVariant::Small,
                 auto_read: true,
                 ..Settings::default()
+            }
+        );
+    }
+
+    #[test]
+    fn old_file_without_shortcuts_loads_defaults() {
+        let dir = unique_temp_dir();
+        let path = dir.join("settings.toml");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&path, "voice = \"bm_lewis\"\nunload_after_minutes = 0\n").unwrap();
+        let (settings, err) = Settings::load(&path);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(err.is_none(), "unexpected error: {err:?}");
+        assert_eq!(settings.voice, "bm_lewis");
+        assert_eq!(settings.shortcuts, Shortcuts::default());
+    }
+
+    #[test]
+    fn partial_shortcuts_fill_defaults() {
+        let dir = unique_temp_dir();
+        let path = dir.join("settings.toml");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&path, "[shortcuts]\nstop = \"\"\n").unwrap();
+        let (settings, err) = Settings::load(&path);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(err.is_none(), "unexpected error: {err:?}");
+        assert_eq!(
+            settings.shortcuts,
+            Shortcuts {
+                stop: String::new(),
+                ..Shortcuts::default()
             }
         );
     }
