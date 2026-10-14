@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use smart_voices::audio::AudioSink;
+use smart_voices::clipboard::{self, ClipboardEvent, MIN_TEXT_LEN};
 use smart_voices::engine::{KokoroEngine, ModelVariant};
 use smart_voices::models::{self, ModelError};
 use smart_voices::pipeline::prepare;
@@ -10,7 +11,7 @@ use smart_voices::pronounce::{Pronunciations, pronunciations_path};
 use smart_voices::sanitize::SanitizerOptions;
 use smart_voices::settings::{Settings, settings_path};
 
-const USAGE: &str = "Usage: smart-voices speak \"<text>\" [--voice <name>] [--speed <f>] [--model fast|small] [--verbose]\n       smart-voices download [--model fast|small]\n       smart-voices clean [<file>]";
+const USAGE: &str = "Usage: smart-voices speak \"<text>\" [--voice <name>] [--speed <f>] [--model fast|small] [--verbose]\n       smart-voices download [--model fast|small]\n       smart-voices clean [<file>]\n       smart-voices watch [--auto-read]";
 
 fn main() {
     std::process::exit(run());
@@ -22,6 +23,7 @@ fn run() -> i32 {
         Some("speak") => speak(&args[1..]),
         Some("download") => download_cmd(&args[1..]),
         Some("clean") => clean(&args[1..]),
+        Some("watch") => watch_cmd(&args[1..]),
         _ => {
             eprintln!("{USAGE}");
             2
@@ -245,6 +247,155 @@ fn clean(args: &[String]) -> i32 {
         println!("{}\t{}", chunk.pause_after.label(), chunk.text);
     }
     0
+}
+
+/// Watch the clipboard and announce new text; with auto-read, read it aloud.
+/// The player (and the voice model) starts lazily on the first copy, so plain
+/// `watch` works without audio or a downloaded model. Ctrl+C ends the process
+/// (default SIGINT termination); nothing is half-written: settings and
+/// pronunciations are only read here (missing pronunciations are seeded once
+/// at startup via an atomic tmp-file rename).
+fn watch_cmd(args: &[String]) -> i32 {
+    let mut auto_read_flag = false;
+    for arg in args {
+        if arg == "--auto-read" {
+            auto_read_flag = true;
+        } else {
+            eprintln!("{USAGE}");
+            return 2;
+        }
+    }
+    let (settings, settings_err) = settings_path()
+        .map(|path| Settings::load(&path))
+        .unwrap_or((Settings::default(), None));
+    if let Some(err) = &settings_err {
+        eprintln!("Warning: {err}");
+    }
+    let (pronunciations, pronunciations_err) = pronunciations_path()
+        .map(|path| Pronunciations::load(&path))
+        .unwrap_or((Pronunciations::with_defaults(), None));
+    if let Some(err) = &pronunciations_err {
+        eprintln!("Warning: {err}");
+    }
+    let auto_read = auto_read_flag || settings.auto_read;
+    let (events_tx, events) = std::sync::mpsc::channel();
+    let _watcher = match clipboard::watch(events_tx) {
+        Ok(watcher) => watcher,
+        Err(err) => {
+            eprintln!("Error: {err}");
+            return 1;
+        }
+    };
+    let mut player = LazyPlayer::new(&settings, pronunciations);
+    println!("Watching the clipboard. Press Ctrl+C to quit.");
+    for event in events {
+        match event {
+            ClipboardEvent::Changed { source_app } => {
+                let app = source_app.as_deref().unwrap_or("an app");
+                println!("Copied text from {app}");
+                if !auto_read {
+                    continue;
+                }
+                match clipboard::read_text() {
+                    Ok(Some(text)) => {
+                        if text.chars().count() < MIN_TEXT_LEN {
+                            continue;
+                        }
+                        player.play(text);
+                    }
+                    Ok(None) => {}
+                    Err(err) => eprintln!("Error: {err}"),
+                }
+            }
+            ClipboardEvent::Error(message) => {
+                eprintln!("Error: {message}");
+                return 1;
+            }
+        }
+    }
+    // The channel only closes when the watcher thread is gone.
+    eprintln!("Error: The clipboard watcher stopped unexpectedly.");
+    1
+}
+
+/// Player spawned on first use (auto-read only), then reused; `play`
+/// interrupts the current reading, like Swift's auto-read.
+struct LazyPlayer {
+    player: Option<Player>,
+    voice: String,
+    speed: f32,
+    model: ModelVariant,
+    unload_after: Option<Duration>,
+    pronunciations: Pronunciations,
+}
+
+impl LazyPlayer {
+    fn new(settings: &Settings, pronunciations: Pronunciations) -> Self {
+        Self {
+            player: None,
+            voice: settings.voice.clone(),
+            speed: settings.speed,
+            model: settings.model,
+            unload_after: if settings.unload_after_minutes == 0 {
+                None
+            } else {
+                Some(Duration::from_secs(
+                    u64::from(settings.unload_after_minutes) * 60,
+                ))
+            },
+            pronunciations,
+        }
+    }
+
+    fn play(&mut self, text: String) {
+        if self.player.is_none() {
+            match self.spawn() {
+                Ok(player) => self.player = Some(player),
+                Err(message) => {
+                    eprintln!("Error: {message}");
+                    return;
+                }
+            }
+        }
+        if let Some(player) = &self.player {
+            player.play(text);
+        }
+    }
+
+    fn spawn(&self) -> Result<Player, String> {
+        let models_root = models_root().ok_or_else(|| {
+            "Couldn't find the models folder: SMART_VOICES_MODELS is not set and no data directory is available."
+                .to_string()
+        })?;
+        if !models::is_installed(&models_root, self.model) {
+            download_with_progress(&models_root, self.model).map_err(|err| err.to_string())?;
+        }
+        let sink = AudioSink::new().map_err(|err| err.to_string())?;
+        let config = PlayerConfig {
+            voice: self.voice.clone(),
+            speed: self.speed,
+            unload_after: self.unload_after,
+            sanitizer_options: SanitizerOptions::default(),
+            pronunciations: self.pronunciations.clone(),
+        };
+        let model = self.model;
+        let factory = move || -> Result<Box<dyn Synth>, String> {
+            match KokoroEngine::load(&models_root, model) {
+                Ok(engine) => Ok(Box::new(engine) as Box<dyn Synth>),
+                Err(err) => Err(err.to_string()),
+            }
+        };
+        let (player, player_events) = Player::spawn(config, Box::new(factory), sink);
+        // Playback problems are reported but don't stop the watcher.
+        std::thread::spawn(move || {
+            for event in player_events {
+                if let PlayerEvent::Error(message) = event {
+                    eprintln!("Error: {message}");
+                }
+            }
+        });
+        Ok(player)
+    }
 }
 
 /// Download `variant` unless already installed, with a one-line stderr
