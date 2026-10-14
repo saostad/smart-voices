@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use smart_voices::app;
 use smart_voices::audio::AudioSink;
 use smart_voices::clipboard::{self, ClipboardEvent, MIN_TEXT_LEN};
-use smart_voices::engine::{KokoroEngine, ModelVariant};
+use smart_voices::engine::{KokoroEngine, ModelVariant, PersianVoice, PiperEngine};
 use smart_voices::models::{self, ModelError, ModelId};
 use smart_voices::pipeline::prepare;
 use smart_voices::player::{Player, PlayerConfig, PlayerEvent, Synth};
@@ -212,14 +212,24 @@ fn speak(args: &[String]) -> i32 {
         unload_after,
         sanitizer_options: SanitizerOptions::default(),
         pronunciations,
+        // Wired to settings in the next item; Amir until then.
+        persian_voice: PersianVoice::Amir,
     };
+    let persian_root = models_root.clone();
     let factory = move || -> Result<Box<dyn Synth>, String> {
         match KokoroEngine::load(&models_root, model) {
             Ok(engine) => Ok(Box::new(engine) as Box<dyn Synth>),
             Err(err) => Err(err.to_string()),
         }
     };
-    let (player, events) = Player::spawn(config, Box::new(factory), sink);
+    let persian_factory = move || -> Result<Box<dyn Synth>, String> {
+        match PiperEngine::load(&persian_root, PersianVoice::Amir) {
+            Ok(engine) => Ok(Box::new(engine) as Box<dyn Synth>),
+            Err(err) => Err(err.to_string()),
+        }
+    };
+    let (player, events) =
+        Player::spawn(config, Box::new(factory), Box::new(persian_factory), sink);
     let started = Instant::now();
     player.play(options.text);
     let mut first_audio = true;
@@ -444,15 +454,25 @@ impl LazyPlayer {
             unload_after: self.unload_after,
             sanitizer_options: SanitizerOptions::default(),
             pronunciations: self.pronunciations.clone(),
+            // Wired to settings in the next item; Amir until then.
+            persian_voice: PersianVoice::Amir,
         };
         let model = self.model;
+        let persian_root = models_root.clone();
         let factory = move || -> Result<Box<dyn Synth>, String> {
             match KokoroEngine::load(&models_root, model) {
                 Ok(engine) => Ok(Box::new(engine) as Box<dyn Synth>),
                 Err(err) => Err(err.to_string()),
             }
         };
-        let (player, player_events) = Player::spawn(config, Box::new(factory), sink);
+        let persian_factory = move || -> Result<Box<dyn Synth>, String> {
+            match PiperEngine::load(&persian_root, PersianVoice::Amir) {
+                Ok(engine) => Ok(Box::new(engine) as Box<dyn Synth>),
+                Err(err) => Err(err.to_string()),
+            }
+        };
+        let (player, player_events) =
+            Player::spawn(config, Box::new(factory), Box::new(persian_factory), sink);
         // Playback problems are reported but don't stop the watcher.
         std::thread::spawn(move || {
             for event in player_events {

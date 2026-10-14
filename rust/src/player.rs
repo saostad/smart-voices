@@ -1,11 +1,12 @@
 //! Playback controller: gapless lookahead playback with transport controls and
 //! idle model unload. The tray app drives this; the `speak` CLI wraps it once.
 //!
-//! A controller thread owns the voice engine and the audio output. It
+//! A controller thread owns the voice engines (English Kokoro plus a lazily
+//! loaded Persian Piper synth, routed per chunk) and the audio output. It
 //! synthesizes at most 2 chunks ahead of the one playing, checks the command
 //! channel between chunks (so `stop`/`play` take effect within one chunk's
 //! synth time), and idles in `recv_timeout` (never a polling loop): the stream
-//! is dropped ~2 s after the last item finished, and the engine is dropped
+//! is dropped ~2 s after the last item finished, and the engines are dropped
 //! after `unload_after` of idleness.
 
 use std::collections::VecDeque;
@@ -14,7 +15,8 @@ use std::time::{Duration, Instant};
 
 use crate::audio::{AudioSink, SinkEvent};
 use crate::chunk::SpeechChunk;
-use crate::engine::{EngineError, KokoroEngine};
+use crate::engine::{EngineError, KokoroEngine, PersianVoice, PiperEngine};
+use crate::lang::{Lang, chunk_language};
 use crate::pipeline::prepare;
 use crate::pronounce::Pronunciations;
 use crate::sanitize::SanitizerOptions;
@@ -28,19 +30,63 @@ const MAX_INFLIGHT: usize = LOOKAHEAD_CHUNKS + 1;
 /// Idle time after the last item finished before the stream is dropped.
 const STREAM_CLOSE_AFTER: Duration = Duration::from_secs(2);
 
-/// Voice engine interface (the real [`KokoroEngine`] or a test fake).
+/// One chunk of synthesized audio: mono samples at `sample_rate` Hz.
+pub struct SynthesizedAudio {
+    pub samples: Vec<f32>,
+    pub sample_rate: u32,
+}
+
+/// Voice engine interface (the real engines or a test fake).
 pub trait Synth: Send {
-    fn sample_rate(&self) -> u32;
-    fn synthesize(&mut self, text: &str, voice: &str, speed: f32) -> Result<Vec<f32>, String>;
+    fn synthesize(
+        &mut self,
+        text: &str,
+        voice: &str,
+        speed: f32,
+    ) -> Result<SynthesizedAudio, String>;
+}
+
+/// Check an engine's reported sample rate; a bad value becomes an error
+/// naming it rather than a silent fallback.
+fn checked_rate(rate: i32) -> Result<u32, String> {
+    if rate > 0 {
+        Ok(rate as u32)
+    } else {
+        Err(format!(
+            "The voice engine reported an invalid sample rate: {rate}."
+        ))
+    }
 }
 
 impl Synth for KokoroEngine {
-    fn sample_rate(&self) -> u32 {
-        u32::try_from(KokoroEngine::sample_rate(self)).unwrap_or(24_000)
+    fn synthesize(
+        &mut self,
+        text: &str,
+        voice: &str,
+        speed: f32,
+    ) -> Result<SynthesizedAudio, String> {
+        let samples =
+            KokoroEngine::synthesize(self, text, voice, speed).map_err(|err| err.to_string())?;
+        Ok(SynthesizedAudio {
+            samples,
+            sample_rate: checked_rate(KokoroEngine::sample_rate(self))?,
+        })
     }
+}
 
-    fn synthesize(&mut self, text: &str, voice: &str, speed: f32) -> Result<Vec<f32>, String> {
-        KokoroEngine::synthesize(self, text, voice, speed).map_err(|err| err.to_string())
+impl Synth for PiperEngine {
+    fn synthesize(
+        &mut self,
+        text: &str,
+        _voice: &str,
+        speed: f32,
+    ) -> Result<SynthesizedAudio, String> {
+        // A Piper model is a single voice; the voice string is ignored.
+        let samples = PiperEngine::synthesize(self, text, speed).map_err(|err| err.to_string())?;
+        Ok(SynthesizedAudio {
+            samples,
+            sample_rate: checked_rate(PiperEngine::sample_rate(self))?,
+        })
     }
 }
 
@@ -81,16 +127,17 @@ impl Output for AudioSink {
     }
 }
 
-/// Player configuration (`voice`/`speed` can be changed later; they apply from
-/// the next synthesized chunk).
+/// Player configuration (`voice`/`speed`/`persian_voice` can be changed
+/// later; they apply from the next synthesized chunk).
 #[derive(Debug, Clone)]
 pub struct PlayerConfig {
     pub voice: String,
     pub speed: f32,
-    /// Idle time after which the engine is dropped (`None` = keep loaded).
+    /// Idle time after which the engines are dropped (`None` = keep loaded).
     pub unload_after: Option<Duration>,
     pub sanitizer_options: SanitizerOptions,
     pub pronunciations: Pronunciations,
+    pub persian_voice: PersianVoice,
 }
 
 /// Playback state (see [`PlayerEvent::State`]).
@@ -130,6 +177,7 @@ enum Command {
     SetSpeed(f32),
     SetUnloadAfter(Option<Duration>),
     SetPronunciations(Pronunciations),
+    SetPersianVoice(PersianVoice),
     Shutdown,
     Sink(SinkEvent),
 }
@@ -140,12 +188,15 @@ pub struct Player {
 }
 
 impl Player {
-    /// Spawn the controller thread with a lazily-loaded engine (`factory` is
-    /// called on the first `play` and after every idle unload) and the given
-    /// output. Returns the handle plus the event receiver.
+    /// Spawn the controller thread with two lazily-loaded engines: the
+    /// English `factory` (called on the first `play` with English text, and
+    /// after every idle unload) and the Persian `persian_factory` (called only
+    /// when the first Persian chunk is reached). Returns the handle plus the
+    /// event receiver.
     pub fn spawn(
         config: PlayerConfig,
         factory: Box<dyn FnMut() -> Result<Box<dyn Synth>, String> + Send>,
+        persian_factory: Box<dyn FnMut() -> Result<Box<dyn Synth>, String> + Send>,
         output: impl Output + 'static,
     ) -> (Self, mpsc::Receiver<PlayerEvent>) {
         let (command_tx, command_rx) = mpsc::channel();
@@ -164,7 +215,14 @@ impl Player {
                 }
             }
         });
-        let controller = Controller::new(config, factory, output, command_rx, event_tx);
+        let controller = Controller::new(
+            config,
+            factory,
+            persian_factory,
+            output,
+            command_rx,
+            event_tx,
+        );
         std::thread::spawn(move || controller.run());
         (
             Self {
@@ -225,6 +283,12 @@ impl Player {
         self.send(Command::SetPronunciations(pronunciations));
     }
 
+    /// Switch the Persian voice; applies from the next chunk (the loaded
+    /// Persian synth is dropped when the voice changed).
+    pub fn set_persian_voice(&self, voice: PersianVoice) {
+        self.send(Command::SetPersianVoice(voice));
+    }
+
     pub fn shutdown(&self) {
         self.send(Command::Shutdown);
     }
@@ -248,9 +312,12 @@ struct Controller<O: Output> {
     unload_after: Option<Duration>,
     sanitizer_options: SanitizerOptions,
     pronunciations: Pronunciations,
+    persian_voice: PersianVoice,
     factory: Box<dyn FnMut() -> Result<Box<dyn Synth>, String> + Send>,
+    persian_factory: Box<dyn FnMut() -> Result<Box<dyn Synth>, String> + Send>,
     output: O,
-    engine: Option<Box<dyn Synth>>,
+    english: Option<Box<dyn Synth>>,
+    persian: Option<Box<dyn Synth>>,
     commands: mpsc::Receiver<Command>,
     events: mpsc::Sender<PlayerEvent>,
     state: PlayerState,
@@ -279,6 +346,7 @@ impl<O: Output> Controller<O> {
     fn new(
         config: PlayerConfig,
         factory: Box<dyn FnMut() -> Result<Box<dyn Synth>, String> + Send>,
+        persian_factory: Box<dyn FnMut() -> Result<Box<dyn Synth>, String> + Send>,
         output: O,
         commands: mpsc::Receiver<Command>,
         events: mpsc::Sender<PlayerEvent>,
@@ -289,9 +357,12 @@ impl<O: Output> Controller<O> {
             unload_after: config.unload_after,
             sanitizer_options: config.sanitizer_options,
             pronunciations: config.pronunciations,
+            persian_voice: config.persian_voice,
             factory,
+            persian_factory,
             output,
-            engine: None,
+            english: None,
+            persian: None,
             commands,
             events,
             state: PlayerState::Idle,
@@ -378,6 +449,13 @@ impl<O: Output> Controller<O> {
             Command::SetSpeed(speed) => self.speed = speed,
             Command::SetUnloadAfter(after) => self.unload_after = after,
             Command::SetPronunciations(pronunciations) => self.pronunciations = pronunciations,
+            Command::SetPersianVoice(voice) => {
+                if self.persian_voice != voice {
+                    self.persian_voice = voice;
+                    // The new voice loads on the next Persian chunk.
+                    self.persian = None;
+                }
+            }
             Command::Shutdown => {}
             Command::Sink(SinkEvent::ItemFinished(id)) => self.item_finished(id),
             Command::Sink(SinkEvent::Error(message)) => self.fail(message),
@@ -395,10 +473,17 @@ impl<O: Output> Controller<O> {
             self.fail(EngineError::NoAudio(text).to_string());
             return;
         }
-        if self.engine.is_none() {
+        // Load the English engine up front when the text needs it (so `Loading`
+        // still comes first); the Persian synth loads lazily when its first
+        // chunk is reached, so English-only use never touches it.
+        let needs_english = self
+            .chunks
+            .iter()
+            .any(|chunk| chunk_language(&chunk.text) == Lang::English);
+        if needs_english && self.english.is_none() {
             self.set_state(PlayerState::Loading);
             match (self.factory)() {
-                Ok(engine) => self.engine = Some(engine),
+                Ok(engine) => self.english = Some(engine),
                 Err(message) => {
                     self.fail(message);
                     return;
@@ -511,35 +596,65 @@ impl<O: Output> Controller<O> {
             && self.inflight.len() < MAX_INFLIGHT
     }
 
-    /// Synthesize one chunk (the slow step; commands are re-checked after).
+    /// Make sure the synth for `lang` is loaded, creating it on demand (the
+    /// Persian synth is created only when its first chunk is reached). Returns
+    /// false after failing the playback on a factory error.
+    fn ensure_engine(&mut self, lang: Lang) -> bool {
+        let loaded = match lang {
+            Lang::English => self.english.is_some(),
+            Lang::Persian => self.persian.is_some(),
+        };
+        if loaded {
+            return true;
+        }
+        let resume_state = self.state;
+        self.set_state(PlayerState::Loading);
+        let created = match lang {
+            Lang::English => (self.factory)(),
+            Lang::Persian => (self.persian_factory)(),
+        };
+        match created {
+            Ok(engine) => {
+                match lang {
+                    Lang::English => self.english = Some(engine),
+                    Lang::Persian => self.persian = Some(engine),
+                }
+                self.set_state(resume_state);
+                true
+            }
+            Err(message) => {
+                self.fail(message);
+                false
+            }
+        }
+    }
+
+    /// Synthesize one chunk (the slow step; commands are re-checked after),
+    /// routed to the English or Persian synth by the chunk's language.
     fn synthesize_next(&mut self) {
         let index = self.synth_next;
         let Some(chunk) = self.chunks.get(index).cloned() else {
             return;
         };
-        if self.engine.is_none() {
-            // Unreachable in practice (the engine is only dropped while idle),
-            // but reload rather than stall if the invariant ever breaks.
-            let resume_state = self.state;
-            self.set_state(PlayerState::Loading);
-            match (self.factory)() {
-                Ok(engine) => {
-                    self.engine = Some(engine);
-                    self.set_state(resume_state);
-                }
-                Err(message) => {
-                    self.fail(message);
-                    return;
-                }
-            }
+        let lang = chunk_language(&chunk.text);
+        if !self.ensure_engine(lang) {
+            return;
         }
         let spoken = self.pronunciations.apply(&chunk.text);
-        let voice = self.voice.clone();
+        let voice = match lang {
+            Lang::English => self.voice.clone(),
+            Lang::Persian => self.persian_voice.id().to_string(),
+        };
         let speed = self.speed;
-        if let Some(engine) = self.engine.as_mut() {
+        let engine = match lang {
+            Lang::English => self.english.as_mut(),
+            Lang::Persian => self.persian.as_mut(),
+        };
+        if let Some(engine) = engine {
             match engine.synthesize(&spoken, &voice, speed) {
-                Ok(mut samples) => {
-                    let rate = engine.sample_rate();
+                Ok(audio) => {
+                    let mut samples = audio.samples;
+                    let rate = audio.sample_rate;
                     let silence = (chunk.pause_after.seconds() * f64::from(rate)) as usize;
                     samples.resize(samples.len() + silence, 0.0);
                     self.pending_synth = Some((self.generation, index, samples, rate));
@@ -590,7 +705,7 @@ impl<O: Output> Controller<O> {
         if !self.stream_closed {
             timeout = Some(STREAM_CLOSE_AFTER.saturating_sub(since.elapsed()));
         }
-        if self.engine.is_some()
+        if (self.english.is_some() || self.persian.is_some())
             && let Some(after) = self.unload_after
         {
             let unload_in = after.saturating_sub(since.elapsed());
@@ -611,11 +726,12 @@ impl<O: Output> Controller<O> {
             self.output.close_if_idle();
             self.stream_closed = true;
         }
-        if self.engine.is_some()
+        if (self.english.is_some() || self.persian.is_some())
             && let Some(after) = self.unload_after
             && since.elapsed() >= after
         {
-            self.engine = None;
+            self.english = None;
+            self.persian = None;
         }
     }
 
@@ -747,11 +863,12 @@ mod tests {
     }
 
     impl Synth for FakeSynth {
-        fn sample_rate(&self) -> u32 {
-            self.rate
-        }
-
-        fn synthesize(&mut self, text: &str, voice: &str, speed: f32) -> Result<Vec<f32>, String> {
+        fn synthesize(
+            &mut self,
+            text: &str,
+            voice: &str,
+            speed: f32,
+        ) -> Result<SynthesizedAudio, String> {
             self.calls
                 .lock()
                 .unwrap()
@@ -764,7 +881,10 @@ mod tests {
             if !self.delay.is_zero() {
                 std::thread::sleep(self.delay);
             }
-            Ok(vec![0.5; text.len()])
+            Ok(SynthesizedAudio {
+                samples: vec![0.5; text.len()],
+                sample_rate: self.rate,
+            })
         }
     }
 
@@ -775,6 +895,7 @@ mod tests {
             unload_after,
             sanitizer_options: SanitizerOptions::default(),
             pronunciations: Pronunciations::new(Vec::new()),
+            persian_voice: PersianVoice::Amir,
         }
     }
 
@@ -799,14 +920,46 @@ mod tests {
         Arc<AtomicUsize>,
         FakeSynth,
     ) {
+        let (player, events, shared, count, _, synth, _) =
+            spawn_bilingual(unload_after, synth, FakeSynth::new());
+        (player, events, shared, count, synth)
+    }
+
+    /// Spawn a player with separate English and Persian fakes; returns
+    /// (player, events, output state, english count, persian count,
+    /// english synth, persian synth).
+    #[allow(clippy::type_complexity)]
+    fn spawn_bilingual(
+        unload_after: Option<Duration>,
+        english: FakeSynth,
+        persian: FakeSynth,
+    ) -> (
+        Player,
+        mpsc::Receiver<PlayerEvent>,
+        Arc<Mutex<FakeState>>,
+        Arc<AtomicUsize>,
+        Arc<AtomicUsize>,
+        FakeSynth,
+        FakeSynth,
+    ) {
         let (output, shared) = FakeOutput::new();
-        let count = Arc::new(AtomicUsize::new(0));
+        let english_count = Arc::new(AtomicUsize::new(0));
+        let persian_count = Arc::new(AtomicUsize::new(0));
         let (player, events) = Player::spawn(
             test_config(unload_after),
-            counting_factory(synth.clone(), Arc::clone(&count)),
+            counting_factory(english.clone(), Arc::clone(&english_count)),
+            counting_factory(persian.clone(), Arc::clone(&persian_count)),
             output,
         );
-        (player, events, shared, count, synth)
+        (
+            player,
+            events,
+            shared,
+            english_count,
+            persian_count,
+            english,
+            persian,
+        )
     }
 
     fn next_event(events: &mpsc::Receiver<PlayerEvent>) -> PlayerEvent {
@@ -1066,6 +1219,7 @@ mod tests {
         let (player, events) = Player::spawn(
             test_config(None),
             Box::new(move || -> Result<Box<dyn Synth>, String> { Err("boom-123".to_string()) }),
+            Box::new(move || -> Result<Box<dyn Synth>, String> { Err("persian-boom".to_string()) }),
             output,
         );
         player.play("Hello.");
@@ -1279,6 +1433,249 @@ mod tests {
         FakeOutput::finish(&shared, ids[2]);
         assert_eq!(next_event(&events), PlayerEvent::Finished);
         assert_eq!(next_event(&events), PlayerEvent::State(PlayerState::Idle));
+        player.shutdown();
+    }
+
+    #[test]
+    fn mixed_text_routes_each_chunk_to_its_language() {
+        let english = FakeSynth::new();
+        let persian = FakeSynth {
+            rate: 22_050,
+            ..FakeSynth::new()
+        };
+        let (player, events, shared, english_count, persian_count, english, persian) =
+            spawn_bilingual(None, english, persian);
+        player.play("Hello world. سلام دنیا. Goodbye.");
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Loading)
+        );
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Playing)
+        );
+        assert_eq!(next_event(&events), chunk(0, 3, "Hello world."));
+        // The Persian synth loads lazily when its first chunk is reached.
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Loading)
+        );
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Playing)
+        );
+        wait_for_enqueued(&shared, 3);
+        assert_eq!(english_count.load(Ordering::SeqCst), 1);
+        assert_eq!(persian_count.load(Ordering::SeqCst), 1);
+        let english_texts: Vec<String> = english
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|call| call.0.clone())
+            .collect();
+        let persian_texts: Vec<String> = persian
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|call| call.0.clone())
+            .collect();
+        assert_eq!(english_texts, ["Hello world.", "Goodbye."]);
+        assert_eq!(persian_texts, ["سلام دنیا."]);
+        // Each item keeps its own engine's sample rate.
+        let rates: Vec<u32> = shared
+            .lock()
+            .unwrap()
+            .enqueued
+            .iter()
+            .map(|item| item.2)
+            .collect();
+        assert_eq!(rates, [24_000, 22_050, 24_000]);
+        let ids = FakeOutput::enqueued_ids(&shared);
+        FakeOutput::finish(&shared, ids[0]);
+        assert_eq!(next_event(&events), chunk(1, 3, "سلام دنیا."));
+        FakeOutput::finish(&shared, ids[1]);
+        assert_eq!(next_event(&events), chunk(2, 3, "Goodbye."));
+        FakeOutput::finish(&shared, ids[2]);
+        assert_eq!(next_event(&events), PlayerEvent::Finished);
+        assert_eq!(next_event(&events), PlayerEvent::State(PlayerState::Idle));
+        player.shutdown();
+    }
+
+    #[test]
+    fn english_only_text_never_creates_persian_synth() {
+        let (player, events, shared, english_count, persian_count, _, _) =
+            spawn_bilingual(None, FakeSynth::new(), FakeSynth::new());
+        player.play("One. Two. Three.");
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Loading)
+        );
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Playing)
+        );
+        assert_eq!(next_event(&events), chunk(0, 3, "One."));
+        wait_for_enqueued(&shared, 3);
+        let ids = FakeOutput::enqueued_ids(&shared);
+        for id in ids {
+            FakeOutput::finish(&shared, id);
+        }
+        assert_eq!(next_event(&events), chunk(1, 3, "Two."));
+        assert_eq!(next_event(&events), chunk(2, 3, "Three."));
+        assert_eq!(next_event(&events), PlayerEvent::Finished);
+        assert_eq!(next_event(&events), PlayerEvent::State(PlayerState::Idle));
+        assert_eq!(english_count.load(Ordering::SeqCst), 1);
+        assert_eq!(persian_count.load(Ordering::SeqCst), 0);
+        player.shutdown();
+    }
+
+    #[test]
+    fn persian_factory_error_surfaces_verbatim() {
+        let (output, _) = FakeOutput::new();
+        let english_count = Arc::new(AtomicUsize::new(0));
+        let english_calls = Arc::clone(&english_count);
+        let (player, events) = Player::spawn(
+            test_config(None),
+            Box::new(move || -> Result<Box<dyn Synth>, String> {
+                english_calls.fetch_add(1, Ordering::SeqCst);
+                Ok(Box::new(FakeSynth::new()) as Box<dyn Synth>)
+            }),
+            Box::new(move || -> Result<Box<dyn Synth>, String> { Err("fa-boom-7".to_string()) }),
+            output,
+        );
+        player.play("سلام دنیا.");
+        // Persian-only text: no English load, straight to playing, then the
+        // Persian load fails verbatim.
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Playing)
+        );
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Loading)
+        );
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::Error("fa-boom-7".to_string())
+        );
+        assert_eq!(next_event(&events), PlayerEvent::State(PlayerState::Idle));
+        assert_eq!(english_count.load(Ordering::SeqCst), 0);
+        player.shutdown();
+    }
+
+    #[test]
+    fn idle_unload_drops_both_engines() {
+        let (player, events, shared, english_count, persian_count, _, _) = spawn_bilingual(
+            Some(Duration::from_millis(50)),
+            FakeSynth::new(),
+            FakeSynth::new(),
+        );
+        player.play("Hello. سلام.");
+        // Drain the first play: Loading, Playing, Chunk 0, Loading, Playing.
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Loading)
+        );
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Playing)
+        );
+        assert_eq!(next_event(&events), chunk(0, 2, "Hello."));
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Loading)
+        );
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Playing)
+        );
+        wait_for_enqueued(&shared, 2);
+        let ids = FakeOutput::enqueued_ids(&shared);
+        FakeOutput::finish(&shared, ids[0]);
+        assert_eq!(next_event(&events), chunk(1, 2, "سلام."));
+        FakeOutput::finish(&shared, ids[1]);
+        assert_eq!(next_event(&events), PlayerEvent::Finished);
+        assert_eq!(next_event(&events), PlayerEvent::State(PlayerState::Idle));
+        assert_eq!(english_count.load(Ordering::SeqCst), 1);
+        assert_eq!(persian_count.load(Ordering::SeqCst), 1);
+        // Idle unload emits nothing and drops both engines.
+        expect_no_event(&events);
+        player.play("Hi. سلام.");
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Loading)
+        );
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Playing)
+        );
+        assert_eq!(next_event(&events), chunk(0, 2, "Hi."));
+        wait_for_enqueued(&shared, 4);
+        assert_eq!(english_count.load(Ordering::SeqCst), 2);
+        assert_eq!(persian_count.load(Ordering::SeqCst), 2);
+        player.shutdown();
+    }
+
+    #[test]
+    fn set_persian_voice_drops_synth_only_when_changed() {
+        let (player, events, shared, english_count, persian_count, _, _) =
+            spawn_bilingual(None, FakeSynth::new(), FakeSynth::new());
+        player.play("سلام.");
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Playing)
+        );
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Loading)
+        );
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Playing)
+        );
+        assert_eq!(next_event(&events), chunk(0, 1, "سلام."));
+        wait_for_enqueued(&shared, 1);
+        assert_eq!(persian_count.load(Ordering::SeqCst), 1);
+        let ids = FakeOutput::enqueued_ids(&shared);
+        FakeOutput::finish(&shared, ids[0]);
+        assert_eq!(next_event(&events), PlayerEvent::Finished);
+        assert_eq!(next_event(&events), PlayerEvent::State(PlayerState::Idle));
+        // Same voice: the loaded synth is kept.
+        player.set_persian_voice(PersianVoice::Amir);
+        player.play("سلام.");
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Playing)
+        );
+        assert_eq!(next_event(&events), chunk(0, 1, "سلام."));
+        wait_for_enqueued(&shared, 2);
+        assert_eq!(persian_count.load(Ordering::SeqCst), 1);
+        let ids = FakeOutput::enqueued_ids(&shared);
+        FakeOutput::finish(&shared, ids[1]);
+        assert_eq!(next_event(&events), PlayerEvent::Finished);
+        assert_eq!(next_event(&events), PlayerEvent::State(PlayerState::Idle));
+        // Changed voice: the synth reloads on the next Persian chunk.
+        player.set_persian_voice(PersianVoice::Gyro);
+        player.play("سلام.");
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Playing)
+        );
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Loading)
+        );
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Playing)
+        );
+        assert_eq!(next_event(&events), chunk(0, 1, "سلام."));
+        wait_for_enqueued(&shared, 3);
+        assert_eq!(persian_count.load(Ordering::SeqCst), 2);
+        // The English engine was never needed.
+        assert_eq!(english_count.load(Ordering::SeqCst), 0);
         player.shutdown();
     }
 

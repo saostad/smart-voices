@@ -23,7 +23,9 @@ use winit::window::WindowId;
 
 use crate::audio::AudioSink;
 use crate::clipboard::{self, ClipboardEvent, MIN_TEXT_LEN};
-use crate::engine::{KokoroEngine, ModelVariant, VOICES, voice_display_name};
+use crate::engine::{
+    KokoroEngine, ModelVariant, PersianVoice, PiperEngine, VOICES, voice_display_name,
+};
 use crate::icon;
 use crate::models::{self, ModelId};
 use crate::player::{Player, PlayerConfig, PlayerEvent, PlayerState, Synth};
@@ -689,16 +691,27 @@ impl App {
             unload_after,
             sanitizer_options: SanitizerOptions::default(),
             pronunciations: self.pronunciations.clone(),
+            // Wired to settings in the next item; Amir until then.
+            persian_voice: PersianVoice::Amir,
         };
         let models_root = self.models_root.clone();
         let model = self.model;
+        let persian_root = models_root.clone();
         let factory = move || -> Result<Box<dyn Synth>, String> {
             match KokoroEngine::load(&models_root, model) {
                 Ok(engine) => Ok(Box::new(engine) as Box<dyn Synth>),
                 Err(err) => Err(err.to_string()),
             }
         };
-        let (player, events) = Player::spawn(config, Box::new(factory), sink);
+        let persian_voice = PersianVoice::Amir;
+        let persian_factory = move || -> Result<Box<dyn Synth>, String> {
+            match PiperEngine::load(&persian_root, persian_voice) {
+                Ok(engine) => Ok(Box::new(engine) as Box<dyn Synth>),
+                Err(err) => Err(err.to_string()),
+            }
+        };
+        let (player, events) =
+            Player::spawn(config, Box::new(factory), Box::new(persian_factory), sink);
         let proxy = self.proxy.clone();
         std::thread::spawn(move || {
             for event in events {
