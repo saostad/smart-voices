@@ -1,12 +1,12 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use smart_voices::audio::AudioOut;
 use smart_voices::engine::{KokoroEngine, ModelVariant};
+use smart_voices::models::{self, ModelError};
 use smart_voices::settings::{Settings, settings_path};
 
-const USAGE: &str =
-    "Usage: smart-voices speak \"<text>\" [--voice <name>] [--speed <f>] [--model fast|small]";
+const USAGE: &str = "Usage: smart-voices speak \"<text>\" [--voice <name>] [--speed <f>] [--model fast|small]\n       smart-voices download [--model fast|small]";
 
 fn main() {
     std::process::exit(run());
@@ -16,6 +16,7 @@ fn run() -> i32 {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("speak") => speak(&args[1..]),
+        Some("download") => download_cmd(&args[1..]),
         _ => {
             eprintln!("{USAGE}");
             2
@@ -99,6 +100,13 @@ fn speak(args: &[String]) -> i32 {
     let speed = options.speed.unwrap_or(settings.speed);
     let model = options.model.unwrap_or(settings.model);
 
+    if !models::is_installed(&models_root, model)
+        && let Err(err) = download_with_progress(&models_root, model)
+    {
+        eprintln!("Error: {err}");
+        return 1;
+    }
+
     let started = Instant::now();
     let engine = match KokoroEngine::load(&models_root, model) {
         Ok(engine) => engine,
@@ -150,4 +158,65 @@ fn speak(args: &[String]) -> i32 {
             1
         }
     }
+}
+
+fn parse_download(args: &[String]) -> Option<ModelVariant> {
+    let mut model = ModelVariant::Fast;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--model" => {
+                i += 1;
+                model = ModelVariant::parse(args.get(i)?)?;
+            }
+            _ => return None,
+        }
+        i += 1;
+    }
+    Some(model)
+}
+
+fn download_cmd(args: &[String]) -> i32 {
+    let Some(model) = parse_download(args) else {
+        eprintln!("{USAGE}");
+        return 2;
+    };
+    let Some(models_root) = models_root() else {
+        eprintln!(
+            "Error: Couldn't find the models folder: SMART_VOICES_MODELS is not set and no data directory is available."
+        );
+        return 1;
+    };
+    match download_with_progress(&models_root, model) {
+        Ok(dir) => {
+            eprintln!("Voice model ready at {}", dir.display());
+            0
+        }
+        Err(err) => {
+            eprintln!("Error: {err}");
+            1
+        }
+    }
+}
+
+/// Download `variant` unless already installed, with a one-line stderr
+/// progress display. Returns the install dir.
+fn download_with_progress(root: &Path, variant: ModelVariant) -> Result<PathBuf, ModelError> {
+    if models::is_installed(root, variant) {
+        return Ok(models::model_dir(root, variant));
+    }
+    let label = variant.label();
+    let result = models::download(root, variant, |done, total| {
+        const MB: f64 = 1_000_000.0;
+        match total {
+            Some(total) => eprint!(
+                "\rDownloading {label}: {:.1}/{:.1} MB",
+                done as f64 / MB,
+                total as f64 / MB
+            ),
+            None => eprint!("\rDownloading {label}: {:.1} MB", done as f64 / MB),
+        }
+    });
+    eprintln!();
+    result
 }

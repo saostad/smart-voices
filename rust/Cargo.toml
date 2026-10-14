@@ -17,6 +17,9 @@ cpal = "=0.18.2"
 dirs = "=7.0.0"
 serde = { version = "=1.0.229", features = ["derive"] }
 toml = "=0.8.2"
+ureq = "=2.12.1"
+bzip2 = "=0.5.2"
+tar = "=0.4.46"
 
 [profile.release]
 opt-level = 3

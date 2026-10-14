@@ -138,12 +138,12 @@ impl fmt::Display for EngineError {
         match self {
             EngineError::MissingModel(path) => write!(
                 f,
-                "Voice model file not found: {}. Run rust/scripts/fetch-models.sh to download it.",
+                "Voice model file not found: {}. Run `smart-voices download` to get it.",
                 path.display()
             ),
             EngineError::LoadFailed(dir) => write!(
                 f,
-                "Couldn't load the Kokoro voice model from {}. The files may be damaged; delete the folder and run rust/scripts/fetch-models.sh again.",
+                "Couldn't load the Kokoro voice model from {}. The files may be damaged; delete the folder and run `smart-voices download` again.",
                 dir.display()
             ),
             EngineError::UnknownVoice(name) => {
@@ -325,11 +325,11 @@ mod tests {
     }
 
     #[test]
-    fn missing_model_message_names_fetch_script() {
-        let err = EngineError::MissingModel(PathBuf::from("/x/model.int8.onnx"));
+    fn missing_model_message_names_download_command() {
+        let err = EngineError::MissingModel(PathBuf::from("/x/model.onnx"));
         assert_eq!(
             err.to_string(),
-            "Voice model file not found: /x/model.int8.onnx. Run rust/scripts/fetch-models.sh to download it."
+            "Voice model file not found: /x/model.onnx. Run `smart-voices download` to get it."
         );
     }
 }
