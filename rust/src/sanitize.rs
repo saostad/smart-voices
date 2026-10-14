@@ -938,6 +938,9 @@ fn clean_fragment(raw: &str, options: &SanitizerOptions) -> Option<String> {
     let mut value = remove_citations(raw);
     value = remove_space_before_punctuation(&value);
     value = remove_emoji(&value);
+    // Improvement over Swift: emoji removal can leave "word ." behind, so run
+    // the space-before-punctuation pass again.
+    value = remove_space_before_punctuation(&value);
     value = replace_bare_urls(&value, options);
     value = apply_word_replacements(&value);
     value = collapse_whitespace(&value);
@@ -956,7 +959,10 @@ fn with_terminal_punctuation(text: &str) -> String {
         return String::new();
     }
     if let Some(last) = trimmed.chars().last()
-        && matches!(last, '.' | '!' | '?' | ':' | ';' | '…')
+        && matches!(
+            last,
+            '.' | '!' | '?' | ':' | ';' | '…' | '。' | '！' | '？' | '．' | '؟'
+        )
     {
         return trimmed.to_string();
     }
@@ -1957,6 +1963,20 @@ mod tests {
         let elapsed = start.elapsed();
         assert_eq!(result.len(), 2000);
         assert!(elapsed.as_secs_f64() < 0.5, "took {elapsed:?}");
+    }
+
+    #[test]
+    fn emoji_before_punctuation_leaves_no_gap() {
+        assert_eq!(
+            sanitize_default("Emoji at end 🚀.")[0].text,
+            "Emoji at end."
+        );
+    }
+
+    #[test]
+    fn cjk_and_arabic_terminal_marks_need_no_period() {
+        assert_eq!(sanitize_default("中文句子。")[0].text, "中文句子。");
+        assert_eq!(sanitize_default("حالت چطوره؟")[0].text, "حالت چطوره؟");
     }
 
     #[test]
