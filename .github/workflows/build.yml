@@ -1,17 +1,12 @@
-name: Rust
+name: Build and Release
 
+# Every push and pull request builds and tests on Linux, Windows and macOS.
+# Every push to main also publishes a release with all three downloads.
 on:
   push:
-    branches: [rust-port]
-    tags: ['rust-v*']
-    paths: ['rust/**', '.github/workflows/rust.yml']
+    branches: [main]
   pull_request:
-    paths: ['rust/**', '.github/workflows/rust.yml']
   workflow_dispatch:
-
-defaults:
-  run:
-    working-directory: rust
 
 jobs:
   build:
@@ -30,8 +25,6 @@ jobs:
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: rust
 
       - name: Install Linux audio dependencies
         if: runner.os == 'Linux'
@@ -74,7 +67,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: smart-voices-linux-x86_64
-          path: rust/smart-voices-linux-x86_64.tar.gz
+          path: smart-voices-linux-x86_64.tar.gz
           retention-days: 14
 
       - name: Upload artifact (Windows)
@@ -82,7 +75,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: smart-voices-windows-x86_64
-          path: rust/smart-voices-windows-x86_64.zip
+          path: smart-voices-windows-x86_64.zip
           retention-days: 14
 
       - name: Upload artifact (macOS)
@@ -90,41 +83,49 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: smart-voices-macos-arm64
-          path: rust/smart-voices-macos-arm64.zip
+          path: smart-voices-macos-arm64.zip
           retention-days: 14
 
   release:
     needs: build
-    if: startsWith(github.ref, 'refs/tags/rust-v')
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
     permissions:
       contents: write
-    runs-on: ubuntu-latest
     steps:
-      - name: Download Linux build
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
         with:
           name: smart-voices-linux-x86_64
-          path: rust/dist
+          path: dist
 
-      - name: Download Windows build
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           name: smart-voices-windows-x86_64
-          path: rust/dist
+          path: dist
 
-      - name: Download macOS build
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           name: smart-voices-macos-arm64
-          path: rust/dist
+          path: dist
 
       - name: Create release
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: >
-          gh release create "$GITHUB_REF_NAME"
-          dist/smart-voices-linux-x86_64.tar.gz
-          dist/smart-voices-windows-x86_64.zip
-          dist/smart-voices-macos-arm64.zip
-          --title "Smart Voices (Rust) $GITHUB_REF_NAME"
-          --notes "Tray app for Linux, Windows and macOS (see rust/README.md). The first reading downloads the voice model (~350 MB)."
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          TAG="v${VERSION}-build.${{ github.run_number }}"
+          gh release create "$TAG" \
+            dist/smart-voices-windows-x86_64.zip \
+            dist/smart-voices-linux-x86_64.tar.gz \
+            dist/smart-voices-macos-arm64.zip \
+            --target "${{ github.sha }}" \
+            --title "Smart Voices ${VERSION} (build ${{ github.run_number }})" \
+            --notes "Automated build from main (${{ github.sha }}).
+
+          - **Windows:** download \`smart-voices-windows-x86_64.zip\`, unzip, run \`smart-voices.exe\`.
+          - **Linux:** download \`smart-voices-linux-x86_64.tar.gz\`, extract, see \`README-linux.txt\`.
+          - **macOS (Apple Silicon):** download \`smart-voices-macos-arm64.zip\`, unzip, move \`Smart Voices.app\` to Applications, then right-click it and choose Open the first time (the app is ad-hoc signed).
+
+          The first reading downloads the voice model (~350 MB, once)."

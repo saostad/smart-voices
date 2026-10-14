@@ -1,116 +1,138 @@
 # Smart Voices
 
-Smart Voices is a native macOS menu-bar app that reads text aloud with local,
-on-device voices. Copy Markdown from ChatGPT, Claude, or Grok, press play, and
-hear it read like a person would — headings, lists, tables, and code are spoken
-naturally instead of reading the markup. Everything runs 100% on your Mac; no
-text ever leaves your computer.
+Smart Voices reads copied text aloud on Linux, Windows, and macOS. Copy text
+anywhere and hear it read right away — Markdown from ChatGPT, Claude, or Grok
+is spoken like a person would read it. It's a tiny tray app (about 20 MB)
+that uses almost no CPU or memory when idle.
 
-## Linux and Windows
+How it works: the app watches your clipboard, cleans up Markdown for speech
+(tables read row by row, lists with ordinals, code announced instead of
+spelled out, links shortened to site names, emoji removed), and reads it with
+an on-device voice. English uses the Kokoro voice; Persian text automatically
+switches to a Persian Piper voice. Everything runs on your computer — no text
+ever leaves it.
 
-A cross-platform port is in progress in [`rust/`](rust/README.md): the same
-clipboard-to-speech loop (Markdown cleanup, Kokoro English voice plus Persian
-Piper voices) as a tiny tray app for Linux, Windows, and macOS. See
-[`rust/README.md`](rust/README.md) for downloads, settings, and building from
-source.
+## Downloads
 
-## Features
+Get the latest build from the
+[Releases page](https://github.com/saostad/smart-voices/releases/latest).
+Every push to `main` publishes a new release with:
 
-- **Clipboard reading** — copy text, click the menu-bar icon (or press play) to
-  hear it. A play badge lights up when new text is copied; password managers
-  and ignored apps never trigger it.
-- **Markdown-aware speech** — Grok-style reading: tables read row by row, lists
-  with ordinals ("Second, …"), code announced instead of spelled out, links
-  shortened to site names, emoji and citations removed.
-- **Conversational mode (optional)** — retells text in a natural spoken style
-  with Apple's on-device model before reading. Requires macOS 26 with Apple
-  Intelligence.
-- **Local Kokoro voice** — the natural Kokoro-82M voice runs on-device
-  (~120 MB download on first launch), plus all built-in macOS voices.
-- **Language-aware** — non-English text (Persian, German, …) automatically
-  switches to a matching installed macOS voice; Kokoro speaks English.
-- **Reading panel** — a floating window that highlights the current sentence
-  and word, with click-to-jump, transport controls, and speed.
-- **Pronunciation dictionary** — teach Smart Voices how to say names, acronyms,
-  and jargon (SQL → "sequel", JSON → "jason", …).
-- **More ways to read** — "Read Aloud with Smart Voices" Service for selected
-  text in any app, Read File… (`.md`, `.txt`, `.rtf`, `.pdf`), drag and drop
-  onto the reading panel, and auto-read on copy.
-- **Extras** — recent history with replay, export to `.m4a`, media keys and
-  Control Center (Now Playing), sleep timer, global shortcuts, launch at login.
+- Linux: `smart-voices-linux-x86_64.tar.gz`
+- Windows: `smart-voices-windows-x86_64.zip`
+- macOS (Apple Silicon): `smart-voices-macos-arm64.zip` (contains
+  `Smart Voices.app`; it's ad-hoc signed, so the first time right-click it
+  and choose Open)
 
-## Requirements
+On first launch the app sits in your tray (menu bar on macOS). The first
+reading downloads the voice model (see sizes below), then plays.
 
-- Apple Silicon Mac, macOS 15 or later.
-- Conversational mode additionally needs macOS 26 with Apple Intelligence
-  enabled.
-- Xcode toolchain to build (`swift build`).
+## First run: voice downloads
 
-## Install and run
+Models download automatically when first needed:
 
-Download `SmartVoices-1.0.0.dmg` from the
-[releases page](https://github.com/saostad/smart-voices/releases), open it, and
-drag Smart Voices to Applications. (The app is ad-hoc signed, so on first
-launch right-click it and choose Open.)
+| Model | Size | When |
+|---|---|---|
+| Fast (default English voice) | ~350 MB | First English reading |
+| Small (slower, low-memory English) | ~130 MB | Only if you pick it in Settings |
+| Persian voice | ~67 MB | First Persian reading (English-only use never downloads it) |
 
-Or build from source:
+You can also pre-download from a terminal:
+`smart-voices download`, `smart-voices download --model small`, or
+`smart-voices download --persian`.
+
+## The tray menu
+
+By default every new copy is read aloud automatically, and a new copy stops
+the current reading and reads the new text. Click the tray icon to open the
+menu: a status line (`Ready`, `Reading 3 of 12`, `Paused`, …),
+`Read Copied Text Automatically` (the main on/off switch), `Read Clipboard`,
+`Pause`/`Resume`, `Stop`, `Previous`/`Next Sentence`, the `Settings` submenu,
+and `Quit`.
+
+The `Settings` submenu holds everything customizable:
+
+- `Launch at Login` — start with your computer (reflects the real system
+  state).
+- `Watch the Clipboard` — turn clipboard watching off entirely.
+- `Voice` — 28 English voices (`Heart — American female`, …).
+- `Persian Voice` — Amir, Gyro, Reza Ibrahim, Ganji, Ganji Adabi.
+- `Speed` — 0.75× to 2×.
+- `Voice Model` — Fast or Small (switching reloads the voice).
+- `Unload Voice When Idle` — free the voice memory after 1–60 minutes, or
+  `Never`.
+- `Edit Pronunciations…` / `Open Settings File…` — teach the app words
+  (SQL → "sequel"); edits apply on the next reading.
+- `Shortcuts` — shows the current bindings; change them in `settings.toml`
+  and restart.
+
+## Shortcuts
+
+Global shortcuts work everywhere, even when another app is focused:
+
+| Action | macOS | Linux / Windows |
+|---|---|---|
+| Read / Pause | ⌃⌥Space | Ctrl+Alt+Space |
+| Stop | ⌃⌥. | Ctrl+Alt+. |
+| Next Sentence | ⌃⌥→ | Ctrl+Alt+→ |
+| Previous Sentence | ⌃⌥← | Ctrl+Alt+← |
+
+Set a binding to `""` in `settings.toml` to disable it.
+
+## Where things live
+
+| | macOS | Linux | Windows |
+|---|---|---|---|
+| Settings | `~/Library/Application Support/smart-voices/settings.toml` | `~/.config/smart-voices/settings.toml` | `%APPDATA%\smart-voices\settings.toml` |
+| Pronunciations | same folder, `pronunciations.toml` | same folder | same folder |
+| Voice models | `~/Library/Application Support/smart-voices/models/` | `~/.local/share/smart-voices/models/` | `%APPDATA%\smart-voices\models\` |
+
+Override the settings file with the `SMART_VOICES_CONFIG` environment
+variable (full file path) and the models folder with `SMART_VOICES_MODELS`.
+
+## Linux notes
+
+- On GNOME, install the "AppIndicator and KStatusNotifierItem Support"
+  extension to see the tray icon. Copy `smart-voices` to `~/.local/bin` and
+  the `.desktop` file from the download to `~/.local/share/applications` (and
+  to `~/.config/autostart` to start at login).
+- Clipboard watching needs X11 or XWayland. On pure Wayland without XWayland,
+  use the tray icon / shortcuts to read instead.
+- Global shortcuts use the XDG GlobalShortcuts portal on Wayland sessions
+  (your desktop may ask you to confirm them once; needs GNOME 48+, KDE 6, or
+  similar) and a classic key grab on X11.
+
+## Building from source
+
+You need a Rust toolchain (stable). From the repository root:
 
 ```sh
-scripts/build-app.sh && open "build/Smart Voices.app"
+cargo build --release
 ```
 
-Every push to `main` automatically builds and publishes a new DMG release.
+The binary lands at `target/release/smart-voices` (about 20 MB,
+self-contained). On Linux, install the audio headers first:
+`sudo apt-get install libasound2-dev pkg-config`. On macOS,
+`scripts/bundle-macos.sh` wraps the binary in `Smart Voices.app`.
 
-Click the menu-bar icon to read the clipboard. Right-click (or Control-click)
-for the menu: Watch the Clipboard, Read New Copies Automatically,
-Read Clipboard (⌘R), Read File… (⌘O), Recent, Pause/Resume, Stop,
-Previous/Next Sentence, Show Reading Panel (⌘P), Export Clipboard as Audio…,
-Speed, Sleep Timer, Voice, Engine, Settings… (⌘,), Quit (⌘Q).
+## Command line
 
-The two clipboard checkboxes stay in sync with Settings → General. Uncheck
-Watch the Clipboard to stop watching new copies, or Read New Copies
-Automatically to keep watching without starting playback automatically.
+Running `smart-voices` with no arguments starts the tray app. It also has
+headless commands (handy for scripts and testing):
 
-Default global shortcuts (change them in Settings → Shortcuts):
+- `smart-voices speak "<text>"` — read text aloud (`--voice`, `--speed`,
+  `--model fast|small`, `--persian-voice`, `--verbose`).
+- `smart-voices clean [<file>]` — print how text would be cleaned for speech,
+  one chunk per line (reads stdin without a file).
+- `smart-voices download` — fetch voice models up front (`--model`,
+  `--persian`).
+- `smart-voices watch` — print each copy and, with `--auto-read`, read it
+  aloud (Ctrl+C quits).
 
-- Play/Pause: `Ctrl+Opt+Space`
-- Stop: `Ctrl+Opt+.`
-- Next/Previous sentence: `Ctrl+Opt+→` / `Ctrl+Opt+←`
+## Performance
 
-## Read selected text from any app
-
-The first time, enable the Service in System Settings → Keyboard → Keyboard
-Shortcuts → Services → Text → "Read Aloud with Smart Voices", where you can
-also assign a shortcut. Then select text anywhere and use the Services menu.
-
-## Settings
-
-- **General** — launch at login, clipboard watching, auto-read, language
-  switching, reading panel, history, ignored apps.
-- **Voice** — engine (Kokoro / macOS Voice), voice, speed.
-- **Reading** — how code blocks, tables, and links are spoken, conversational
-  mode, and a live preview of exactly what will be said.
-- **Pronunciation** — the Written/Says dictionary with per-row previews.
-- **Shortcuts** — global keyboard shortcuts.
-- **About** — version, voice-model folder, credits.
-
-## For developers
-
-```sh
-swift build
-swift test
-swift run svtext < some.md   # print sanitized speech chunks, one per line
-```
-
-Headless checks (no UI):
-
-```sh
-swift run SmartVoices --say "Hello there."
-swift run SmartVoices --say-file sample.md --engine system --conversational
-swift run SmartVoices --export out.m4a --say-file sample.md
-```
-
-## Credits
-
-Voice: Kokoro-82M (Apache 2.0). Engine: FluidAudio. Thanks to the open-source
-projects that make on-device speech possible.
+Measured on an M1 Pro Mac: idle tray uses about 11–50 MB and 0% CPU (the
+voice unloads after 15 idle minutes); synthesis runs at about 0.2×
+real-time (5× faster than playback). From copy to first sound takes about
+0.3–0.5 seconds while the voice is loaded, and about 1.5 seconds right after
+it was unloaded.
