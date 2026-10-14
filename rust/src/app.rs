@@ -10,7 +10,9 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
-use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
+use tray_icon::menu::{
+    CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu, accelerator::Accelerator,
+};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
@@ -84,6 +86,16 @@ fn unload_duration(minutes: u32) -> Option<Duration> {
 
 fn menu_build_error(err: tray_icon::menu::Error) -> String {
     format!("Couldn't build the tray menu: {err}.")
+}
+
+/// Display-only accelerator for a menu item, from a shortcut binding. A
+/// binding that doesn't parse (the hotkey error is already shown at startup)
+/// or is empty (disabled) shows no accelerator.
+fn menu_accelerator(binding: &str) -> Option<Accelerator> {
+    if binding.trim().is_empty() {
+        return None;
+    }
+    binding.parse().ok()
 }
 
 /// OS default-editor opener for a file (no shell string).
@@ -322,12 +334,21 @@ impl App {
     /// this on macOS). Called once from `resumed`.
     fn create_tray(&mut self) -> Result<(), String> {
         let menu = Menu::new();
+        let shortcuts = &self.settings.shortcuts;
         let status_item = MenuItem::new("Ready", false, None);
-        let read_item = MenuItem::new("Read Clipboard", true, None);
-        let pause_item = MenuItem::new("Pause", false, None);
-        let stop_item = MenuItem::new("Stop", false, None);
-        let prev_item = MenuItem::new("Previous Sentence", false, None);
-        let next_item = MenuItem::new("Next Sentence", false, None);
+        let read_item = MenuItem::new(
+            "Read Clipboard",
+            true,
+            menu_accelerator(&shortcuts.read_or_pause),
+        );
+        let pause_item = MenuItem::new("Pause", false, menu_accelerator(&shortcuts.read_or_pause));
+        let stop_item = MenuItem::new("Stop", false, menu_accelerator(&shortcuts.stop));
+        let prev_item = MenuItem::new(
+            "Previous Sentence",
+            false,
+            menu_accelerator(&shortcuts.previous),
+        );
+        let next_item = MenuItem::new("Next Sentence", false, menu_accelerator(&shortcuts.next));
         let watch_item = CheckMenuItem::new(
             "Watch the Clipboard",
             true,
@@ -384,7 +405,6 @@ impl App {
         let edit_pron_item = MenuItem::new("Edit Pronunciations…", true, None);
         let open_settings_item = MenuItem::new("Open Settings File…", true, None);
 
-        let shortcuts = &self.settings.shortcuts;
         let shortcuts_menu = Submenu::new("Shortcuts", true);
         for label in [
             format!("Read / Pause: {}", format_binding(&shortcuts.read_or_pause)),
@@ -1197,6 +1217,22 @@ mod tests {
         assert_eq!(unload_duration(0), None);
         assert_eq!(unload_duration(5), Some(Duration::from_secs(300)));
         assert_eq!(unload_duration(60), Some(Duration::from_secs(3600)));
+    }
+
+    #[test]
+    fn default_bindings_show_accelerators_and_garbage_shows_none() {
+        use crate::settings::Shortcuts;
+        let defaults = Shortcuts::default();
+        for binding in [
+            &defaults.read_or_pause,
+            &defaults.stop,
+            &defaults.next,
+            &defaults.previous,
+        ] {
+            assert!(menu_accelerator(binding).is_some(), "{binding}");
+        }
+        assert_eq!(menu_accelerator(""), None);
+        assert_eq!(menu_accelerator("ctrl+Space+alt"), None);
     }
 
     #[test]
