@@ -1,10 +1,12 @@
 //! Sentence-bounded chunking for TTS (port of `SpeechChunker.swift`).
 //!
-//! Faithful port of `Sources/SmartVoicesCore/SpeechChunker.swift`: same chunk
-//! shapes, limits and split-before/after-limit logic (counts are in chars, not
-//! bytes). Sentence splitting differs by design: Swift uses `NLTokenizer`,
-//! replaced here by a small hand-written splitter (no crate) that breaks after
-//! sentence punctuation unless it ends a known abbreviation or an initial.
+//! Port of `Sources/SmartVoicesCore/SpeechChunker.swift`: same chunk shapes
+//! and split-before/after-limit logic (counts are in chars, not bytes), but
+//! with a short-first schedule (50/150/300) for fast first audio instead of
+//! Swift's 120/300. Sentence splitting differs by design: Swift uses
+//! `NLTokenizer`, replaced here by a small hand-written splitter (no crate)
+//! that breaks after sentence punctuation unless it ends a known abbreviation
+//! or an initial.
 
 use crate::sanitize::{SpeechPause, SpeechSegment};
 
@@ -20,30 +22,39 @@ pub struct SpeechChunk {
 pub struct SpeechChunker {
     max_characters: usize,
     first_chunk_max_characters: usize,
+    second_chunk_max_characters: usize,
+    natural_first: bool,
 }
 
 impl Default for SpeechChunker {
     fn default() -> Self {
         Self {
             max_characters: 300,
-            first_chunk_max_characters: 120,
+            first_chunk_max_characters: 50,
+            second_chunk_max_characters: 150,
+            natural_first: true,
         }
     }
 }
 
 impl SpeechChunker {
-    /// Chunker with the default limits (300 chars, 120 for the first chunk).
+    /// Chunker with the default schedule (50 chars for chunk 1, 150 for
+    /// chunk 2, 300 after) for fast first audio.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Chunker with custom limits (chars, not bytes).
+    /// Chunker with custom limits (chars, not bytes). The second chunk uses
+    /// `max_characters` (the old "first vs rest" shape, kept for tests); the
+    /// chunk-1 natural break is off so the old expectations hold.
     #[must_use]
     pub fn with_limits(max_characters: usize, first_chunk_max_characters: usize) -> Self {
         Self {
             max_characters,
             first_chunk_max_characters,
+            second_chunk_max_characters: max_characters,
+            natural_first: false,
         }
     }
 
@@ -52,7 +63,7 @@ impl SpeechChunker {
     #[must_use]
     pub fn chunks(&self, segments: &[SpeechSegment]) -> Vec<SpeechChunk> {
         let mut result = Vec::new();
-        let mut is_first_chunk = true;
+        let mut chunk_index = 0;
         for segment in segments {
             let trimmed = segment.text.trim();
             if trimmed.is_empty() {
@@ -60,7 +71,7 @@ impl SpeechChunker {
             }
             let mut texts: Vec<String> = Vec::new();
             for sentence in split_sentences(trimmed) {
-                texts.extend(self.split_sentence(&sentence, &mut is_first_chunk));
+                texts.extend(self.split_sentence(&sentence, &mut chunk_index));
             }
             let last = texts.len().saturating_sub(1);
             for (index, text) in texts.into_iter().enumerate() {
@@ -79,7 +90,7 @@ impl SpeechChunker {
     }
 
     /// Split one sentence into limit-sized parts.
-    fn split_sentence(&self, sentence: &str, is_first: &mut bool) -> Vec<String> {
+    fn split_sentence(&self, sentence: &str, chunk_index: &mut usize) -> Vec<String> {
         let mut remaining = sentence.trim().to_string();
         if remaining.is_empty() {
             return Vec::new();
@@ -90,28 +101,38 @@ impl SpeechChunker {
             if remaining.is_empty() {
                 break;
             }
-            let limit = if *is_first {
-                self.first_chunk_max_characters
-            } else {
-                self.max_characters
+            let limit = match *chunk_index {
+                0 => self.first_chunk_max_characters,
+                1 => self.second_chunk_max_characters,
+                _ => self.max_characters,
             };
             if remaining.chars().count() <= limit {
                 parts.push(remaining);
-                *is_first = false;
+                *chunk_index += 1;
                 break;
+            }
+            // Chunk 1 prefers a natural break in 12..=80 chars, even past 50.
+            if *chunk_index == 0
+                && self.natural_first
+                && let Some((first, rest)) = split_first_chunk_natural(&remaining)
+            {
+                parts.push(first.trim().to_string());
+                *chunk_index += 1;
+                remaining = rest;
+                continue;
             }
             if let Some((first, rest)) = split_before_limit(&remaining, limit) {
                 parts.push(first.trim().to_string());
-                *is_first = false;
+                *chunk_index += 1;
                 remaining = rest;
             } else if let Some((first, rest)) = split_after_limit(&remaining, limit) {
                 parts.push(first.trim().to_string());
-                *is_first = false;
+                *chunk_index += 1;
                 remaining = rest;
             } else {
                 // Single long word: emit whole to avoid mid-word split.
                 parts.push(remaining);
-                *is_first = false;
+                *chunk_index += 1;
                 break;
             }
         }
@@ -153,6 +174,53 @@ fn split_after_limit(text: &str, limit: usize) -> Option<(String, String)> {
         }
     }
     None
+}
+
+/// Split chunk 1 at a natural break (", ", "; ", ": " or " — ") whose first
+/// part is 12..=80 chars. Prefers the longest break at or under 50 chars,
+/// else the shortest break past 50. Punctuation stays in the first part.
+fn split_first_chunk_natural(text: &str) -> Option<(String, String)> {
+    const MIN_FIRST: usize = 12;
+    const TARGET: usize = 50;
+    const MAX_FIRST: usize = 80;
+    let chars: Vec<char> = text.chars().collect();
+    let mut best_under: Option<(usize, usize, usize)> = None;
+    let mut best_over: Option<(usize, usize, usize)> = None;
+    for separator in [", ", "; ", ": ", " — "] {
+        let needle: Vec<char> = separator.chars().collect();
+        let mut from = 0;
+        while from + needle.len() <= chars.len() {
+            let Some(found) = find_seq(&chars[from..], &needle) else {
+                break;
+            };
+            let at = from + found;
+            let first_len = at + needle.len() - 1;
+            if (MIN_FIRST..=MAX_FIRST).contains(&first_len) {
+                let first: String = chars[..first_len].iter().collect();
+                if !first.trim().is_empty() {
+                    if first_len <= TARGET {
+                        let better = best_under.is_none_or(|(len, _, _)| first_len > len);
+                        if better {
+                            best_under = Some((first_len, at, needle.len()));
+                        }
+                    } else {
+                        let better = best_over.is_none_or(|(len, _, _)| first_len < len);
+                        if better {
+                            best_over = Some((first_len, at, needle.len()));
+                        }
+                    }
+                }
+            }
+            from = at + 1;
+        }
+    }
+    let (first_len, at, needle_len) = best_under.or(best_over)?;
+    let first: String = chars[..first_len].iter().collect();
+    let rest: String = chars[at + needle_len..].iter().collect();
+    if rest.trim().is_empty() {
+        return None;
+    }
+    Some((first, rest))
 }
 
 /// Split `chars` around `needle` at `at`: a two-char separator keeps its
@@ -442,6 +510,57 @@ mod tests {
         assert_eq!(
             result.iter().map(|c| c.text.as_str()).collect::<Vec<_>>(),
             ["你好。", "再见。"]
+        );
+    }
+
+    #[test]
+    fn first_sentence_with_comma_at_46_splits_there() {
+        let chunker = SpeechChunker::new();
+        let text = format!("{}, {}.", "a".repeat(46), "b".repeat(65));
+        assert_eq!(text.chars().count(), 114);
+        let result = chunker.chunks(&[seg(&text, SpeechPause::Medium)]);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].text, format!("{},", "a".repeat(46)));
+        assert_eq!(result[1].text, format!("{}.", "b".repeat(65)));
+    }
+
+    #[test]
+    fn thirty_char_first_sentence_stays_whole() {
+        let chunker = SpeechChunker::new();
+        let text = "This sentence is thirty chars.";
+        assert_eq!(text.chars().count(), 30);
+        let result = chunker.chunks(&[seg(text, SpeechPause::Medium)]);
+        assert_eq!(result, [chunk(text, SpeechPause::Medium)]);
+    }
+
+    #[test]
+    fn second_chunk_respects_150() {
+        let chunker = SpeechChunker::new();
+        let long = format!("{}.", "w ".repeat(100).trim_end());
+        assert!(long.chars().count() > 150);
+        let text = format!("Short first. {long}");
+        let result = chunker.chunks(&[seg(&text, SpeechPause::Medium)]);
+        assert!(result.len() >= 3, "expected chunk 2 to split: {result:?}");
+        assert_eq!(result[0].text, "Short first.");
+        assert!(
+            result[1].text.chars().count() <= 150,
+            "chunk 2 is {} chars",
+            result[1].text.chars().count()
+        );
+    }
+
+    #[test]
+    fn first_chunk_stays_short_for_long_paragraph_without_commas() {
+        let chunker = SpeechChunker::new();
+        let paragraph = format!("{}.", "word ".repeat(80).trim_end());
+        assert_eq!(paragraph.chars().count(), 400);
+        assert!(!paragraph.contains(','));
+        let result = chunker.chunks(&[seg(&paragraph, SpeechPause::Medium)]);
+        assert!(!result.is_empty());
+        assert!(
+            result[0].text.chars().count() <= 80,
+            "chunk 1 is {} chars",
+            result[0].text.chars().count()
         );
     }
 }
