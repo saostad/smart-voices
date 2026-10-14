@@ -14,7 +14,7 @@ use smart_voices::pronounce::{Pronunciations, pronunciations_path};
 use smart_voices::sanitize::SanitizerOptions;
 use smart_voices::settings::{Settings, settings_path};
 
-const USAGE: &str = "Usage: smart-voices (starts the tray app)\n       smart-voices speak \"<text>\" [--voice <name>] [--speed <f>] [--model fast|small] [--verbose]\n       smart-voices download [--model fast|small]\n       smart-voices clean [<file>]\n       smart-voices watch [--auto-read]";
+const USAGE: &str = "Usage: smart-voices (starts the tray app)\n       smart-voices speak \"<text>\" [--voice <name>] [--speed <f>] [--model fast|small] [--persian-voice <id>] [--verbose]\n       smart-voices download [--model fast|small] [--persian] [--persian-voice <id>]\n       smart-voices clean [<file>]\n       smart-voices watch [--auto-read]";
 
 fn main() {
     std::process::exit(run());
@@ -102,6 +102,7 @@ struct SpeakOptions {
     voice: Option<String>,
     speed: Option<f32>,
     model: Option<ModelVariant>,
+    persian_voice: Option<PersianVoice>,
     verbose: bool,
 }
 
@@ -110,6 +111,7 @@ fn parse_speak(args: &[String]) -> Option<SpeakOptions> {
     let mut voice: Option<String> = None;
     let mut speed: Option<f32> = None;
     let mut model: Option<ModelVariant> = None;
+    let mut persian_voice: Option<PersianVoice> = None;
     let mut verbose = false;
     let mut i = 0;
     while i < args.len() {
@@ -125,6 +127,10 @@ fn parse_speak(args: &[String]) -> Option<SpeakOptions> {
             "--model" => {
                 i += 1;
                 model = Some(ModelVariant::parse(args.get(i)?)?);
+            }
+            "--persian-voice" => {
+                i += 1;
+                persian_voice = Some(PersianVoice::parse(args.get(i)?)?);
             }
             "--verbose" => {
                 verbose = true;
@@ -144,6 +150,7 @@ fn parse_speak(args: &[String]) -> Option<SpeakOptions> {
         voice,
         speed,
         model,
+        persian_voice,
         verbose,
     })
 }
@@ -184,12 +191,16 @@ fn speak(args: &[String]) -> i32 {
     let voice = options.voice.unwrap_or(settings.voice);
     let speed = options.speed.unwrap_or(settings.speed);
     let model = options.model.unwrap_or(settings.model);
+    let persian_voice = options.persian_voice.unwrap_or(settings.persian_voice);
 
-    if !models::is_installed(&models_root, ModelId::Kokoro(model))
-        && let Err(err) = download_with_progress(&models_root, ModelId::Kokoro(model))
-    {
-        eprintln!("Error: {err}");
-        return 1;
+    // Download whichever models this text needs; English-only text never
+    // downloads the Persian voice.
+    let chunks = prepare(&options.text, &SanitizerOptions::default(), &pronunciations);
+    for needed in models::models_for_chunks(&chunks, model, persian_voice) {
+        if let Err(err) = download_with_progress(&models_root, needed) {
+            eprintln!("Error: {err}");
+            return 1;
+        }
     }
 
     let sink = match AudioSink::new() {
@@ -212,8 +223,7 @@ fn speak(args: &[String]) -> i32 {
         unload_after,
         sanitizer_options: SanitizerOptions::default(),
         pronunciations,
-        // Wired to settings in the next item; Amir until then.
-        persian_voice: PersianVoice::Amir,
+        persian_voice,
     };
     let persian_root = models_root.clone();
     let factory = move || -> Result<Box<dyn Synth>, String> {
@@ -223,7 +233,7 @@ fn speak(args: &[String]) -> i32 {
         }
     };
     let persian_factory = move || -> Result<Box<dyn Synth>, String> {
-        match PiperEngine::load(&persian_root, PersianVoice::Amir) {
+        match PiperEngine::load(&persian_root, persian_voice) {
             Ok(engine) => Ok(Box::new(engine) as Box<dyn Synth>),
             Err(err) => Err(err.to_string()),
         }
@@ -256,24 +266,46 @@ fn speak(args: &[String]) -> i32 {
     1
 }
 
-fn parse_download(args: &[String]) -> Option<ModelVariant> {
-    let mut model = ModelVariant::Fast;
+struct DownloadOptions {
+    kokoro: Option<ModelVariant>,
+    persian: Option<PersianVoice>,
+}
+
+fn parse_download(args: &[String]) -> Option<DownloadOptions> {
+    let mut kokoro: Option<ModelVariant> = None;
+    let mut persian: Option<PersianVoice> = None;
+    let mut want_persian = false;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
             "--model" => {
                 i += 1;
-                model = ModelVariant::parse(args.get(i)?)?;
+                kokoro = Some(ModelVariant::parse(args.get(i)?)?);
+            }
+            "--persian" => {
+                want_persian = true;
+            }
+            "--persian-voice" => {
+                i += 1;
+                persian = Some(PersianVoice::parse(args.get(i)?)?);
             }
             _ => return None,
         }
         i += 1;
     }
-    Some(model)
+    // `--persian-voice <id>` alone implies the Persian download; `--persian`
+    // alone means the default voice. A bare `download` keeps fetching Fast.
+    if want_persian && persian.is_none() {
+        persian = Some(PersianVoice::Amir);
+    }
+    if kokoro.is_none() && persian.is_none() {
+        kokoro = Some(ModelVariant::Fast);
+    }
+    Some(DownloadOptions { kokoro, persian })
 }
 
 fn download_cmd(args: &[String]) -> i32 {
-    let Some(model) = parse_download(args) else {
+    let Some(options) = parse_download(args) else {
         eprintln!("{USAGE}");
         return 2;
     };
@@ -283,16 +315,23 @@ fn download_cmd(args: &[String]) -> i32 {
         );
         return 1;
     };
-    match download_with_progress(&models_root, ModelId::Kokoro(model)) {
-        Ok(dir) => {
-            eprintln!("Voice model ready at {}", dir.display());
-            0
-        }
-        Err(err) => {
-            eprintln!("Error: {err}");
-            1
+    let mut models = Vec::with_capacity(2);
+    if let Some(variant) = options.kokoro {
+        models.push(ModelId::Kokoro(variant));
+    }
+    if let Some(voice) = options.persian {
+        models.push(ModelId::Persian(voice));
+    }
+    for model in models {
+        match download_with_progress(&models_root, model) {
+            Ok(dir) => eprintln!("Voice model ready at {}", dir.display()),
+            Err(err) => {
+                eprintln!("Error: {err}");
+                return 1;
+            }
         }
     }
+    0
 }
 
 /// Read Markdown from `file` (or stdin) and print one line per
@@ -401,6 +440,7 @@ struct LazyPlayer {
     voice: String,
     speed: f32,
     model: ModelVariant,
+    persian_voice: PersianVoice,
     unload_after: Option<Duration>,
     pronunciations: Pronunciations,
 }
@@ -412,6 +452,7 @@ impl LazyPlayer {
             voice: settings.voice.clone(),
             speed: settings.speed,
             model: settings.model,
+            persian_voice: settings.persian_voice,
             unload_after: if settings.unload_after_minutes == 0 {
                 None
             } else {
@@ -424,6 +465,12 @@ impl LazyPlayer {
     }
 
     fn play(&mut self, text: String) {
+        // Download whichever models this text needs (no-op when installed),
+        // like `speak` and the tray app.
+        if let Err(message) = self.ensure_models(&text) {
+            eprintln!("Error: {message}");
+            return;
+        }
         if self.player.is_none() {
             match self.spawn() {
                 Ok(player) => self.player = Some(player),
@@ -438,24 +485,32 @@ impl LazyPlayer {
         }
     }
 
+    fn ensure_models(&self, text: &str) -> Result<(), String> {
+        let models_root = models_root().ok_or_else(|| {
+            "Couldn't find the models folder: SMART_VOICES_MODELS is not set and no data directory is available."
+                .to_string()
+        })?;
+        let chunks = prepare(text, &SanitizerOptions::default(), &self.pronunciations);
+        for needed in models::models_for_chunks(&chunks, self.model, self.persian_voice) {
+            download_with_progress(&models_root, needed).map_err(|err| err.to_string())?;
+        }
+        Ok(())
+    }
+
     fn spawn(&self) -> Result<Player, String> {
         let models_root = models_root().ok_or_else(|| {
             "Couldn't find the models folder: SMART_VOICES_MODELS is not set and no data directory is available."
                 .to_string()
         })?;
-        if !models::is_installed(&models_root, ModelId::Kokoro(self.model)) {
-            download_with_progress(&models_root, ModelId::Kokoro(self.model))
-                .map_err(|err| err.to_string())?;
-        }
         let sink = AudioSink::new().map_err(|err| err.to_string())?;
+        let persian_voice = self.persian_voice;
         let config = PlayerConfig {
             voice: self.voice.clone(),
             speed: self.speed,
             unload_after: self.unload_after,
             sanitizer_options: SanitizerOptions::default(),
             pronunciations: self.pronunciations.clone(),
-            // Wired to settings in the next item; Amir until then.
-            persian_voice: PersianVoice::Amir,
+            persian_voice,
         };
         let model = self.model;
         let persian_root = models_root.clone();
@@ -466,7 +521,7 @@ impl LazyPlayer {
             }
         };
         let persian_factory = move || -> Result<Box<dyn Synth>, String> {
-            match PiperEngine::load(&persian_root, PersianVoice::Amir) {
+            match PiperEngine::load(&persian_root, persian_voice) {
                 Ok(engine) => Ok(Box::new(engine) as Box<dyn Synth>),
                 Err(err) => Err(err.to_string()),
             }

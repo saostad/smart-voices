@@ -24,10 +24,12 @@ use winit::window::WindowId;
 use crate::audio::AudioSink;
 use crate::clipboard::{self, ClipboardEvent, MIN_TEXT_LEN};
 use crate::engine::{
-    KokoroEngine, ModelVariant, PersianVoice, PiperEngine, VOICES, voice_display_name,
+    KokoroEngine, ModelVariant, PERSIAN_VOICES, PersianVoice, PiperEngine, VOICES,
+    voice_display_name,
 };
 use crate::icon;
 use crate::models::{self, ModelId};
+use crate::pipeline::prepare;
 use crate::player::{Player, PlayerConfig, PlayerEvent, PlayerState, Synth};
 use crate::pronounce::{Pronunciations, pronunciations_path};
 use crate::sanitize::SanitizerOptions;
@@ -43,7 +45,7 @@ enum AppEvent {
     Tray(TrayIconEvent),
     Menu(MenuEvent),
     Shortcut(GlobalHotKeyEvent),
-    DownloadProgress(u64, Option<u64>),
+    DownloadProgress(ModelId, u64, Option<u64>),
     DownloadDone(Result<(), String>),
 }
 
@@ -224,6 +226,7 @@ struct App {
     watch_item: Option<CheckMenuItem>,
     autoread_item: Option<CheckMenuItem>,
     voice_items: Vec<(String, CheckMenuItem)>,
+    persian_voice_items: Vec<(PersianVoice, CheckMenuItem)>,
     speed_items: Vec<(f32, CheckMenuItem)>,
     model_items: Vec<(ModelVariant, CheckMenuItem)>,
     unload_items: Vec<(u32, CheckMenuItem)>,
@@ -280,6 +283,7 @@ impl App {
             watch_item: None,
             autoread_item: None,
             voice_items: Vec::new(),
+            persian_voice_items: Vec::new(),
             speed_items: Vec::new(),
             model_items: Vec::new(),
             unload_items: Vec::new(),
@@ -374,6 +378,19 @@ impl App {
             voice_items.push((id.to_string(), item));
         }
 
+        let persian_voice_menu = Submenu::new("Persian Voice", true);
+        let mut persian_voice_items = Vec::with_capacity(PERSIAN_VOICES.len());
+        for voice in PERSIAN_VOICES {
+            let item = CheckMenuItem::new(
+                voice.label(),
+                true,
+                voice == self.settings.persian_voice,
+                None,
+            );
+            persian_voice_menu.append(&item).map_err(menu_build_error)?;
+            persian_voice_items.push((voice, item));
+        }
+
         let speed_menu = Submenu::new("Speed", true);
         let mut speed_items = Vec::with_capacity(SPEEDS.len());
         for speed in SPEEDS {
@@ -441,6 +458,9 @@ impl App {
             .append(&voice_menu)
             .map_err(menu_build_error)?;
         settings_menu
+            .append(&persian_voice_menu)
+            .map_err(menu_build_error)?;
+        settings_menu
             .append(&speed_menu)
             .map_err(menu_build_error)?;
         settings_menu
@@ -500,6 +520,7 @@ impl App {
         self.watch_item = Some(watch_item);
         self.autoread_item = Some(autoread_item);
         self.voice_items = voice_items;
+        self.persian_voice_items = persian_voice_items;
         self.speed_items = speed_items;
         self.model_items = model_items;
         self.unload_items = unload_items;
@@ -596,12 +617,23 @@ impl App {
 
     fn play_text(&mut self, text: String) {
         self.reload_pronunciations();
-        if !models::is_installed(&self.models_root, ModelId::Kokoro(self.model)) {
+        // Download whichever models this reading needs (English chunks need
+        // the Kokoro variant, Persian chunks the Persian voice), one after the
+        // other, then play. English-only text never downloads the Persian
+        // voice.
+        let chunks = prepare(&text, &SanitizerOptions::default(), &self.pronunciations);
+        let missing: Vec<ModelId> =
+            models::models_for_chunks(&chunks, self.model, self.settings.persian_voice)
+                .into_iter()
+                .filter(|model| !models::is_installed(&self.models_root, *model))
+                .collect();
+        if !missing.is_empty() {
             // Download on a worker thread, then play; a newer request while
-            // a download runs replaces the pending text.
+            // a download runs replaces the pending text (and the next check
+            // re-computes what is still missing).
             self.pending_text = Some(text);
             if !self.downloading {
-                self.start_download();
+                self.start_download(missing);
             }
             return;
         }
@@ -614,32 +646,36 @@ impl App {
         }
     }
 
-    /// Download the model on a worker thread, reporting progress into the
-    /// loop at most ~2×/s for the status line.
-    fn start_download(&mut self) {
+    /// Download the missing models on a worker thread, one after the other,
+    /// reporting progress into the loop at most ~2×/s for the status line.
+    fn start_download(&mut self, queue: Vec<ModelId>) {
         self.downloading = true;
         self.set_status("Downloading voice…");
         let proxy = self.proxy.clone();
         let root = self.models_root.clone();
-        let model = ModelId::Kokoro(self.model);
         std::thread::spawn(move || {
             let mut last_report: Option<Instant> = None;
-            let result = models::download(&root, model, |done, total| {
-                let now = Instant::now();
-                let due = last_report.is_none_or(|last| now - last >= Duration::from_millis(500));
-                if due {
-                    last_report = Some(now);
-                    let _ = proxy.send_event(AppEvent::DownloadProgress(done, total));
+            for model in queue {
+                let result = models::download(&root, model, |done, total| {
+                    let now = Instant::now();
+                    let due =
+                        last_report.is_none_or(|last| now - last >= Duration::from_millis(500));
+                    if due {
+                        last_report = Some(now);
+                        let _ = proxy.send_event(AppEvent::DownloadProgress(model, done, total));
+                    }
+                });
+                if let Err(err) = result {
+                    let _ = proxy.send_event(AppEvent::DownloadDone(Err(err.to_string())));
+                    return;
                 }
-            });
-            let _ = proxy.send_event(AppEvent::DownloadDone(
-                result.map(|_| ()).map_err(|err| err.to_string()),
-            ));
+            }
+            let _ = proxy.send_event(AppEvent::DownloadDone(Ok(())));
         });
     }
 
-    fn on_download_progress(&mut self, done: u64, total: Option<u64>) {
-        self.set_status(&download_status(done, total));
+    fn on_download_progress(&mut self, model: ModelId, done: u64, total: Option<u64>) {
+        self.set_status(&download_status(download_label(model), done, total));
     }
 
     fn on_download_done(&mut self, result: Result<(), String>) {
@@ -685,14 +721,14 @@ impl App {
         }
         let sink = AudioSink::new().map_err(|err| err.to_string())?;
         let unload_after = unload_duration(self.settings.unload_after_minutes);
+        let persian_voice = self.settings.persian_voice;
         let config = PlayerConfig {
             voice: self.settings.voice.clone(),
             speed: self.settings.speed,
             unload_after,
             sanitizer_options: SanitizerOptions::default(),
             pronunciations: self.pronunciations.clone(),
-            // Wired to settings in the next item; Amir until then.
-            persian_voice: PersianVoice::Amir,
+            persian_voice,
         };
         let models_root = self.models_root.clone();
         let model = self.model;
@@ -703,7 +739,6 @@ impl App {
                 Err(err) => Err(err.to_string()),
             }
         };
-        let persian_voice = PersianVoice::Amir;
         let persian_factory = move || -> Result<Box<dyn Synth>, String> {
             match PiperEngine::load(&persian_root, persian_voice) {
                 Ok(engine) => Ok(Box::new(engine) as Box<dyn Synth>),
@@ -861,6 +896,13 @@ impl App {
             .map(|(voice, _)| voice.clone())
         {
             self.on_voice_selected(&voice);
+        } else if let Some(voice) = self
+            .persian_voice_items
+            .iter()
+            .find(|(_, item)| id == item.id())
+            .map(|(voice, _)| *voice)
+        {
+            self.on_persian_voice_selected(voice);
         } else if let Some(speed) = self
             .speed_items
             .iter()
@@ -952,6 +994,25 @@ impl App {
     fn update_voice_checks(&self) {
         for (voice, item) in &self.voice_items {
             item.set_checked(*voice == self.settings.voice);
+        }
+    }
+
+    /// A Persian voice item was clicked (muda already flipped its check;
+    /// re-sync all of them so exactly one stays checked). Applies from the
+    /// next chunk; if its model isn't installed it downloads on the next
+    /// Persian reading (existing flow).
+    fn on_persian_voice_selected(&mut self, voice: PersianVoice) {
+        self.settings.persian_voice = voice;
+        if let Some(player) = &self.player {
+            player.set_persian_voice(voice);
+        }
+        self.update_persian_voice_checks();
+        self.save_settings();
+    }
+
+    fn update_persian_voice_checks(&self) {
+        for (voice, item) in &self.persian_voice_items {
+            item.set_checked(*voice == self.settings.persian_voice);
         }
     }
 
@@ -1164,7 +1225,9 @@ impl ApplicationHandler<AppEvent> for App {
             AppEvent::Tray(event) => self.on_tray_event(event),
             AppEvent::Menu(event) => self.on_menu_event(event_loop, event),
             AppEvent::Shortcut(event) => self.on_shortcut(event),
-            AppEvent::DownloadProgress(done, total) => self.on_download_progress(done, total),
+            AppEvent::DownloadProgress(model, done, total) => {
+                self.on_download_progress(model, done, total)
+            }
             AppEvent::DownloadDone(result) => self.on_download_done(result),
         }
     }
@@ -1184,16 +1247,24 @@ fn tray_icon(rgba: &[u8]) -> Option<Icon> {
     Icon::from_rgba(rgba.to_vec(), icon::SIZE, icon::SIZE).ok()
 }
 
+/// Status-line label for a running model download.
+fn download_label(model: ModelId) -> &'static str {
+    match model {
+        ModelId::Kokoro(_) => "Downloading voice",
+        ModelId::Persian(_) => "Downloading Persian voice",
+    }
+}
+
 /// Status-line text for a running model download (decimal MB).
-fn download_status(done: u64, total: Option<u64>) -> String {
+fn download_status(label: &str, done: u64, total: Option<u64>) -> String {
     const MB: f64 = 1_000_000.0;
     match total {
         Some(total) => format!(
-            "Downloading voice: {:.0}/{:.0} MB",
+            "{label}: {:.0}/{:.0} MB",
             done as f64 / MB,
             total as f64 / MB
         ),
-        None => format!("Downloading voice: {:.0} MB", done as f64 / MB),
+        None => format!("{label}: {:.0} MB", done as f64 / MB),
     }
 }
 
@@ -1251,9 +1322,24 @@ mod tests {
     #[test]
     fn download_status_shows_whole_mb() {
         assert_eq!(
-            download_status(120_000_000, Some(350_000_000)),
+            download_status("Downloading voice", 120_000_000, Some(350_000_000)),
             "Downloading voice: 120/350 MB"
         );
-        assert_eq!(download_status(1_500_000, None), "Downloading voice: 2 MB");
+        assert_eq!(
+            download_status("Downloading voice", 1_500_000, None),
+            "Downloading voice: 2 MB"
+        );
+        assert_eq!(
+            download_status(
+                download_label(ModelId::Persian(crate::engine::PersianVoice::Amir)),
+                30_000_000,
+                Some(67_000_000)
+            ),
+            "Downloading Persian voice: 30/67 MB"
+        );
+        assert_eq!(
+            download_label(ModelId::Kokoro(crate::engine::ModelVariant::Fast)),
+            "Downloading voice"
+        );
     }
 }

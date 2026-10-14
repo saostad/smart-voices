@@ -9,7 +9,9 @@ use std::time::{Duration, Instant};
 use bzip2::read::BzDecoder;
 use tar::Archive;
 
+use crate::chunk::SpeechChunk;
 use crate::engine::{ModelVariant, PersianVoice};
+use crate::lang::{Lang, chunk_language};
 
 /// A downloadable voice model: a Kokoro variant or a Persian Piper voice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,6 +100,31 @@ impl fmt::Display for ModelError {
 }
 
 impl Error for ModelError {}
+
+/// Models needed to read `chunks`: the Kokoro `variant` when any chunk is
+/// English, the Persian `voice` when any chunk is Persian (Kokoro first).
+/// English-only text never asks for the Persian model.
+#[must_use]
+pub fn models_for_chunks(
+    chunks: &[SpeechChunk],
+    variant: ModelVariant,
+    voice: PersianVoice,
+) -> Vec<ModelId> {
+    let mut models = Vec::with_capacity(2);
+    if chunks
+        .iter()
+        .any(|chunk| chunk_language(&chunk.text) == Lang::English)
+    {
+        models.push(ModelId::Kokoro(variant));
+    }
+    if chunks
+        .iter()
+        .any(|chunk| chunk_language(&chunk.text) == Lang::Persian)
+    {
+        models.push(ModelId::Persian(voice));
+    }
+    models
+}
 
 /// Final install dir for a model: `root/<dir_name>`.
 pub fn model_dir(root: &Path, model: ModelId) -> PathBuf {
@@ -329,6 +356,31 @@ mod tests {
             assert!(!is_installed(&dir, model), "model {model:?}");
             std::fs::remove_dir_all(&dir).unwrap();
         }
+    }
+
+    #[test]
+    fn models_for_chunks_requests_only_needed_models() {
+        use crate::sanitize::SpeechPause;
+
+        let chunk = |text: &str| SpeechChunk {
+            text: text.to_string(),
+            pause_after: SpeechPause::None,
+        };
+        let variant = ModelVariant::Small;
+        let voice = PersianVoice::Gyro;
+        assert_eq!(
+            models_for_chunks(&[chunk("Hello."), chunk("World.")], variant, voice),
+            [ModelId::Kokoro(variant)]
+        );
+        assert_eq!(
+            models_for_chunks(&[chunk("سلام.")], variant, voice),
+            [ModelId::Persian(voice)]
+        );
+        assert_eq!(
+            models_for_chunks(&[chunk("سلام."), chunk("Hello.")], variant, voice),
+            [ModelId::Kokoro(variant), ModelId::Persian(voice)]
+        );
+        assert!(models_for_chunks(&[], variant, voice).is_empty());
     }
 
     #[test]

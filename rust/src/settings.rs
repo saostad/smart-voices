@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::engine::{DEFAULT_VOICE, ModelVariant};
+use crate::engine::{DEFAULT_VOICE, ModelVariant, PersianVoice};
 
 /// Errors from loading or saving the settings file.
 #[derive(Debug)]
@@ -73,6 +73,8 @@ pub struct Settings {
     pub speed: f32,
     /// Model variant.
     pub model: ModelVariant,
+    /// Persian voice (serialized as its id, e.g. `"amir"`).
+    pub persian_voice: PersianVoice,
     /// Watch the clipboard for new text.
     pub watch_clipboard: bool,
     /// Start reading automatically on new clipboard text.
@@ -89,6 +91,7 @@ impl Default for Settings {
             voice: DEFAULT_VOICE.to_string(),
             speed: 1.0,
             model: ModelVariant::Fast,
+            persian_voice: PersianVoice::Amir,
             watch_clipboard: true,
             auto_read: false,
             unload_after_minutes: 5,
@@ -183,6 +186,7 @@ mod tests {
             voice: "bm_lewis".to_string(),
             speed: 1.25,
             model: ModelVariant::Small,
+            persian_voice: PersianVoice::Gyro,
             watch_clipboard: false,
             auto_read: true,
             unload_after_minutes: 0,
@@ -275,6 +279,19 @@ mod tests {
         assert!(err.is_none(), "unexpected error: {err:?}");
         assert_eq!(settings.voice, "bm_lewis");
         assert_eq!(settings.shortcuts, Shortcuts::default());
+        assert_eq!(settings.persian_voice, PersianVoice::Amir);
+    }
+
+    #[test]
+    fn persian_voice_serializes_as_its_id() {
+        let dir = unique_temp_dir();
+        let path = dir.join("settings.toml");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&path, "persian_voice = \"reza_ibrahim\"\n").unwrap();
+        let (settings, err) = Settings::load(&path);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(err.is_none(), "unexpected error: {err:?}");
+        assert_eq!(settings.persian_voice, PersianVoice::RezaIbrahim);
     }
 
     #[test]
