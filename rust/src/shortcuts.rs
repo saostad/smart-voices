@@ -1,5 +1,32 @@
-//! Global shortcut helpers: display formatting for the bindings stored in
-//! `Settings::shortcuts` (`HotKey::from_str` syntax, e.g. `"ctrl+alt+Space"`).
+//! Global shortcut helpers: parsing and display formatting for the bindings
+//! stored in `Settings::shortcuts` (`HotKey::from_str` syntax, e.g.
+//! `"ctrl+alt+Space"`).
+
+use global_hotkey::hotkey::HotKey;
+
+/// What a registered global shortcut does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShortcutAction {
+    /// Read the clipboard when idle, pause/resume while reading.
+    ReadOrPause,
+    /// Stop reading.
+    Stop,
+    /// Jump to the next chunk.
+    Next,
+    /// Jump to the previous chunk.
+    Previous,
+}
+
+/// Parse one binding: an empty string means disabled (`Ok(None)`), anything
+/// else must be `HotKey::from_str` syntax.
+pub fn parse_binding(text: &str) -> Result<Option<HotKey>, String> {
+    if text.trim().is_empty() {
+        return Ok(None);
+    }
+    text.parse::<HotKey>()
+        .map(Some)
+        .map_err(|err| err.to_string())
+}
 
 /// Format a shortcut binding for the menu (`"ctrl+alt+Space"` →
 /// `"Ctrl+Alt+Space"`, `"⌃⌥Space"` on macOS). An empty binding (disabled)
@@ -107,6 +134,32 @@ fn format_key(token: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_accepts_defaults_and_rejects_garbage() {
+        use crate::settings::Shortcuts;
+        let defaults = Shortcuts::default();
+        for binding in [
+            &defaults.read_or_pause,
+            &defaults.stop,
+            &defaults.next,
+            &defaults.previous,
+        ] {
+            assert!(parse_binding(binding).unwrap().is_some(), "{binding}");
+        }
+        assert_eq!(parse_binding(""), Ok(None));
+        assert_eq!(parse_binding("   "), Ok(None));
+        assert!(parse_binding("ctrl+alt+frobnicate").is_err());
+        assert!(parse_binding("ctrl+Space+alt").is_err());
+    }
+
+    #[test]
+    fn parsed_ids_are_stable() {
+        // Event routing matches on `HotKey::id`, which must be deterministic.
+        let first = parse_binding("ctrl+alt+Space").unwrap().unwrap();
+        let second = parse_binding("ctrl+alt+Space").unwrap().unwrap();
+        assert_eq!(first.id(), second.id());
+    }
 
     #[test]
     fn empty_binding_shows_off() {

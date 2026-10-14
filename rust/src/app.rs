@@ -9,6 +9,7 @@ use std::process::Command;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use winit::application::ApplicationHandler;
@@ -27,7 +28,7 @@ use crate::player::{Player, PlayerConfig, PlayerEvent, PlayerState, Synth};
 use crate::pronounce::{Pronunciations, pronunciations_path};
 use crate::sanitize::SanitizerOptions;
 use crate::settings::{Settings, settings_path};
-use crate::shortcuts::format_binding;
+use crate::shortcuts::{ShortcutAction, format_binding, parse_binding};
 
 /// Events forwarded into the event loop from worker threads and the
 /// tray/menu global handlers.
@@ -37,6 +38,7 @@ enum AppEvent {
     Clipboard(ClipboardEvent),
     Tray(TrayIconEvent),
     Menu(MenuEvent),
+    Shortcut(GlobalHotKeyEvent),
     DownloadProgress(u64, Option<u64>),
     DownloadDone(Result<(), String>),
 }
@@ -155,6 +157,10 @@ pub fn run() -> i32 {
     MenuEvent::set_event_handler(Some(move |event| {
         let _ = menu_proxy.send_event(AppEvent::Menu(event));
     }));
+    let shortcut_proxy = proxy.clone();
+    GlobalHotKeyEvent::set_event_handler(Some(move |event| {
+        let _ = shortcut_proxy.send_event(AppEvent::Shortcut(event));
+    }));
 
     let mut app = App::new(proxy, settings, settings_file, pronunciations, models_root);
     // The clipboard watcher runs on its own thread; its events are forwarded
@@ -211,6 +217,10 @@ struct App {
     open_settings_item: Option<MenuItem>,
     change_shortcuts_item: Option<MenuItem>,
     quit_item: Option<MenuItem>,
+    /// Global shortcut manager (must stay alive; dropping it unregisters).
+    hotkey_manager: Option<GlobalHotKeyManager>,
+    /// Registered hotkey id → action.
+    hotkeys: Vec<(u32, ShortcutAction)>,
     /// Reading or paused (transport items enabled).
     active: bool,
     /// Last chunk position, to restore "Reading i of n" on resume.
@@ -263,6 +273,8 @@ impl App {
             open_settings_item: None,
             change_shortcuts_item: None,
             quit_item: None,
+            hotkey_manager: None,
+            hotkeys: Vec::new(),
             active: false,
             last_chunk: None,
             paused: false,
@@ -1006,6 +1018,94 @@ impl App {
             self.show_error(&format!("Couldn't open {}: {err}", path.display()));
         }
     }
+
+    /// Register the four global shortcuts from settings. Runs once on the
+    /// main thread. A binding that fails to parse or register (empty = off,
+    /// taken by another app) shows an error but never stops the app or the
+    /// other shortcuts.
+    fn register_shortcuts(&mut self) {
+        #[cfg(target_os = "linux")]
+        if std::env::var("WAYLAND_DISPLAY").is_ok() {
+            eprintln!("Note: global shortcuts on Wayland only work in X11 apps for now.");
+        }
+        let manager = match GlobalHotKeyManager::new() {
+            Ok(manager) => manager,
+            Err(err) => {
+                self.show_error(&format!("Global shortcuts couldn't be set up: {err}"));
+                return;
+            }
+        };
+        let bindings = [
+            (
+                ShortcutAction::ReadOrPause,
+                self.settings.shortcuts.read_or_pause.clone(),
+            ),
+            (ShortcutAction::Stop, self.settings.shortcuts.stop.clone()),
+            (ShortcutAction::Next, self.settings.shortcuts.next.clone()),
+            (
+                ShortcutAction::Previous,
+                self.settings.shortcuts.previous.clone(),
+            ),
+        ];
+        for (action, text) in bindings {
+            let hotkey = match parse_binding(&text) {
+                Ok(None) => continue,
+                Ok(Some(hotkey)) => hotkey,
+                Err(err) => {
+                    self.show_error(&format!("Shortcut \"{text}\" couldn't be set: {err}"));
+                    continue;
+                }
+            };
+            if let Err(err) = manager.register(hotkey) {
+                self.show_error(&format!("Shortcut \"{text}\" couldn't be set: {err}"));
+                continue;
+            }
+            self.hotkeys.push((hotkey.id(), action));
+        }
+        self.hotkey_manager = Some(manager);
+    }
+
+    fn on_shortcut(&mut self, event: GlobalHotKeyEvent) {
+        if event.state() != HotKeyState::Pressed {
+            return;
+        }
+        let action = self
+            .hotkeys
+            .iter()
+            .find(|(id, _)| *id == event.id())
+            .map(|(_, action)| *action);
+        match action {
+            Some(ShortcutAction::ReadOrPause) => {
+                if self.paused {
+                    if let Some(player) = &self.player {
+                        player.resume();
+                    }
+                } else if self.active {
+                    if let Some(player) = &self.player {
+                        player.pause();
+                    }
+                } else {
+                    self.read_clipboard();
+                }
+            }
+            Some(ShortcutAction::Stop) => {
+                if let Some(player) = &self.player {
+                    player.stop();
+                }
+            }
+            Some(ShortcutAction::Next) => {
+                if let Some(player) = &self.player {
+                    player.next();
+                }
+            }
+            Some(ShortcutAction::Previous) => {
+                if let Some(player) = &self.player {
+                    player.previous();
+                }
+            }
+            None => {}
+        }
+    }
 }
 
 impl ApplicationHandler<AppEvent> for App {
@@ -1019,6 +1119,8 @@ impl ApplicationHandler<AppEvent> for App {
             eprintln!("Error: {message}");
             self.exit_code = 1;
             event_loop.exit();
+        } else {
+            self.register_shortcuts();
         }
     }
 
@@ -1028,6 +1130,7 @@ impl ApplicationHandler<AppEvent> for App {
             AppEvent::Clipboard(event) => self.on_clipboard_event(event),
             AppEvent::Tray(event) => self.on_tray_event(event),
             AppEvent::Menu(event) => self.on_menu_event(event_loop, event),
+            AppEvent::Shortcut(event) => self.on_shortcut(event),
             AppEvent::DownloadProgress(done, total) => self.on_download_progress(done, total),
             AppEvent::DownloadDone(result) => self.on_download_done(result),
         }
