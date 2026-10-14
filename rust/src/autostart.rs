@@ -356,10 +356,14 @@ fn os_error_text(code: u32) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_os = "windows"))]
     use std::sync::atomic::{AtomicU64, Ordering};
 
+    // The file-based round-trip tests that use these don't run on Windows.
+    #[cfg(not(target_os = "windows"))]
     static TEST_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+    #[cfg(not(target_os = "windows"))]
     fn unique_temp_dir() -> PathBuf {
         let id = TEST_DIR_COUNTER.fetch_add(1, Ordering::SeqCst);
         std::env::temp_dir().join(format!(
