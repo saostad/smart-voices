@@ -6,9 +6,9 @@
 
 use std::path::PathBuf;
 use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
+use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
@@ -35,6 +35,8 @@ enum AppEvent {
     Clipboard(ClipboardEvent),
     Tray(TrayIconEvent),
     Menu(MenuEvent),
+    DownloadProgress(u64, Option<u64>),
+    DownloadDone(Result<(), String>),
 }
 
 /// Longest status-line text, in characters.
@@ -51,8 +53,10 @@ fn truncate_status(text: &str) -> String {
 
 /// Run the tray app. Returns the process exit code.
 pub fn run() -> i32 {
-    let (settings, settings_err) = settings_path()
-        .map(|path| Settings::load(&path))
+    let settings_file = settings_path();
+    let (settings, settings_err) = settings_file
+        .as_ref()
+        .map(|path| Settings::load(path))
         .unwrap_or((Settings::default(), None));
     if let Some(err) = &settings_err {
         eprintln!("Warning: {err}");
@@ -97,37 +101,16 @@ pub fn run() -> i32 {
         let _ = menu_proxy.send_event(AppEvent::Menu(event));
     }));
 
+    let mut app = App::new(proxy, settings, settings_file, pronunciations, models_root);
     // The clipboard watcher runs on its own thread; its events are forwarded
     // into the loop. A failure here (e.g. Wayland without X11) still shows
     // the tray so manual Read Clipboard keeps working.
-    let (clipboard_tx, clipboard_rx) = mpsc::channel();
-    let (watcher, startup_error) = match clipboard::watch(clipboard_tx) {
-        Ok(watcher) => (Some(watcher), None),
-        Err(err) => {
-            eprintln!("Error: {err}");
-            (None, Some(err.to_string()))
-        }
-    };
-    let clipboard_proxy = proxy.clone();
-    std::thread::spawn(move || {
-        for event in clipboard_rx {
-            if clipboard_proxy
-                .send_event(AppEvent::Clipboard(event))
-                .is_err()
-            {
-                break;
-            }
-        }
-    });
-
-    let mut app = App::new(
-        proxy,
-        settings,
-        pronunciations,
-        models_root,
-        watcher,
-        startup_error,
-    );
+    if app.settings.watch_clipboard
+        && let Err(message) = app.start_watcher()
+    {
+        eprintln!("Error: {message}");
+        app.startup_error = Some(message);
+    }
     match event_loop.run_app(&mut app) {
         Ok(()) => app.exit_code,
         Err(err) => {
@@ -148,17 +131,26 @@ fn models_root() -> Option<PathBuf> {
 struct App {
     proxy: EventLoopProxy<AppEvent>,
     settings: Settings,
+    settings_path: Option<PathBuf>,
     pronunciations: Pronunciations,
     models_root: PathBuf,
     model: ModelVariant,
     player: Option<Player>,
-    _watcher: Option<clipboard::Watcher>,
+    watcher: Option<clipboard::Watcher>,
     /// Watcher error to show in the status line once the menu exists.
     startup_error: Option<String>,
     tray: Option<TrayIcon>,
     status_item: Option<MenuItem>,
     read_item: Option<MenuItem>,
+    pause_item: Option<MenuItem>,
+    stop_item: Option<MenuItem>,
+    prev_item: Option<MenuItem>,
+    next_item: Option<MenuItem>,
+    watch_item: Option<CheckMenuItem>,
+    autoread_item: Option<CheckMenuItem>,
     quit_item: Option<MenuItem>,
+    /// Reading or paused (transport items enabled).
+    active: bool,
     /// Last chunk position, to restore "Reading i of n" on resume.
     last_chunk: Option<(usize, usize)>,
     paused: bool,
@@ -166,6 +158,10 @@ struct App {
     /// action; the `Idle` state right after an `Error` must not clear it).
     showing_error: bool,
     badged: bool,
+    /// A model download is running on a worker thread.
+    downloading: bool,
+    /// Text to play once the running download finishes.
+    pending_text: Option<String>,
     exit_code: i32,
 }
 
@@ -173,30 +169,71 @@ impl App {
     fn new(
         proxy: EventLoopProxy<AppEvent>,
         settings: Settings,
+        settings_path: Option<PathBuf>,
         pronunciations: Pronunciations,
         models_root: PathBuf,
-        watcher: Option<clipboard::Watcher>,
-        startup_error: Option<String>,
     ) -> Self {
         let model = settings.model;
         Self {
             proxy,
             settings,
+            settings_path,
             pronunciations,
             models_root,
             model,
             player: None,
-            _watcher: watcher,
-            startup_error,
+            watcher: None,
+            startup_error: None,
             tray: None,
             status_item: None,
             read_item: None,
+            pause_item: None,
+            stop_item: None,
+            prev_item: None,
+            next_item: None,
+            watch_item: None,
+            autoread_item: None,
             quit_item: None,
+            active: false,
             last_chunk: None,
             paused: false,
             showing_error: false,
             badged: false,
+            downloading: false,
+            pending_text: None,
             exit_code: 0,
+        }
+    }
+
+    /// Start the clipboard watcher unless already running, forwarding its
+    /// events into the loop from a small thread.
+    fn start_watcher(&mut self) -> Result<(), String> {
+        if self.watcher.is_some() {
+            return Ok(());
+        }
+        let (events_tx, events_rx) = mpsc::channel();
+        let watcher = clipboard::watch(events_tx).map_err(|err| err.to_string())?;
+        let proxy = self.proxy.clone();
+        std::thread::spawn(move || {
+            for event in events_rx {
+                if proxy.send_event(AppEvent::Clipboard(event)).is_err() {
+                    break;
+                }
+            }
+        });
+        self.watcher = Some(watcher);
+        Ok(())
+    }
+
+    /// Persist the settings after a menu-check change; failures show in the
+    /// status line.
+    fn save_settings(&mut self) {
+        let result = match &self.settings_path {
+            Some(path) => self.settings.save(path),
+            None => return,
+        };
+        if let Err(err) = result {
+            self.show_error(&err.to_string());
         }
     }
 
@@ -206,10 +243,33 @@ impl App {
         let menu = Menu::new();
         let status_item = MenuItem::new("Ready", false, None);
         let read_item = MenuItem::new("Read Clipboard", true, None);
+        let pause_item = MenuItem::new("Pause", false, None);
+        let stop_item = MenuItem::new("Stop", false, None);
+        let prev_item = MenuItem::new("Previous Sentence", false, None);
+        let next_item = MenuItem::new("Next Sentence", false, None);
+        let watch_item = CheckMenuItem::new(
+            "Watch the Clipboard",
+            true,
+            self.settings.watch_clipboard,
+            None,
+        );
+        let autoread_item = CheckMenuItem::new(
+            "Read New Copies Automatically",
+            true,
+            self.settings.auto_read,
+            None,
+        );
         let quit_item = MenuItem::new("Quit Smart Voices", true, None);
         menu.append(&status_item)
             .and_then(|()| menu.append(&PredefinedMenuItem::separator()))
             .and_then(|()| menu.append(&read_item))
+            .and_then(|()| menu.append(&pause_item))
+            .and_then(|()| menu.append(&stop_item))
+            .and_then(|()| menu.append(&prev_item))
+            .and_then(|()| menu.append(&next_item))
+            .and_then(|()| menu.append(&PredefinedMenuItem::separator()))
+            .and_then(|()| menu.append(&watch_item))
+            .and_then(|()| menu.append(&autoread_item))
             .and_then(|()| menu.append(&PredefinedMenuItem::separator()))
             .and_then(|()| menu.append(&quit_item))
             .map_err(|err| format!("Couldn't build the tray menu: {err}."))?;
@@ -230,6 +290,12 @@ impl App {
             .map_err(|err| format!("Couldn't create the tray icon: {err}."))?;
         self.status_item = Some(status_item);
         self.read_item = Some(read_item);
+        self.pause_item = Some(pause_item);
+        self.stop_item = Some(stop_item);
+        self.prev_item = Some(prev_item);
+        self.next_item = Some(next_item);
+        self.watch_item = Some(watch_item);
+        self.autoread_item = Some(autoread_item);
         self.quit_item = Some(quit_item);
         self.tray = Some(tray);
         if let Some(err) = self.startup_error.take() {
@@ -251,6 +317,21 @@ impl App {
         self.showing_error = true;
         if let Some(status) = &self.status_item {
             status.set_text(truncate_status(&format!("Error: {message}")));
+        }
+    }
+
+    /// Enable the transport items only while reading or paused; the
+    /// pause item's label follows the state.
+    fn update_transport(&self) {
+        if let Some(pause) = &self.pause_item {
+            pause.set_text(if self.paused { "Resume" } else { "Pause" });
+            pause.set_enabled(self.active);
+        }
+        for item in [&self.stop_item, &self.prev_item, &self.next_item]
+            .into_iter()
+            .flatten()
+        {
+            item.set_enabled(self.active);
         }
     }
 
@@ -305,12 +386,12 @@ impl App {
 
     fn play_text(&mut self, text: String) {
         if !models::is_installed(&self.models_root, self.model) {
-            self.show_error(&format!(
-                "Voice model file not found: {}. Run `smart-voices download` to get it.",
-                models::model_dir(&self.models_root, self.model)
-                    .join(self.model.model_file())
-                    .display()
-            ));
+            // Download on a worker thread, then play; a newer request while
+            // a download runs replaces the pending text.
+            self.pending_text = Some(text);
+            if !self.downloading {
+                self.start_download();
+            }
             return;
         }
         if let Err(message) = self.ensure_player() {
@@ -319,6 +400,51 @@ impl App {
         }
         if let Some(player) = &self.player {
             player.play(text);
+        }
+    }
+
+    /// Download the model on a worker thread, reporting progress into the
+    /// loop at most ~2×/s for the status line.
+    fn start_download(&mut self) {
+        self.downloading = true;
+        self.set_status("Downloading voice…");
+        let proxy = self.proxy.clone();
+        let root = self.models_root.clone();
+        let variant = self.model;
+        std::thread::spawn(move || {
+            let mut last_report: Option<Instant> = None;
+            let result = models::download(&root, variant, |done, total| {
+                let now = Instant::now();
+                let due = last_report.is_none_or(|last| now - last >= Duration::from_millis(500));
+                if due {
+                    last_report = Some(now);
+                    let _ = proxy.send_event(AppEvent::DownloadProgress(done, total));
+                }
+            });
+            let _ = proxy.send_event(AppEvent::DownloadDone(
+                result.map(|_| ()).map_err(|err| err.to_string()),
+            ));
+        });
+    }
+
+    fn on_download_progress(&mut self, done: u64, total: Option<u64>) {
+        self.set_status(&download_status(done, total));
+    }
+
+    fn on_download_done(&mut self, result: Result<(), String>) {
+        self.downloading = false;
+        match result {
+            Ok(()) => {
+                if let Some(text) = self.pending_text.take() {
+                    self.play_text(text);
+                } else {
+                    self.set_status("Ready");
+                }
+            }
+            Err(message) => {
+                self.pending_text = None;
+                self.show_error(&message);
+            }
         }
     }
 
@@ -367,6 +493,7 @@ impl App {
     fn on_player_event(&mut self, event: PlayerEvent) {
         match event {
             PlayerEvent::State(PlayerState::Loading) => {
+                self.active = true;
                 self.last_chunk = None;
                 self.paused = false;
                 self.set_status("Loading voice…");
@@ -390,33 +517,54 @@ impl App {
             }
             PlayerEvent::State(PlayerState::Idle) => {
                 if !self.showing_error {
+                    self.active = false;
                     self.last_chunk = None;
                     self.paused = false;
                     self.set_status("Ready");
                 }
             }
             PlayerEvent::Chunk { index, count, .. } => {
+                self.active = true;
                 self.last_chunk = Some((index, count));
                 self.paused = false;
                 self.set_status(&format!("Reading {} of {count}", index + 1));
             }
             PlayerEvent::Finished => {
+                self.active = false;
                 self.last_chunk = None;
                 self.paused = false;
                 self.set_status("Ready");
             }
             PlayerEvent::Error(message) => {
+                self.active = false;
                 self.last_chunk = None;
                 self.paused = false;
                 self.show_error(&message);
             }
         }
+        self.update_transport();
     }
 
     fn on_clipboard_event(&mut self, event: ClipboardEvent) {
         match event {
-            ClipboardEvent::Changed { .. } => self.set_badged(true),
-            ClipboardEvent::Error(message) => self.show_error(&message),
+            ClipboardEvent::Changed { .. } => {
+                // A copy made just before Watch was unchecked may still be in
+                // flight; ignore it.
+                if !self.settings.watch_clipboard {
+                    return;
+                }
+                if self.settings.auto_read {
+                    self.read_clipboard();
+                } else {
+                    self.set_badged(true);
+                }
+            }
+            ClipboardEvent::Error(message) => {
+                // The watcher thread is gone; drop it so enabling Watch
+                // starts a fresh one.
+                self.watcher = None;
+                self.show_error(&message);
+            }
         }
     }
 
@@ -439,12 +587,75 @@ impl App {
         let id = event.id();
         if self.read_item.as_ref().is_some_and(|item| id == item.id()) {
             self.read_clipboard();
+        } else if self.pause_item.as_ref().is_some_and(|item| id == item.id()) {
+            if let Some(player) = &self.player {
+                if self.paused {
+                    player.resume();
+                } else {
+                    player.pause();
+                }
+            }
+        } else if self.stop_item.as_ref().is_some_and(|item| id == item.id()) {
+            if let Some(player) = &self.player {
+                player.stop();
+            }
+        } else if self.prev_item.as_ref().is_some_and(|item| id == item.id()) {
+            if let Some(player) = &self.player {
+                player.previous();
+            }
+        } else if self.next_item.as_ref().is_some_and(|item| id == item.id()) {
+            if let Some(player) = &self.player {
+                player.next();
+            }
+        } else if self.watch_item.as_ref().is_some_and(|item| id == item.id()) {
+            self.on_watch_toggled();
+        } else if self
+            .autoread_item
+            .as_ref()
+            .is_some_and(|item| id == item.id())
+        {
+            let checked = self
+                .autoread_item
+                .as_ref()
+                .is_some_and(CheckMenuItem::is_checked);
+            self.settings.auto_read = checked;
+            self.save_settings();
         } else if self.quit_item.as_ref().is_some_and(|item| id == item.id()) {
             if let Some(player) = &self.player {
                 player.stop();
             }
             event_loop.exit();
         }
+    }
+
+    /// The Watch check already holds its new state (muda flips it on click).
+    fn on_watch_toggled(&mut self) {
+        let checked = self
+            .watch_item
+            .as_ref()
+            .is_some_and(CheckMenuItem::is_checked);
+        self.settings.watch_clipboard = checked;
+        if checked {
+            match self.start_watcher() {
+                Ok(()) => {
+                    if let Some(watcher) = &self.watcher {
+                        watcher.set_enabled(true);
+                    }
+                }
+                Err(message) => {
+                    // Stay unchecked: the setting never changed on disk.
+                    if let Some(watch) = &self.watch_item {
+                        watch.set_checked(false);
+                    }
+                    self.settings.watch_clipboard = false;
+                    self.show_error(&message);
+                    return;
+                }
+            }
+        } else if let Some(watcher) = &self.watcher {
+            watcher.set_enabled(false);
+        }
+        self.save_settings();
     }
 }
 
@@ -468,6 +679,8 @@ impl ApplicationHandler<AppEvent> for App {
             AppEvent::Clipboard(event) => self.on_clipboard_event(event),
             AppEvent::Tray(event) => self.on_tray_event(event),
             AppEvent::Menu(event) => self.on_menu_event(event_loop, event),
+            AppEvent::DownloadProgress(done, total) => self.on_download_progress(done, total),
+            AppEvent::DownloadDone(result) => self.on_download_done(result),
         }
     }
 
@@ -486,6 +699,19 @@ fn tray_icon(rgba: &[u8]) -> Option<Icon> {
     Icon::from_rgba(rgba.to_vec(), icon::SIZE, icon::SIZE).ok()
 }
 
+/// Status-line text for a running model download (decimal MB).
+fn download_status(done: u64, total: Option<u64>) -> String {
+    const MB: f64 = 1_000_000.0;
+    match total {
+        Some(total) => format!(
+            "Downloading voice: {:.0}/{:.0} MB",
+            done as f64 / MB,
+            total as f64 / MB
+        ),
+        None => format!("Downloading voice: {:.0} MB", done as f64 / MB),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -502,5 +728,14 @@ mod tests {
         let cut = truncate_status(&text);
         assert_eq!(cut.chars().count(), 80);
         assert!(cut.starts_with("Error: é"));
+    }
+
+    #[test]
+    fn download_status_shows_whole_mb() {
+        assert_eq!(
+            download_status(120_000_000, Some(350_000_000)),
+            "Downloading voice: 120/350 MB"
+        );
+        assert_eq!(download_status(1_500_000, None), "Downloading voice: 2 MB");
     }
 }
