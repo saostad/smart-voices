@@ -18,11 +18,16 @@ Get the latest build from the
 [Releases page](https://github.com/saostad/smart-voices/releases/latest).
 Every push to `main` publishes a new release with:
 
-- Linux: `smart-voices-linux-x86_64.tar.gz`
-- Windows: `smart-voices-windows-x86_64.zip`
-- macOS (Apple Silicon): `smart-voices-macos-arm64.zip` (contains
-  `Smart Voices.app`; it's ad-hoc signed, so the first time right-click it
-  and choose Open)
+- Windows: `smart-voices-windows-x86_64-setup.exe` — an installer that adds
+  Smart Voices to the Start menu and to Apps & features for uninstalling. It
+  isn't code-signed, so SmartScreen may warn: click More info → Run anyway.
+- macOS (Apple Silicon): `smart-voices-macos-arm64.dmg` — open it and drag
+  Smart Voices into Applications. The app is ad-hoc signed, so the first time
+  right-click it and choose Open.
+- Linux (Debian/Ubuntu): `smart-voices-linux-amd64.deb` — install with
+  `sudo apt install ./smart-voices-linux-amd64.deb`.
+- Linux (other distros): `smart-voices-linux-x86_64.tar.gz` — a plain binary
+  plus `.desktop` file (see Linux notes below).
 
 On first launch the app sits in your tray (menu bar on macOS). The first
 reading downloads the voice model (see sizes below), then plays.
@@ -93,7 +98,8 @@ variable (full file path) and the models folder with `SMART_VOICES_MODELS`.
 ## Linux notes
 
 - On GNOME, install the "AppIndicator and KStatusNotifierItem Support"
-  extension to see the tray icon. Copy `smart-voices` to `~/.local/bin` and
+  extension to see the tray icon. The `.deb` installs everything for you; with
+  the `.tar.gz`, copy `smart-voices` to `~/.local/bin` and
   the `.desktop` file from the download to `~/.local/share/applications` (and
   to `~/.config/autostart` to start at login).
 - Clipboard watching needs X11 or XWayland. On pure Wayland without XWayland,
