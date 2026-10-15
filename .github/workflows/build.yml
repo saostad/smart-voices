@@ -28,7 +28,7 @@ jobs:
 
       - name: Install Linux audio dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config dpkg-dev
 
       - name: Check formatting
         if: runner.os == 'Linux'
@@ -46,44 +46,37 @@ jobs:
       - name: Package (Linux)
         if: runner.os == 'Linux'
         run: |
-          mkdir -p dist
-          cp target/release/smart-voices dist/
-          cp packaging/linux/smart-voices.desktop packaging/linux/README-linux.txt dist/
-          tar -czf smart-voices-linux-x86_64.tar.gz -C dist smart-voices smart-voices.desktop README-linux.txt
+          scripts/package-deb.sh
+          mkdir -p dist tarball
+          cp target/smart-voices-linux-amd64.deb dist/
+          cp target/release/smart-voices packaging/linux/smart-voices.desktop packaging/linux/README-linux.txt tarball/
+          tar -czf dist/smart-voices-linux-x86_64.tar.gz -C tarball smart-voices smart-voices.desktop README-linux.txt
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Compress-Archive -Path target/release/smart-voices.exe -DestinationPath smart-voices-windows-x86_64.zip
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.*)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+          & $iscc "/DAppVersion=$version" packaging\windows\smart-voices.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item target\installer\smart-voices-windows-x86_64-setup.exe dist\
 
       - name: Package (macOS)
         if: runner.os == 'macOS'
         run: |
           scripts/bundle-macos.sh
-          ditto -c -k --keepParent "target/Smart Voices.app" smart-voices-macos-arm64.zip
+          scripts/package-dmg.sh
+          mkdir -p dist
+          cp target/smart-voices-macos-arm64.dmg dist/
 
-      - name: Upload artifact (Linux)
-        if: runner.os == 'Linux'
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: smart-voices-linux-x86_64
-          path: smart-voices-linux-x86_64.tar.gz
-          retention-days: 14
-
-      - name: Upload artifact (Windows)
-        if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v4
-        with:
-          name: smart-voices-windows-x86_64
-          path: smart-voices-windows-x86_64.zip
-          retention-days: 14
-
-      - name: Upload artifact (macOS)
-        if: runner.os == 'macOS'
-        uses: actions/upload-artifact@v4
-        with:
-          name: smart-voices-macos-arm64
-          path: smart-voices-macos-arm64.zip
+          name: smart-voices-${{ runner.os }}
+          path: dist/*
           retention-days: 14
 
   release:
@@ -97,18 +90,9 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: smart-voices-linux-x86_64
+          pattern: smart-voices-*
           path: dist
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: smart-voices-windows-x86_64
-          path: dist
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: smart-voices-macos-arm64
-          path: dist
+          merge-multiple: true
 
       - name: Create release
         env:
@@ -117,15 +101,17 @@ jobs:
           VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
           TAG="v${VERSION}-build.${{ github.run_number }}"
           gh release create "$TAG" \
-            dist/smart-voices-windows-x86_64.zip \
+            dist/smart-voices-windows-x86_64-setup.exe \
+            dist/smart-voices-macos-arm64.dmg \
+            dist/smart-voices-linux-amd64.deb \
             dist/smart-voices-linux-x86_64.tar.gz \
-            dist/smart-voices-macos-arm64.zip \
             --target "${{ github.sha }}" \
             --title "Smart Voices ${VERSION} (build ${{ github.run_number }})" \
             --notes "Automated build from main (${{ github.sha }}).
 
-          - **Windows:** download \`smart-voices-windows-x86_64.zip\`, unzip, run \`smart-voices.exe\`.
-          - **Linux:** download \`smart-voices-linux-x86_64.tar.gz\`, extract, see \`README-linux.txt\`.
-          - **macOS (Apple Silicon):** download \`smart-voices-macos-arm64.zip\`, unzip, move \`Smart Voices.app\` to Applications, then right-click it and choose Open the first time (the app is ad-hoc signed).
+          - **Windows:** download \`smart-voices-windows-x86_64-setup.exe\` and run it. Windows SmartScreen may warn because the installer isn't code-signed: click More info → Run anyway.
+          - **macOS (Apple Silicon):** download \`smart-voices-macos-arm64.dmg\`, open it, drag Smart Voices into Applications, then right-click the app and choose Open the first time (the app is ad-hoc signed).
+          - **Linux (Debian/Ubuntu):** download \`smart-voices-linux-amd64.deb\` and install it with \`sudo apt install ./smart-voices-linux-amd64.deb\`.
+          - **Linux (other distros):** download \`smart-voices-linux-x86_64.tar.gz\`, extract, see \`README-linux.txt\`.
 
           The first reading downloads the voice model (~350 MB, once)."
