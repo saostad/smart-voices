@@ -1464,11 +1464,13 @@ impl ApplicationHandler<AppEvent> for App {
                 if let Some(player) = &self.player {
                     player.jump(index);
                 }
+                reader.restore_previous_focus();
             }
             PanelAction::Previous => {
                 if let Some(player) = &self.player {
                     player.previous();
                 }
+                reader.restore_previous_focus();
             }
             PanelAction::PlayPause => {
                 if let Some(player) = &self.player {
@@ -1478,11 +1480,13 @@ impl ApplicationHandler<AppEvent> for App {
                         player.pause();
                     }
                 }
+                reader.restore_previous_focus();
             }
             PanelAction::Next => {
                 if let Some(player) = &self.player {
                     player.next();
                 }
+                reader.restore_previous_focus();
             }
             PanelAction::DrawFailed(message) => {
                 self.show_error(&message);

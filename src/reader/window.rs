@@ -17,6 +17,10 @@ use winit::window::{Theme as WinitTheme, Window, WindowId, WindowLevel};
 use crate::player::PlayerState;
 use crate::reader::model::ReaderModel;
 use crate::reader::render::{Frame, Hit, Painter, Theme};
+#[cfg(target_os = "macos")]
+use objc2::rc::Retained;
+#[cfg(target_os = "macos")]
+use objc2_app_kit::{NSRunningApplication, NSWorkspace};
 
 /// Logical window sizes.
 const PANEL_W: f32 = 440.0;
@@ -97,6 +101,12 @@ pub struct ReaderWindow {
     /// coordinates).
     cursor: Option<PhysicalPosition<f64>>,
     position: Option<PhysicalPosition<i32>>,
+    /// App that was frontmost when the cursor entered (macOS focus restore).
+    #[cfg(target_os = "macos")]
+    previous_app: Option<Retained<NSRunningApplication>>,
+    /// Foreground window when the cursor entered (Windows focus restore).
+    #[cfg(target_os = "windows")]
+    previous_window: Option<windows_sys::Win32::Foundation::HWND>,
 }
 
 impl ReaderWindow {
@@ -115,6 +125,16 @@ impl ReaderWindow {
             .with_resizable(true)
             .with_window_level(WindowLevel::AlwaysOnTop)
             .with_active(false);
+        #[cfg(target_os = "windows")]
+        {
+            use winit::platform::windows::WindowAttributesExtWindows;
+            attrs = attrs.with_skip_taskbar(true);
+        }
+        #[cfg(target_os = "linux")]
+        {
+            use winit::platform::x11::{WindowAttributesExtX11, WindowType};
+            attrs = attrs.with_x11_window_type(vec![WindowType::Utility]);
+        }
         if let Some(position) = position {
             attrs = attrs.with_position(position);
         }
@@ -153,6 +173,10 @@ impl ReaderWindow {
             hovered: false,
             cursor: None,
             position,
+            #[cfg(target_os = "macos")]
+            previous_app: None,
+            #[cfg(target_os = "windows")]
+            previous_window: None,
         })
     }
 
@@ -207,6 +231,10 @@ impl ReaderWindow {
             }
             WindowEvent::CursorEntered { .. } => {
                 self.hovered = true;
+                #[cfg(target_os = "macos")]
+                self.remember_previous_app();
+                #[cfg(target_os = "windows")]
+                self.remember_previous_window();
                 PanelAction::None
             }
             WindowEvent::CursorLeft { .. } => {
@@ -263,6 +291,70 @@ impl ReaderWindow {
     pub fn position(&self) -> Option<PhysicalPosition<i32>> {
         self.position
     }
+
+    /// Remember the frontmost app so a panel click can hand focus back.
+    #[cfg(target_os = "macos")]
+    fn remember_previous_app(&mut self) {
+        let here = std::process::id() as i32;
+        let workspace = NSWorkspace::sharedWorkspace();
+        if let Some(app) = workspace.frontmostApplication()
+            && app.processIdentifier() != here
+        {
+            self.previous_app = Some(app);
+        }
+    }
+
+    /// Remember the foreground window so a panel click can hand focus back.
+    #[cfg(target_os = "windows")]
+    fn remember_previous_window(&mut self) {
+        use windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+        use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        // SAFETY: `GetForegroundWindow` takes no arguments and is always valid.
+        let foreground = unsafe { GetForegroundWindow() };
+        if foreground.is_null() {
+            return;
+        }
+        let own = self
+            .window
+            .window_handle()
+            .ok()
+            .and_then(|handle| match handle.as_raw() {
+                RawWindowHandle::Win32(win32) => Some(win32.hwnd.get() as isize),
+                _ => None,
+            });
+        if Some(foreground as isize) != own {
+            self.previous_window = Some(foreground);
+        }
+    }
+
+    /// Hand focus back to what was frontmost before the cursor entered.
+    /// Called after panel control clicks only, never for close/drag/resize.
+    #[cfg(target_os = "macos")]
+    pub fn restore_previous_focus(&self) {
+        if let Some(app) = &self.previous_app {
+            use objc2_app_kit::NSApplicationActivationOptions;
+            // The API returns false when activation fails (the app may have
+            // quit); there's nothing to report, the click already did its job.
+            let _ = app.activateWithOptions(NSApplicationActivationOptions::empty());
+        }
+    }
+
+    /// Hand focus back to what was foreground before the cursor entered.
+    #[cfg(target_os = "windows")]
+    pub fn restore_previous_focus(&self) {
+        if let Some(previous) = self.previous_window {
+            // SAFETY: `previous` was a live foreground window when stored; if
+            // it's gone, the call fails harmlessly.
+            unsafe {
+                windows_sys::Win32::UI::WindowsAndMessaging::SetForegroundWindow(previous);
+            }
+            // Ignore the return: nothing to report if activation fails.
+        }
+    }
+
+    /// No portable focus restore on this platform.
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    pub fn restore_previous_focus(&self) {}
 
     fn scale_factor(&self) -> f32 {
         self.window.scale_factor() as f32
