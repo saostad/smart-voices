@@ -15,3 +15,4 @@ pub mod pronounce;
 pub mod sanitize;
 pub mod settings;
 pub mod shortcuts;
+pub mod word_timing;
