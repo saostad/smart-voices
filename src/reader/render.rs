@@ -925,7 +925,7 @@ impl Painter {
     }
 
     fn wrap_width_px(&self) -> f32 {
-        (self.width as f32 - 2.0 * PAD * self.scale).max(1.0)
+        (self.width as f32 - 2.0 * (PAD + INNER) * self.scale).max(1.0)
     }
 
     fn list_height_px(&self) -> i32 {
@@ -1266,6 +1266,50 @@ mod tests {
         // List area is plain background.
         assert_eq!(pixels[5 * 440 + 5], theme.bg);
         assert_eq!(painter.hit(220.0, 50.0), Hit::None);
+    }
+
+    #[test]
+    fn text_stays_out_of_right_padding() {
+        let Some(mut painter) = painter() else {
+            return;
+        };
+        // A long English row and a long Persian row, both wrapping onto
+        // several lines so the wrap width really binds.
+        let scale = 2.0;
+        painter.resize(440 * scale as u32, 300 * scale as u32, scale);
+        painter.set_playlist(&[
+            "This is a deliberately long English row that must wrap onto several lines so the wrap width really binds and every line ends before the right padding begins."
+                .to_string(),
+            "سلام! این یک متن فارسی نسبتا طولانی برای آزمایش است که باید راست‌چین شود.".to_string(),
+        ]);
+        let theme = Theme::light();
+        let frame = Frame {
+            label: "Sentence 1 of 2",
+            progress: 0.5,
+            can_previous: false,
+            can_next: true,
+            playing: true,
+            theme: &theme,
+        };
+        let (w, h) = (painter.width as usize, painter.height as usize);
+        let list_h = painter.list_height_px() as usize;
+        let margin = ((PAD + INNER) * scale).round() as usize;
+        let mut pixels = vec![0u32; w * h];
+        // Both rows highlighted in turn, so the margin is checked against the
+        // current-row background as well as the plain background.
+        for current in [Some(0), Some(1)] {
+            painter.set_highlight(current, Some(1));
+            painter.paint(&frame, &mut pixels);
+            for y in 0..list_h {
+                for x in (w - margin)..w {
+                    let pixel = pixels[y * w + x];
+                    assert!(
+                        pixel == theme.bg || pixel == theme.current_row,
+                        "glyph ink in the right margin at ({x}, {y}): {pixel:#08X}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
