@@ -62,6 +62,9 @@ enum AppEvent {
 /// Longest status-line text, in characters.
 const MAX_STATUS_CHARS: usize = 80;
 
+/// Time between tray-icon animation frames while reading.
+const ICON_FRAME_PERIOD: Duration = Duration::from_millis(400);
+
 /// Truncate a status message to [`MAX_STATUS_CHARS`] characters
 /// (char-boundary safe).
 fn truncate_status(text: &str) -> String {
@@ -236,6 +239,13 @@ struct App {
     /// Watcher error to show in the status line once the menu exists.
     startup_error: Option<String>,
     tray: Option<TrayIcon>,
+    /// Prebuilt tray icons: the idle icon plus the 3 reading frames.
+    tray_idle_icon: Option<Icon>,
+    tray_speaking_icons: Vec<Icon>,
+    /// Shown reading frame (`None` = idle icon).
+    tray_frame: Option<u8>,
+    /// When to advance to the next reading frame (`None` = not animating).
+    icon_next_at: Option<Instant>,
     status_item: Option<MenuItem>,
     read_item: Option<MenuItem>,
     pause_item: Option<MenuItem>,
@@ -314,6 +324,10 @@ impl App {
             watcher: None,
             startup_error: None,
             tray: None,
+            tray_idle_icon: None,
+            tray_speaking_icons: Vec::new(),
+            tray_frame: None,
+            icon_next_at: None,
             status_item: None,
             read_item: None,
             pause_item: None,
@@ -572,8 +586,15 @@ impl App {
         menu.append(&PredefinedMenuItem::separator())
             .map_err(menu_build_error)?;
         menu.append(&quit_item).map_err(menu_build_error)?;
-        let icon = tray_icon(&icon::speaker())
+        let idle_icon = tray_icon(&icon::speaker())
             .ok_or_else(|| "Couldn't build the tray icon: invalid image data.".to_string())?;
+        let speaking_icons: Vec<Icon> = [1, 2, 3]
+            .into_iter()
+            .map(|waves| tray_icon(&icon::speaking(waves)))
+            .collect::<Option<Vec<Icon>>>()
+            .ok_or_else(|| "Couldn't build the tray icon: invalid image data.".to_string())?;
+        self.tray_idle_icon = Some(idle_icon.clone());
+        self.tray_speaking_icons = speaking_icons;
         let builder = TrayIconBuilder::new()
             .with_menu(Box::new(menu))
             .with_tooltip("Smart Voices")
@@ -581,9 +602,9 @@ impl App {
         // macOS draws the icon as a template so it adapts to light/dark menu
         // bars; elsewhere the white glyph suits the usual dark trays.
         #[cfg(target_os = "macos")]
-        let builder = builder.with_icon_templated(icon);
+        let builder = builder.with_icon_templated(idle_icon);
         #[cfg(not(target_os = "macos"))]
-        let builder = builder.with_icon(icon);
+        let builder = builder.with_icon(idle_icon);
         let tray = builder
             .build()
             .map_err(|err| format!("Couldn't create the tray icon: {err}."))?;
@@ -643,6 +664,71 @@ impl App {
             .flatten()
         {
             item.set_enabled(self.active);
+        }
+    }
+
+    /// Show tray frame `frame` (`None` = idle icon). The icon is only set
+    /// when the frame actually changes. Returns false when setting the icon
+    /// failed: the error is shown once and the animation is stopped (no
+    /// per-frame retry).
+    fn set_tray_frame(&mut self, frame: Option<u8>) -> bool {
+        if self.tray_frame == frame {
+            return true;
+        }
+        self.tray_frame = frame;
+        let icon = match frame {
+            None => self.tray_idle_icon.clone(),
+            Some(n) => n
+                .checked_sub(1)
+                .and_then(|i| self.tray_speaking_icons.get(usize::from(i)))
+                .cloned(),
+        };
+        let result = {
+            let (Some(tray), Some(icon)) = (self.tray.as_ref(), icon) else {
+                return true;
+            };
+            #[cfg(target_os = "macos")]
+            {
+                tray.set_icon_templated(Some(icon))
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                tray.set_icon(Some(icon))
+            }
+        };
+        if let Err(err) = result {
+            self.icon_next_at = None;
+            self.show_error(&format!("Couldn't update the tray icon: {err}"));
+            return false;
+        }
+        true
+    }
+
+    /// Show the idle tray icon and stop the icon animation.
+    fn show_idle_frame(&mut self) {
+        self.icon_next_at = None;
+        self.set_tray_frame(None);
+    }
+
+    /// Show the reading tray icon: animate from frame 1 when the setting is
+    /// on, or static frame 3 when it's off. A running animation is left alone
+    /// (later chunks must not restart it).
+    fn show_reading_frame(&mut self) {
+        if self.settings.animate_icon {
+            if self.tray_frame.is_none() {
+                self.start_icon_animation();
+            }
+        } else {
+            self.icon_next_at = None;
+            self.set_tray_frame(Some(3));
+        }
+    }
+
+    /// Start the reading animation from frame 1 (no deadline when setting
+    /// the icon failed).
+    fn start_icon_animation(&mut self) {
+        if self.set_tray_frame(Some(1)) {
+            self.icon_next_at = Some(Instant::now() + ICON_FRAME_PERIOD);
         }
     }
 
@@ -828,6 +914,7 @@ impl App {
                 self.last_chunk = None;
                 self.paused = false;
                 self.set_status("Loading voice…");
+                self.show_idle_frame();
             }
             PlayerEvent::State(PlayerState::Playing) => {
                 // A fresh play keeps "Loading voice…" (or "Ready" when the
@@ -841,10 +928,14 @@ impl App {
                         self.set_status("Ready");
                     }
                 }
+                if self.active {
+                    self.show_reading_frame();
+                }
             }
             PlayerEvent::State(PlayerState::Paused) => {
                 self.paused = true;
                 self.set_status("Paused");
+                self.show_idle_frame();
             }
             PlayerEvent::State(PlayerState::Idle) => {
                 if !self.showing_error {
@@ -852,6 +943,7 @@ impl App {
                     self.last_chunk = None;
                     self.paused = false;
                     self.set_status("Ready");
+                    self.show_idle_frame();
                 }
             }
             PlayerEvent::Chunk { index, count, .. } => {
@@ -859,6 +951,7 @@ impl App {
                 self.last_chunk = Some((index, count));
                 self.paused = false;
                 self.set_status(&format!("Reading {} of {count}", index + 1));
+                self.show_reading_frame();
             }
             PlayerEvent::Playlist(_) => {}
             PlayerEvent::Finished => {
@@ -866,12 +959,14 @@ impl App {
                 self.last_chunk = None;
                 self.paused = false;
                 self.set_status("Ready");
+                self.show_idle_frame();
             }
             PlayerEvent::Error(message) => {
                 self.active = false;
                 self.last_chunk = None;
                 self.paused = false;
                 self.pending_copy_to_read_ms = None;
+                self.show_idle_frame();
                 self.show_error(&message);
             }
             PlayerEvent::Latency {
@@ -976,6 +1071,16 @@ impl App {
             .is_some_and(CheckMenuItem::is_checked);
         self.settings.animate_icon = checked;
         self.save_settings();
+        // A reading frame is showing: switch right away (paused keeps the
+        // idle icon and picks the new mode up on resume).
+        if self.tray_frame.is_some() {
+            if checked {
+                self.start_icon_animation();
+            } else {
+                self.icon_next_at = None;
+                self.set_tray_frame(Some(3));
+            }
+        }
     }
 
     fn on_clipboard_event(&mut self, event: ClipboardEvent) {
@@ -1539,30 +1644,39 @@ impl ApplicationHandler<AppEvent> for App {
         if let Some(reader) = &mut self.reader {
             reader.sync(&self.reader_model, now);
         }
-        event_loop.set_control_flow(reader_control_flow(
-            self.reader.is_some(),
+        if let Some(next_at) = self.icon_next_at
+            && next_at <= now
+        {
+            let next = match self.tray_frame {
+                Some(1) => 2,
+                Some(2) => 3,
+                _ => 1,
+            };
+            if self.set_tray_frame(Some(next)) {
+                self.icon_next_at = Some(now + ICON_FRAME_PERIOD);
+            }
+        }
+        let redraw_at = if self.reader.is_some() {
+            self.reader_model.next_redraw(now)
+        } else {
+            None
+        };
+        event_loop.set_control_flow(next_wake(&[
             self.reader_hide_at,
-            self.reader_model.next_redraw(now),
-        ));
+            redraw_at,
+            self.icon_next_at,
+        ]));
     }
 }
 
-/// Event-loop deadline while the panel is open: wake for the auto-hide timer
-/// or the next word-highlight change, whichever comes first. With the panel
-/// closed this is plain `Wait`, exactly as before (zero wakeups).
-fn reader_control_flow(
-    reader_open: bool,
-    hide_at: Option<Instant>,
-    redraw_at: Option<Instant>,
-) -> ControlFlow {
-    if !reader_open {
-        return ControlFlow::Wait;
-    }
-    match (hide_at, redraw_at) {
-        (None, None) => ControlFlow::Wait,
-        (Some(at), None) | (None, Some(at)) => ControlFlow::WaitUntil(at),
-        (Some(hide), Some(redraw)) => ControlFlow::WaitUntil(hide.min(redraw)),
-    }
+/// Event-loop deadline: wake for the earliest pending deadline, or plain
+/// `Wait` when there are none (zero wakeups when idle).
+fn next_wake(deadlines: &[Option<Instant>]) -> ControlFlow {
+    deadlines
+        .iter()
+        .flatten()
+        .min()
+        .map_or(ControlFlow::Wait, |at| ControlFlow::WaitUntil(*at))
 }
 
 /// Build a tray icon from 32×32 RGBA bytes (`None` on invalid data).
@@ -1627,32 +1741,31 @@ mod tests {
     }
 
     #[test]
-    fn reader_deadline_picks_earlier_and_ignores_when_closed() {
+    fn next_wake_picks_earliest_or_waits() {
         let now = Instant::now();
         let soon = now + Duration::from_secs(1);
         let later = now + Duration::from_secs(3);
-        assert_eq!(reader_control_flow(false, None, None), ControlFlow::Wait);
-        assert_eq!(reader_control_flow(true, None, None), ControlFlow::Wait);
+        assert_eq!(next_wake(&[]), ControlFlow::Wait);
+        assert_eq!(next_wake(&[None, None, None]), ControlFlow::Wait);
         assert_eq!(
-            reader_control_flow(true, Some(later), None),
+            next_wake(&[Some(later), None, None]),
             ControlFlow::WaitUntil(later)
         );
         assert_eq!(
-            reader_control_flow(true, None, Some(soon)),
+            next_wake(&[None, Some(soon), None]),
             ControlFlow::WaitUntil(soon)
         );
         assert_eq!(
-            reader_control_flow(true, Some(later), Some(soon)),
+            next_wake(&[None, None, Some(soon)]),
             ControlFlow::WaitUntil(soon)
         );
         assert_eq!(
-            reader_control_flow(true, Some(soon), Some(later)),
+            next_wake(&[Some(later), Some(soon), None]),
             ControlFlow::WaitUntil(soon)
         );
-        // Closed: no wakeups even with deadlines pending.
         assert_eq!(
-            reader_control_flow(false, Some(later), Some(soon)),
-            ControlFlow::Wait
+            next_wake(&[Some(soon), Some(later), Some(soon)]),
+            ControlFlow::WaitUntil(soon)
         );
     }
 
