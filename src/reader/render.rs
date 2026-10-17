@@ -164,6 +164,25 @@ fn fill_rect(pixels: &mut [u32], bound_w: i32, bound_h: i32, rect: Rect, color: 
     }
 }
 
+/// Stamp one glyph pixel: bounds-check once, then blend in place.
+/// Callers guarantee `pixels.len() >= bound_w * bound_h`, as for `fill_rect`.
+fn stamp_pixel(pixels: &mut [u32], bound_w: i32, bound_h: i32, x: i32, y: i32, color: Color) {
+    let alpha = color.a();
+    if alpha == 0 {
+        return;
+    }
+    if x < 0 || y < 0 || x >= bound_w || y >= bound_h {
+        return;
+    }
+    let src = (u32::from(color.r()) << 16) | (u32::from(color.g()) << 8) | u32::from(color.b());
+    let index = y as usize * bound_w as usize + x as usize;
+    if alpha == 255 {
+        pixels[index] = src;
+    } else {
+        pixels[index] = blend_pixel(pixels[index], src, alpha);
+    }
+}
+
 /// Stamp a cosmic-text glyph rect (per-pixel coverage in the color's alpha),
 /// clipped. Transparent pixels are skipped.
 fn stamp_rect(pixels: &mut [u32], bound_w: i32, bound_h: i32, rect: Rect, color: Color) {
@@ -653,18 +672,24 @@ impl Painter {
                 &mut self.cache,
                 rgb_color(base),
                 |gx, gy, gw, gh, color| {
-                    stamp_rect(
-                        pixels,
-                        w,
-                        list_h,
-                        Rect {
-                            x: ox.saturating_add(gx),
-                            y: oy.saturating_add(gy),
-                            w: gw.min(i32::MAX as u32) as i32,
-                            h: gh.min(i32::MAX as u32) as i32,
-                        },
-                        color,
-                    );
+                    let x = ox.saturating_add(gx);
+                    let y = oy.saturating_add(gy);
+                    if gw == 1 && gh == 1 {
+                        stamp_pixel(pixels, w, list_h, x, y, color);
+                    } else {
+                        stamp_rect(
+                            pixels,
+                            w,
+                            list_h,
+                            Rect {
+                                x,
+                                y,
+                                w: gw.min(i32::MAX as u32) as i32,
+                                h: gh.min(i32::MAX as u32) as i32,
+                            },
+                            color,
+                        );
+                    }
                 },
             );
         }
@@ -701,18 +726,24 @@ impl Painter {
             &mut self.cache,
             rgb_color(frame.theme.secondary),
             |gx, gy, gw, gh, color| {
-                stamp_rect(
-                    pixels,
-                    w,
-                    h,
-                    Rect {
-                        x: pad.saturating_add(gx),
-                        y: label_top.saturating_add(gy),
-                        w: gw.min(i32::MAX as u32) as i32,
-                        h: gh.min(i32::MAX as u32) as i32,
-                    },
-                    color,
-                );
+                let x = pad.saturating_add(gx);
+                let y = label_top.saturating_add(gy);
+                if gw == 1 && gh == 1 {
+                    stamp_pixel(pixels, w, h, x, y, color);
+                } else {
+                    stamp_rect(
+                        pixels,
+                        w,
+                        h,
+                        Rect {
+                            x,
+                            y,
+                            w: gw.min(i32::MAX as u32) as i32,
+                            h: gh.min(i32::MAX as u32) as i32,
+                        },
+                        color,
+                    );
+                }
             },
         );
         let bar_top = label_top + self.px(LABEL_LINE) + self.px(6.0);
@@ -1007,6 +1038,39 @@ mod tests {
         assert_eq!(blend_pixel(0x123456, 0xABCDEF, 0), 0x123456);
         assert_eq!(blend_pixel(0x123456, 0xABCDEF, 255), 0xABCDEF);
         assert_eq!(blend_pixel(0x112233, 0x112233, 200), 0x112233);
+    }
+
+    #[test]
+    fn stamp_pixel_matches_stamp_rect() {
+        // Inside, on every edge, and just outside on a 10x6 surface.
+        let positions = [
+            (0, 0),
+            (5, 3),
+            (9, 5),
+            (0, 5),
+            (9, 0),
+            (-1, 0),
+            (0, -1),
+            (10, 0),
+            (0, 6),
+            (10, 6),
+            (-5, -5),
+            (20, 20),
+        ];
+        for alpha in [0u8, 128, 255] {
+            for (x, y) in positions {
+                let mut fast = vec![0x112233u32; 10 * 6];
+                let mut slow = fast.clone();
+                let color = Color::rgba(0xAA, 0xBB, 0xCC, alpha);
+                stamp_pixel(&mut fast, 10, 6, x, y, color);
+                stamp_rect(&mut slow, 10, 6, Rect { x, y, w: 1, h: 1 }, color);
+                assert_eq!(fast, slow, "mismatch at ({x}, {y}) alpha {alpha}");
+            }
+        }
+        // Zero-size surface: no panic, no write.
+        let mut empty: Vec<u32> = Vec::new();
+        stamp_pixel(&mut empty, 0, 0, 0, 0, Color::rgb(1, 2, 3));
+        assert!(empty.is_empty());
     }
 
     #[test]
