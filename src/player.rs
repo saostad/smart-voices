@@ -155,11 +155,16 @@ pub enum PlayerState {
 #[derive(Debug, Clone, PartialEq)]
 pub enum PlayerEvent {
     State(PlayerState),
-    /// A chunk started playing (`index` of `count`, display text).
+    /// A new playlist: every chunk's text, in order. Emitted once per `play`,
+    /// before any `Loading` state.
+    Playlist(Vec<String>),
+    /// A chunk started playing (`index` of `count`, display text, and the
+    /// chunk's speech length, excluding the trailing pause silence).
     Chunk {
         index: usize,
         count: usize,
         text: String,
+        duration: Duration,
     },
     Finished,
     /// Always the full message (engine load errors verbatim).
@@ -184,6 +189,7 @@ enum Command {
     Stop,
     Next,
     Previous,
+    Jump(usize),
     SetVoice(String),
     SetSpeed(f32),
     SetUnloadAfter(Option<Duration>),
@@ -279,6 +285,11 @@ impl Player {
         self.send(Command::Previous);
     }
 
+    /// Jump to chunk `index`. Ignored while idle or when out of range.
+    pub fn jump(&self, index: usize) {
+        self.send(Command::Jump(index));
+    }
+
     pub fn set_voice(&self, voice: impl Into<String>) {
         self.send(Command::SetVoice(voice.into()));
     }
@@ -323,6 +334,7 @@ impl Drop for Player {
 struct Inflight {
     id: u64,
     index: usize,
+    duration: Duration,
 }
 
 struct Controller<O: Output> {
@@ -352,8 +364,9 @@ struct Controller<O: Output> {
     inflight: VecDeque<Inflight>,
     next_id: u64,
     /// Result synthesized but not yet enqueued: (generation, chunk index,
-    /// samples with trailing pause silence, sample rate).
-    pending_synth: Option<(u64, usize, Vec<f32>, u32)>,
+    /// samples with trailing pause silence, sample rate, speech duration
+    /// excluding the pause silence).
+    pending_synth: Option<(u64, usize, Vec<f32>, u32, Duration)>,
     /// Whether the output is paused (independent of `state`: stop-while-paused
     /// stays paused until the next `play` resumes it).
     output_paused: bool,
@@ -475,6 +488,13 @@ impl<O: Output> Controller<O> {
             Command::Stop => self.stop(),
             Command::Next => self.next(),
             Command::Previous => self.previous(),
+            Command::Jump(index) => {
+                if matches!(self.state, PlayerState::Playing | PlayerState::Paused)
+                    && index < self.chunks.len()
+                {
+                    self.jump_to(index);
+                }
+            }
             Command::SetVoice(voice) => self.voice = voice,
             Command::SetSpeed(speed) => self.speed = speed,
             Command::SetUnloadAfter(after) => self.unload_after = after,
@@ -510,9 +530,12 @@ impl<O: Output> Controller<O> {
             self.fail(EngineError::NoAudio(text).to_string());
             return;
         }
+        self.emit(PlayerEvent::Playlist(
+            self.chunks.iter().map(|chunk| chunk.text.clone()).collect(),
+        ));
         // Load the English engine up front when the text needs it (so `Loading`
-        // still comes first); the Persian synth loads lazily when its first
-        // chunk is reached, so English-only use never touches it.
+        // still comes before `Playing`); the Persian synth loads lazily when
+        // its first chunk is reached, so English-only use never touches it.
         let needs_english = self
             .chunks
             .iter()
@@ -640,11 +663,17 @@ impl<O: Output> Controller<O> {
         if was_head && let Some(head) = self.inflight.front() {
             // The next item starts playing now.
             let index = head.index;
+            let duration = head.duration;
             self.cursor = index;
             if let Some(chunk) = self.chunks.get(index) {
                 let text = chunk.text.clone();
                 let count = self.chunks.len();
-                self.emit(PlayerEvent::Chunk { index, count, text });
+                self.emit(PlayerEvent::Chunk {
+                    index,
+                    count,
+                    text,
+                    duration,
+                });
             }
         }
         if self.inflight.is_empty() && self.synth_next >= self.chunks.len() {
@@ -727,9 +756,14 @@ impl<O: Output> Controller<O> {
                     }
                     let mut samples = audio.samples;
                     let rate = audio.sample_rate;
+                    let duration = if rate == 0 {
+                        Duration::ZERO
+                    } else {
+                        Duration::from_secs_f64(samples.len() as f64 / f64::from(rate))
+                    };
                     let silence = (chunk.pause_after.seconds() * f64::from(rate)) as usize;
                     samples.resize(samples.len() + silence, 0.0);
-                    self.pending_synth = Some((self.generation, index, samples, rate));
+                    self.pending_synth = Some((self.generation, index, samples, rate, duration));
                 }
                 Err(message) => self.fail(message),
             }
@@ -738,7 +772,7 @@ impl<O: Output> Controller<O> {
 
     /// Enqueue the pending synth result unless a command superseded it.
     fn flush_pending(&mut self) {
-        let Some((generation, index, samples, rate)) = self.pending_synth.take() else {
+        let Some((generation, index, samples, rate, duration)) = self.pending_synth.take() else {
             return;
         };
         if generation != self.generation
@@ -752,7 +786,11 @@ impl<O: Output> Controller<O> {
         match self.output.enqueue(id, &samples, rate) {
             Ok(()) => {
                 let was_empty = self.inflight.is_empty();
-                self.inflight.push_back(Inflight { id, index });
+                self.inflight.push_back(Inflight {
+                    id,
+                    index,
+                    duration,
+                });
                 self.synth_next = index + 1;
                 if self.debug_latency && self.latency_pending && index == 0 {
                     self.latency_pending = false;
@@ -779,7 +817,12 @@ impl<O: Output> Controller<O> {
                     self.cursor = index;
                     let text = chunk.text.clone();
                     let count = self.chunks.len();
-                    self.emit(PlayerEvent::Chunk { index, count, text });
+                    self.emit(PlayerEvent::Chunk {
+                        index,
+                        count,
+                        text,
+                        duration,
+                    });
                 }
             }
             Err(message) => self.fail(message),
@@ -1103,10 +1146,25 @@ mod tests {
     }
 
     fn chunk(index: usize, count: usize, text: &str) -> PlayerEvent {
+        chunk_with_rate(index, count, text, 24_000)
+    }
+
+    /// Expected `Chunk` event: the fake synth emits one sample per byte of
+    /// text, so the speech duration is `text.len() / rate` seconds.
+    fn chunk_with_rate(index: usize, count: usize, text: &str, rate: u32) -> PlayerEvent {
         PlayerEvent::Chunk {
             index,
             count,
             text: text.to_string(),
+            duration: Duration::from_secs_f64(text.len() as f64 / f64::from(rate)),
+        }
+    }
+
+    /// Consume the `Playlist` event every `play` emits; returns its texts.
+    fn drain_playlist(events: &mpsc::Receiver<PlayerEvent>) -> Vec<String> {
+        match next_event(events) {
+            PlayerEvent::Playlist(texts) => texts,
+            event => panic!("expected Playlist, got {event:?}"),
         }
     }
 
@@ -1114,6 +1172,7 @@ mod tests {
     fn three_chunk_play_event_order() {
         let (player, events, shared, factory_count, _) = spawn_player(None, FakeSynth::new());
         player.play("One. Two. Three.");
+        drain_playlist(&events);
         assert_eq!(
             next_event(&events),
             PlayerEvent::State(PlayerState::Loading)
@@ -1156,6 +1215,7 @@ mod tests {
     fn lookahead_never_exceeds_two() {
         let (player, events, shared, _, _) = spawn_player(None, FakeSynth::new());
         player.play("One. Two. Three. Four. Five. Six.");
+        drain_playlist(&events);
         assert_eq!(
             next_event(&events),
             PlayerEvent::State(PlayerState::Loading)
@@ -1196,6 +1256,7 @@ mod tests {
     fn stop_mid_play_clears_output_and_idles() {
         let (player, events, shared, _, _) = spawn_player(None, FakeSynth::new());
         player.play("One. Two. Three.");
+        drain_playlist(&events);
         assert_eq!(
             next_event(&events),
             PlayerEvent::State(PlayerState::Loading)
@@ -1222,6 +1283,7 @@ mod tests {
     fn new_play_discards_stale_chunks() {
         let (player, events, shared, factory_count, _) = spawn_player(None, FakeSynth::new());
         player.play("One. Two. Three.");
+        drain_playlist(&events);
         assert_eq!(
             next_event(&events),
             PlayerEvent::State(PlayerState::Loading)
@@ -1234,6 +1296,7 @@ mod tests {
         wait_for_enqueued(&shared, 3);
         let old_ids = FakeOutput::enqueued_ids(&shared);
         player.play("Alpha. Beta.");
+        drain_playlist(&events);
         // Still playing: no state event, straight to the new first chunk.
         assert_eq!(next_event(&events), chunk(0, 2, "Alpha."));
         wait_for_enqueued(&shared, 5);
@@ -1256,6 +1319,7 @@ mod tests {
     fn next_and_previous_jump() {
         let (player, events, shared, _, _) = spawn_player(None, FakeSynth::new());
         player.play("One. Two. Three.");
+        drain_playlist(&events);
         assert_eq!(
             next_event(&events),
             PlayerEvent::State(PlayerState::Loading)
@@ -1290,6 +1354,7 @@ mod tests {
     fn next_at_last_chunk_finishes() {
         let (player, events, shared, _, _) = spawn_player(None, FakeSynth::new());
         player.play("Hi.");
+        drain_playlist(&events);
         assert_eq!(
             next_event(&events),
             PlayerEvent::State(PlayerState::Loading)
@@ -1316,6 +1381,7 @@ mod tests {
             output,
         );
         player.play("Hello.");
+        drain_playlist(&events);
         assert_eq!(
             next_event(&events),
             PlayerEvent::State(PlayerState::Loading)
@@ -1336,6 +1402,7 @@ mod tests {
         };
         let (player, events, shared, _, _) = spawn_player(None, synth);
         player.play("One. Two. Three.");
+        drain_playlist(&events);
         assert_eq!(
             next_event(&events),
             PlayerEvent::State(PlayerState::Loading)
@@ -1359,6 +1426,7 @@ mod tests {
         let (player, events, shared, factory_count, _) =
             spawn_player(Some(Duration::from_millis(50)), FakeSynth::new());
         player.play("Hi.");
+        drain_playlist(&events);
         assert_eq!(
             next_event(&events),
             PlayerEvent::State(PlayerState::Loading)
@@ -1381,6 +1449,7 @@ mod tests {
         assert_eq!(shared.lock().unwrap().closes, 1);
         // The next play reloads the engine (Loading again).
         player.play("Yo.");
+        drain_playlist(&events);
         assert_eq!(
             next_event(&events),
             PlayerEvent::State(PlayerState::Loading)
@@ -1403,6 +1472,7 @@ mod tests {
     fn no_unload_after_keeps_engine_loaded() {
         let (player, events, shared, factory_count, _) = spawn_player(None, FakeSynth::new());
         player.play("Hi.");
+        drain_playlist(&events);
         assert_eq!(
             next_event(&events),
             PlayerEvent::State(PlayerState::Loading)
@@ -1419,6 +1489,7 @@ mod tests {
         assert_eq!(next_event(&events), PlayerEvent::State(PlayerState::Idle));
         std::thread::sleep(Duration::from_millis(150));
         player.play("Yo.");
+        drain_playlist(&events);
         // No Loading: the engine was kept.
         assert_eq!(
             next_event(&events),
@@ -1438,6 +1509,7 @@ mod tests {
     fn pause_resume_toggle_and_stop_while_paused() {
         let (player, events, shared, _, _) = spawn_player(None, FakeSynth::new());
         player.play("One. Two. Three.");
+        drain_playlist(&events);
         assert_eq!(
             next_event(&events),
             PlayerEvent::State(PlayerState::Loading)
@@ -1470,6 +1542,7 @@ mod tests {
         assert_eq!(next_event(&events), PlayerEvent::State(PlayerState::Idle));
         // The next play resumes the still-paused output.
         player.play("Alpha. Beta.");
+        drain_playlist(&events);
         assert_eq!(
             next_event(&events),
             PlayerEvent::State(PlayerState::Playing)
@@ -1495,6 +1568,7 @@ mod tests {
         };
         let (player, events, shared, _, synth) = spawn_player(None, synth);
         player.play("One. Two. Three.");
+        drain_playlist(&events);
         assert_eq!(
             next_event(&events),
             PlayerEvent::State(PlayerState::Loading)
@@ -1539,6 +1613,7 @@ mod tests {
         let (player, events, shared, english_count, persian_count, english, persian) =
             spawn_bilingual(None, english, persian);
         player.play("Hello world. سلام دنیا. Goodbye.");
+        drain_playlist(&events);
         assert_eq!(
             next_event(&events),
             PlayerEvent::State(PlayerState::Loading)
@@ -1587,7 +1662,10 @@ mod tests {
         assert_eq!(rates, [24_000, 22_050, 24_000]);
         let ids = FakeOutput::enqueued_ids(&shared);
         FakeOutput::finish(&shared, ids[0]);
-        assert_eq!(next_event(&events), chunk(1, 3, "سلام دنیا."));
+        assert_eq!(
+            next_event(&events),
+            chunk_with_rate(1, 3, "سلام دنیا.", 22_050)
+        );
         FakeOutput::finish(&shared, ids[1]);
         assert_eq!(next_event(&events), chunk(2, 3, "Goodbye."));
         FakeOutput::finish(&shared, ids[2]);
@@ -1601,6 +1679,7 @@ mod tests {
         let (player, events, shared, english_count, persian_count, _, _) =
             spawn_bilingual(None, FakeSynth::new(), FakeSynth::new());
         player.play("One. Two. Three.");
+        drain_playlist(&events);
         assert_eq!(
             next_event(&events),
             PlayerEvent::State(PlayerState::Loading)
@@ -1639,6 +1718,7 @@ mod tests {
             output,
         );
         player.play("سلام دنیا.");
+        drain_playlist(&events);
         // Persian-only text: no English load, straight to playing, then the
         // Persian load fails verbatim.
         assert_eq!(
@@ -1666,6 +1746,7 @@ mod tests {
             FakeSynth::new(),
         );
         player.play("Hello. سلام.");
+        drain_playlist(&events);
         // Drain the first play: Loading, Playing, Chunk 0, Loading, Playing.
         assert_eq!(
             next_event(&events),
@@ -1696,6 +1777,7 @@ mod tests {
         // Idle unload emits nothing and drops both engines.
         expect_no_event(&events);
         player.play("Hi. سلام.");
+        drain_playlist(&events);
         assert_eq!(
             next_event(&events),
             PlayerEvent::State(PlayerState::Loading)
@@ -1716,6 +1798,7 @@ mod tests {
         let (player, events, shared, english_count, persian_count, _, _) =
             spawn_bilingual(None, FakeSynth::new(), FakeSynth::new());
         player.play("سلام.");
+        drain_playlist(&events);
         assert_eq!(
             next_event(&events),
             PlayerEvent::State(PlayerState::Playing)
@@ -1738,6 +1821,7 @@ mod tests {
         // Same voice: the loaded synth is kept.
         player.set_persian_voice(PersianVoice::Amir);
         player.play("سلام.");
+        drain_playlist(&events);
         assert_eq!(
             next_event(&events),
             PlayerEvent::State(PlayerState::Playing)
@@ -1752,6 +1836,7 @@ mod tests {
         // Changed voice: the synth reloads on the next Persian chunk.
         player.set_persian_voice(PersianVoice::Gyro);
         player.play("سلام.");
+        drain_playlist(&events);
         assert_eq!(
             next_event(&events),
             PlayerEvent::State(PlayerState::Playing)
@@ -1781,6 +1866,7 @@ mod tests {
         };
         let (player, events, shared, _, synth) = spawn_player(None, synth);
         player.play("SQL one. SQL two. SQL three.");
+        drain_playlist(&events);
         assert_eq!(
             next_event(&events),
             PlayerEvent::State(PlayerState::Loading)
@@ -1816,6 +1902,7 @@ mod tests {
         assert_eq!(factory_count.load(Ordering::SeqCst), 1);
         // The next play reuses the warmed engine (no Loading).
         player.play("Hi.");
+        drain_playlist(&events);
         assert_eq!(
             next_event(&events),
             PlayerEvent::State(PlayerState::Playing)
@@ -1829,6 +1916,7 @@ mod tests {
     fn play_while_paused_interrupts_and_resumes_with_new_text() {
         let (player, events, shared, _, _) = spawn_player(None, FakeSynth::new());
         player.play("One. Two. Three.");
+        drain_playlist(&events);
         assert_eq!(
             next_event(&events),
             PlayerEvent::State(PlayerState::Loading)
@@ -1844,6 +1932,7 @@ mod tests {
         assert_eq!(next_event(&events), PlayerEvent::State(PlayerState::Paused));
         // A new copy while paused interrupts and resumes with the new text.
         player.play("Alpha. Beta.");
+        drain_playlist(&events);
         assert_eq!(
             next_event(&events),
             PlayerEvent::State(PlayerState::Playing)
@@ -1881,6 +1970,7 @@ mod tests {
         assert_eq!(factory_count.load(Ordering::SeqCst), 1);
         // Busy: silent too.
         player.play("One. Two. Three.");
+        drain_playlist(&events);
         assert_eq!(
             next_event(&events),
             PlayerEvent::State(PlayerState::Playing)
@@ -1905,6 +1995,7 @@ mod tests {
             output,
         );
         player.play("Hello world. Second.");
+        drain_playlist(&events);
         assert_eq!(
             next_event(&events),
             PlayerEvent::State(PlayerState::Loading)
@@ -1928,6 +2019,117 @@ mod tests {
         }
         assert_eq!(next_event(&events), chunk(0, 2, "Hello world."));
         wait_for_enqueued(&shared, 2);
+        player.shutdown();
+    }
+
+    #[test]
+    fn playlist_arrives_before_loading_with_chunk_texts() {
+        let (player, events, _, _, _) = spawn_player(None, FakeSynth::new());
+        player.play("One. Two. Three.");
+        let expected: Vec<String> = ["One.", "Two.", "Three."]
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        assert_eq!(drain_playlist(&events), expected);
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Loading)
+        );
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Playing)
+        );
+        assert_eq!(next_event(&events), chunk(0, 3, "One."));
+        player.shutdown();
+    }
+
+    #[test]
+    fn chunk_duration_excludes_pause_silence() {
+        let (player, events, shared, _, _) = spawn_player(None, FakeSynth::new());
+        player.play("One. Two. Three.");
+        drain_playlist(&events);
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Loading)
+        );
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Playing)
+        );
+        // The fake synth emits one sample per byte at 24 kHz.
+        match next_event(&events) {
+            PlayerEvent::Chunk {
+                index,
+                count,
+                text,
+                duration,
+            } => {
+                assert_eq!((index, count), (0, 3));
+                assert_eq!(text, "One.");
+                assert_eq!(duration, Duration::from_secs_f64(4.0 / 24_000.0));
+            }
+            event => panic!("expected Chunk, got {event:?}"),
+        }
+        wait_for_enqueued(&shared, 3);
+        // The last chunk's enqueued audio includes trailing pause silence...
+        let chunks = prepare(
+            "One. Two. Three.",
+            &SanitizerOptions::default(),
+            &Pronunciations::new(Vec::new()),
+        );
+        let silence = (chunks[2].pause_after.seconds() * 24_000.0) as usize;
+        assert!(silence > 0, "test needs a chunk with pause silence");
+        assert_eq!(
+            shared.lock().unwrap().enqueued[2].1,
+            chunks[2].text.len() + silence
+        );
+        // ...but its Chunk duration still excludes it.
+        let ids = FakeOutput::enqueued_ids(&shared);
+        FakeOutput::finish(&shared, ids[0]);
+        assert_eq!(next_event(&events), chunk(1, 3, "Two."));
+        FakeOutput::finish(&shared, ids[1]);
+        assert_eq!(next_event(&events), chunk(2, 3, "Three."));
+        player.shutdown();
+    }
+
+    #[test]
+    fn jump_to_chunk_emits_that_chunk() {
+        let (player, events, shared, _, _) = spawn_player(None, FakeSynth::new());
+        player.play("One. Two. Three.");
+        drain_playlist(&events);
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Loading)
+        );
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Playing)
+        );
+        assert_eq!(next_event(&events), chunk(0, 3, "One."));
+        wait_for_enqueued(&shared, 3);
+        player.jump(2);
+        assert_eq!(next_event(&events), chunk(2, 3, "Three."));
+        player.shutdown();
+    }
+
+    #[test]
+    fn jump_out_of_range_and_while_idle_do_nothing() {
+        let (player, events, shared, _, _) = spawn_player(None, FakeSynth::new());
+        player.jump(0); // Idle: ignored.
+        player.play("One. Two. Three.");
+        drain_playlist(&events);
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Loading)
+        );
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Playing)
+        );
+        assert_eq!(next_event(&events), chunk(0, 3, "One."));
+        wait_for_enqueued(&shared, 3);
+        player.jump(9); // Out of range: ignored.
+        expect_no_event(&events);
         player.shutdown();
     }
 }

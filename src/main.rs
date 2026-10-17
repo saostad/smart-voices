@@ -260,7 +260,7 @@ fn speak(args: &[String]) -> i32 {
                 eprintln!("Error: {message}");
                 return 1;
             }
-            PlayerEvent::State(_) | PlayerEvent::Latency { .. } => {}
+            PlayerEvent::State(_) | PlayerEvent::Playlist(_) | PlayerEvent::Latency { .. } => {}
         }
     }
     eprintln!("Error: The player stopped before finishing.");

@@ -807,6 +807,7 @@ impl App {
                 self.paused = false;
                 self.set_status(&format!("Reading {} of {count}", index + 1));
             }
+            PlayerEvent::Playlist(_) => {}
             PlayerEvent::Finished => {
                 self.active = false;
                 self.last_chunk = None;

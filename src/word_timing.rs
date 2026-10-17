@@ -55,7 +55,10 @@ pub fn word_index(text: &str, elapsed: f64, duration: f64) -> Option<usize> {
     if words.is_empty() {
         return None;
     }
-    if !(elapsed >= 0.0) || !(duration > 0.0) || elapsed > duration {
+    if elapsed.is_nan() || elapsed < 0.0 || duration.is_nan() || duration <= 0.0 {
+        return None;
+    }
+    if elapsed > duration {
         return None;
     }
     if elapsed == duration {
