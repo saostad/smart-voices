@@ -474,6 +474,7 @@ fn reader_preview(args: &[String]) -> i32 {
         can_previous: true,
         can_next: true,
         playing: true,
+        can_play_pause: true,
         theme: &theme,
     };
     let count = width_px as u64 * height_px as u64;

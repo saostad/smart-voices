@@ -88,6 +88,8 @@ pub struct Frame<'a> {
     pub can_previous: bool,
     pub can_next: bool,
     pub playing: bool,
+    /// Whether the Play/Pause button is enabled (a reading is active).
+    pub can_play_pause: bool,
     pub theme: &'a Theme,
 }
 
@@ -332,6 +334,7 @@ pub struct Painter {
     /// Button state from the last painted frame (for [`Painter::hit`]).
     can_previous: bool,
     can_next: bool,
+    can_play_pause: bool,
     accent: u32,
     #[cfg(test)]
     reshapes: usize,
@@ -365,6 +368,7 @@ impl Painter {
             shaped_for: (0, 1.0f32.to_bits()),
             can_previous: false,
             can_next: false,
+            can_play_pause: false,
             accent: Theme::light().accent,
             #[cfg(test)]
             reshapes: 0,
@@ -486,6 +490,7 @@ impl Painter {
         }
         self.can_previous = frame.can_previous;
         self.can_next = frame.can_next;
+        self.can_play_pause = frame.can_play_pause;
         self.accent = frame.theme.accent;
         fill_rect(pixels, w, h, Rect { x: 0, y: 0, w, h }, frame.theme.bg);
         self.paint_rows(frame, pixels);
@@ -528,12 +533,22 @@ impl Painter {
             };
         }
         if play.contains(x, y) {
-            return Hit::PlayPause;
+            return if self.can_play_pause {
+                Hit::PlayPause
+            } else {
+                Hit::None
+            };
         }
         if next.contains(x, y) {
             return if self.can_next { Hit::Next } else { Hit::None };
         }
         Hit::None
+    }
+
+    /// Current content offset in physical pixels (for redraw comparison).
+    #[must_use]
+    pub fn scroll_offset(&self) -> f32 {
+        self.scroll
     }
 
     #[cfg(test)]
@@ -749,7 +764,14 @@ impl Painter {
             prev,
             if frame.can_previous { text } else { track },
         );
-        self.paint_play_icon(pixels, w, h, play, text, frame.playing);
+        self.paint_play_icon(
+            pixels,
+            w,
+            h,
+            play,
+            if frame.can_play_pause { text } else { track },
+            frame.playing,
+        );
         self.paint_next_icon(
             pixels,
             w,
@@ -974,6 +996,7 @@ mod tests {
             can_previous: false,
             can_next: true,
             playing: true,
+            can_play_pause: true,
             theme,
         }
     }
@@ -1289,6 +1312,7 @@ mod tests {
             can_previous: false,
             can_next: true,
             playing: true,
+            can_play_pause: true,
             theme: &theme,
         };
         let (w, h) = (painter.width as usize, painter.height as usize);

@@ -3,3 +3,4 @@
 pub mod bmp;
 pub mod model;
 pub mod render;
+pub mod window;
