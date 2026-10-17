@@ -52,14 +52,20 @@ By default every new copy is read aloud automatically, and a new copy stops
 the current reading and reads the new text. Click the tray icon to open the
 menu: a status line (`Ready`, `Reading 3 of 12`, `Paused`, …),
 `Read Copied Text Automatically` (the main on/off switch), `Read Clipboard`,
-`Pause`/`Resume`, `Stop`, `Previous`/`Next Sentence`, the `Settings` submenu,
-and `Quit`.
+`Pause`/`Resume`, `Stop`, `Previous`/`Next Sentence`, `Show Reading Panel`,
+the `Settings` submenu, and `Quit`.
+
+While reading, a small panel shows the text with the current word
+highlighted; click a paragraph to jump there, or use its Previous / Pause /
+Next buttons. Close it to hide it for that reading.
 
 The `Settings` submenu holds everything customizable:
 
 - `Launch at Login` — start with your computer (reflects the real system
   state).
 - `Watch the Clipboard` — turn clipboard watching off entirely.
+- `Show Reading Panel While Reading` — show the panel automatically while
+  reading.
 - `Voice` — 28 English voices (`Heart — American female`, …).
 - `Persian Voice` — Amir, Gyro, Reza Ibrahim, Ganji, Ganji Adabi.
 - `Speed` — 0.75× to 2×.

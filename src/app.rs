@@ -1,8 +1,10 @@
 //! Tray application: a menu-bar icon driven by the player and the
-//! clipboard watcher. The winit event loop runs with `ControlFlow::Wait` (zero
-//! CPU when idle) and creates no windows; player, clipboard, tray and menu
-//! events are forwarded into it from small forwarder threads and the
-//! tray/menu global handlers. All UI updates run on the main thread.
+//! clipboard watcher, with an optional reading panel window. The winit event
+//! loop runs with `ControlFlow::Wait` (zero CPU when idle); while the panel is
+//! open it wakes only for the auto-hide timer and word-highlight changes.
+//! Player, clipboard, tray and menu events are forwarded into it from small
+//! forwarder threads and the tray/menu global handlers. All UI updates run on
+//! the main thread.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -15,6 +17,7 @@ use tray_icon::menu::{
 };
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use winit::application::ApplicationHandler;
+use winit::dpi::PhysicalPosition;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 #[cfg(target_os = "macos")]
@@ -33,6 +36,8 @@ use crate::models::{self, ModelId};
 use crate::pipeline::prepare;
 use crate::player::{Player, PlayerConfig, PlayerEvent, PlayerState, Synth};
 use crate::pronounce::{Pronunciations, pronunciations_path};
+use crate::reader::model::ReaderModel;
+use crate::reader::window::{PanelAction, ReaderWindow};
 use crate::sanitize::SanitizerOptions;
 use crate::settings::{Settings, settings_path};
 use crate::shortcuts::{ShortcutAction, format_binding, parse_binding};
@@ -249,6 +254,19 @@ struct App {
     open_settings_item: Option<MenuItem>,
     change_shortcuts_item: Option<MenuItem>,
     quit_item: Option<MenuItem>,
+    show_reader_item: Option<CheckMenuItem>,
+    open_reader_item: Option<MenuItem>,
+    /// Reading panel state, driven by every player event.
+    reader_model: ReaderModel,
+    reader: Option<ReaderWindow>,
+    /// When to auto-hide the panel after the reading ended.
+    reader_hide_at: Option<Instant>,
+    /// Opened from the menu: never auto-hide.
+    reader_pinned: bool,
+    /// Opening failed for this reading; don't retry it.
+    reader_failed_reading: Option<u64>,
+    /// Last panel position, reused on reopen.
+    reader_position: Option<PhysicalPosition<i32>>,
     /// Global shortcut manager (must stay alive; dropping it unregisters).
     hotkey_manager: Option<GlobalHotKeyManager>,
     /// Registered hotkey id → action.
@@ -313,6 +331,14 @@ impl App {
             open_settings_item: None,
             change_shortcuts_item: None,
             quit_item: None,
+            show_reader_item: None,
+            open_reader_item: None,
+            reader_model: ReaderModel::new(),
+            reader: None,
+            reader_hide_at: None,
+            reader_pinned: false,
+            reader_failed_reading: None,
+            reader_position: None,
             hotkey_manager: None,
             hotkeys: Vec::new(),
             active: false,
@@ -379,6 +405,7 @@ impl App {
             menu_accelerator(&shortcuts.previous),
         );
         let next_item = MenuItem::new("Next Sentence", false, menu_accelerator(&shortcuts.next));
+        let open_reader_item = MenuItem::new("Show Reading Panel", true, None);
         // The real OS state, read fresh (not a stored setting).
         let launch_at_login_item =
             CheckMenuItem::new("Launch at Login", true, autostart::is_enabled(), None);
@@ -386,6 +413,12 @@ impl App {
             "Watch the Clipboard",
             true,
             self.settings.watch_clipboard,
+            None,
+        );
+        let show_reader_item = CheckMenuItem::new(
+            "Show Reading Panel While Reading",
+            true,
+            self.settings.show_reader,
             None,
         );
         let autoread_item = CheckMenuItem::new(
@@ -482,6 +515,9 @@ impl App {
             .append(&watch_item)
             .map_err(menu_build_error)?;
         settings_menu
+            .append(&show_reader_item)
+            .map_err(menu_build_error)?;
+        settings_menu
             .append(&voice_menu)
             .map_err(menu_build_error)?;
         settings_menu
@@ -518,6 +554,7 @@ impl App {
         menu.append(&stop_item).map_err(menu_build_error)?;
         menu.append(&prev_item).map_err(menu_build_error)?;
         menu.append(&next_item).map_err(menu_build_error)?;
+        menu.append(&open_reader_item).map_err(menu_build_error)?;
         menu.append(&PredefinedMenuItem::separator())
             .map_err(menu_build_error)?;
         menu.append(&settings_menu).map_err(menu_build_error)?;
@@ -557,6 +594,8 @@ impl App {
         self.open_settings_item = Some(open_settings_item);
         self.change_shortcuts_item = Some(change_shortcuts_item);
         self.quit_item = Some(quit_item);
+        self.show_reader_item = Some(show_reader_item);
+        self.open_reader_item = Some(open_reader_item);
         self.tray = Some(tray);
         if let Some(err) = self.startup_error.take() {
             self.show_error(&err);
@@ -768,7 +807,9 @@ impl App {
         Ok(())
     }
 
-    fn on_player_event(&mut self, event: PlayerEvent) {
+    fn on_player_event(&mut self, event_loop: &ActiveEventLoop, event: PlayerEvent) {
+        self.reader_model.apply(&event, Instant::now());
+        self.update_reader(event_loop);
         match event {
             PlayerEvent::State(PlayerState::Loading) => {
                 self.active = true;
@@ -838,6 +879,82 @@ impl App {
         self.update_transport();
     }
 
+    /// Open the panel window if needed and sync it. A failure shows once
+    /// per reading (the menu clears the guard, so opening from there retries).
+    fn open_reader(&mut self, event_loop: &ActiveEventLoop) {
+        if self.reader.is_none() {
+            let now = Instant::now();
+            match ReaderWindow::open(event_loop, &self.reader_model, now, self.reader_position) {
+                Ok(window) => self.reader = Some(window),
+                Err(message) => {
+                    self.show_error(&message);
+                    self.reader_failed_reading = Some(self.reader_model.reading_id());
+                    return;
+                }
+            }
+        }
+        if let Some(reader) = &mut self.reader {
+            reader.sync(&self.reader_model, Instant::now());
+        }
+    }
+
+    /// Open, sync or schedule hiding the panel after a player event.
+    fn update_reader(&mut self, event_loop: &ActiveEventLoop) {
+        if self.reader_model.should_show(self.settings.show_reader)
+            && self.reader_failed_reading != Some(self.reader_model.reading_id())
+        {
+            self.reader_hide_at = None;
+            self.open_reader(event_loop);
+        } else if self.reader.is_some() {
+            let now = Instant::now();
+            if let Some(reader) = &mut self.reader {
+                reader.sync(&self.reader_model, now);
+            }
+            if !self.reader_pinned
+                && !self.reader_model.is_active()
+                && self.reader_hide_at.is_none()
+            {
+                self.reader_hide_at = Some(now + Duration::from_secs(3));
+            }
+        }
+    }
+
+    /// Close the panel through every path (×, hide timer, setting off, draw
+    /// failure): remember the position, drop the window (freeing the fonts),
+    /// and clear the hide timer and the pinned flag.
+    fn close_reader(&mut self) {
+        if let Some(reader) = self.reader.take() {
+            self.reader_position = reader.position().or(self.reader_position);
+        }
+        self.reader_hide_at = None;
+        self.reader_pinned = false;
+    }
+
+    /// "Show Reading Panel" menu item: show the panel even when idle, and keep
+    /// it open (pinned) instead of auto-hiding it.
+    fn open_reader_pinned(&mut self, event_loop: &ActiveEventLoop) {
+        self.reader_model.undismiss();
+        self.reader_pinned = true;
+        self.reader_failed_reading = None;
+        self.reader_hide_at = None;
+        self.open_reader(event_loop);
+    }
+
+    /// The Settings check already holds its new state (muda flips it on click).
+    fn on_show_reader_toggled(&mut self, event_loop: &ActiveEventLoop) {
+        let checked = self
+            .show_reader_item
+            .as_ref()
+            .is_some_and(CheckMenuItem::is_checked);
+        self.settings.show_reader = checked;
+        self.save_settings();
+        if checked {
+            self.update_reader(event_loop);
+        } else if !self.reader_pinned {
+            self.close_reader();
+        }
+    }
+
     fn on_clipboard_event(&mut self, event: ClipboardEvent) {
         match event {
             ClipboardEvent::Changed { .. } => {
@@ -901,6 +1018,12 @@ impl App {
                 player.next();
             }
         } else if self
+            .open_reader_item
+            .as_ref()
+            .is_some_and(|item| id == item.id())
+        {
+            self.open_reader_pinned(event_loop);
+        } else if self
             .launch_at_login_item
             .as_ref()
             .is_some_and(|item| id == item.id())
@@ -908,6 +1031,12 @@ impl App {
             self.on_launch_at_login_toggled();
         } else if self.watch_item.as_ref().is_some_and(|item| id == item.id()) {
             self.on_watch_toggled();
+        } else if self
+            .show_reader_item
+            .as_ref()
+            .is_some_and(|item| id == item.id())
+        {
+            self.on_show_reader_toggled(event_loop);
         } else if self
             .autoread_item
             .as_ref()
@@ -1297,7 +1426,7 @@ impl ApplicationHandler<AppEvent> for App {
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
         match event {
-            AppEvent::Player(event) => self.on_player_event(event),
+            AppEvent::Player(event) => self.on_player_event(event_loop, event),
             AppEvent::Clipboard(event) => self.on_clipboard_event(event),
             AppEvent::Tray(event) => self.on_tray_event(event),
             AppEvent::Menu(event) => self.on_menu_event(event_loop, event),
@@ -1316,10 +1445,90 @@ impl ApplicationHandler<AppEvent> for App {
     fn window_event(
         &mut self,
         _event_loop: &ActiveEventLoop,
-        _window_id: WindowId,
-        _event: WindowEvent,
+        window_id: WindowId,
+        event: WindowEvent,
     ) {
-        // The app creates no windows; this is unreachable.
+        let Some(reader) = &mut self.reader else {
+            return;
+        };
+        if reader.id() != window_id {
+            return;
+        }
+        match reader.handle(&event, &self.reader_model) {
+            PanelAction::None => {}
+            PanelAction::Close => {
+                self.reader_model.dismiss();
+                self.close_reader();
+            }
+            PanelAction::Jump(index) => {
+                if let Some(player) = &self.player {
+                    player.jump(index);
+                }
+            }
+            PanelAction::Previous => {
+                if let Some(player) = &self.player {
+                    player.previous();
+                }
+            }
+            PanelAction::PlayPause => {
+                if let Some(player) = &self.player {
+                    if self.paused {
+                        player.resume();
+                    } else {
+                        player.pause();
+                    }
+                }
+            }
+            PanelAction::Next => {
+                if let Some(player) = &self.player {
+                    player.next();
+                }
+            }
+            PanelAction::DrawFailed(message) => {
+                self.show_error(&message);
+                self.reader_failed_reading = Some(self.reader_model.reading_id());
+                self.close_reader();
+            }
+        }
+    }
+
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        let now = Instant::now();
+        if let Some(hide_at) = self.reader_hide_at
+            && hide_at <= now
+        {
+            if self.reader.as_ref().is_some_and(ReaderWindow::is_hovered) {
+                self.reader_hide_at = Some(now + Duration::from_secs(3));
+            } else {
+                self.close_reader();
+            }
+        }
+        if let Some(reader) = &mut self.reader {
+            reader.sync(&self.reader_model, now);
+        }
+        event_loop.set_control_flow(reader_control_flow(
+            self.reader.is_some(),
+            self.reader_hide_at,
+            self.reader_model.next_redraw(now),
+        ));
+    }
+}
+
+/// Event-loop deadline while the panel is open: wake for the auto-hide timer
+/// or the next word-highlight change, whichever comes first. With the panel
+/// closed this is plain `Wait`, exactly as before (zero wakeups).
+fn reader_control_flow(
+    reader_open: bool,
+    hide_at: Option<Instant>,
+    redraw_at: Option<Instant>,
+) -> ControlFlow {
+    if !reader_open {
+        return ControlFlow::Wait;
+    }
+    match (hide_at, redraw_at) {
+        (None, None) => ControlFlow::Wait,
+        (Some(at), None) | (None, Some(at)) => ControlFlow::WaitUntil(at),
+        (Some(hide), Some(redraw)) => ControlFlow::WaitUntil(hide.min(redraw)),
     }
 }
 
@@ -1382,6 +1591,36 @@ mod tests {
         assert_eq!(unload_duration(0), None);
         assert_eq!(unload_duration(5), Some(Duration::from_secs(300)));
         assert_eq!(unload_duration(60), Some(Duration::from_secs(3600)));
+    }
+
+    #[test]
+    fn reader_deadline_picks_earlier_and_ignores_when_closed() {
+        let now = Instant::now();
+        let soon = now + Duration::from_secs(1);
+        let later = now + Duration::from_secs(3);
+        assert_eq!(reader_control_flow(false, None, None), ControlFlow::Wait);
+        assert_eq!(reader_control_flow(true, None, None), ControlFlow::Wait);
+        assert_eq!(
+            reader_control_flow(true, Some(later), None),
+            ControlFlow::WaitUntil(later)
+        );
+        assert_eq!(
+            reader_control_flow(true, None, Some(soon)),
+            ControlFlow::WaitUntil(soon)
+        );
+        assert_eq!(
+            reader_control_flow(true, Some(later), Some(soon)),
+            ControlFlow::WaitUntil(soon)
+        );
+        assert_eq!(
+            reader_control_flow(true, Some(soon), Some(later)),
+            ControlFlow::WaitUntil(soon)
+        );
+        // Closed: no wakeups even with deadlines pending.
+        assert_eq!(
+            reader_control_flow(false, Some(later), Some(soon)),
+            ControlFlow::Wait
+        );
     }
 
     #[test]

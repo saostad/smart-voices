@@ -127,8 +127,8 @@ impl ReaderWindow {
             .map_err(|err| format!("Couldn't open the reading panel: {err}"))?;
         let surface = Surface::new(&context, Rc::clone(&window))
             .map_err(|err| format!("Couldn't open the reading panel: {err}"))?;
-        let mut painter = Painter::new()
-            .map_err(|err| format!("Couldn't open the reading panel: {err}"))?;
+        let mut painter =
+            Painter::new().map_err(|err| format!("Couldn't open the reading panel: {err}"))?;
         let size = window.inner_size();
         painter.resize(size.width, size.height, window.scale_factor() as f32);
         painter.set_playlist(model.chunks());
@@ -170,8 +170,7 @@ impl ReaderWindow {
             self.user_scrolled = false;
         }
         let current = model.current();
-        self.painter
-            .set_highlight(current, model.current_word(now));
+        self.painter.set_highlight(current, model.current_word(now));
         if current != self.current {
             self.current = current;
             if !self.user_scrolled {
@@ -232,8 +231,7 @@ impl ReaderWindow {
             }
             WindowEvent::MouseInput { .. } => PanelAction::None,
             WindowEvent::MouseWheel { delta, .. } => {
-                self.painter
-                    .scroll_by(wheel_px(delta, self.scale_factor()));
+                self.painter.scroll_by(wheel_px(delta, self.scale_factor()));
                 self.user_scrolled = true;
                 self.window.request_redraw();
                 PanelAction::None
@@ -273,10 +271,9 @@ impl ReaderWindow {
     /// Paint one frame straight into the softbuffer and present it.
     fn redraw(&mut self, model: &ReaderModel) -> PanelAction {
         let size = self.window.inner_size();
-        let (Some(width), Some(height)) = (
-            NonZeroU32::new(size.width),
-            NonZeroU32::new(size.height),
-        ) else {
+        let (Some(width), Some(height)) =
+            (NonZeroU32::new(size.width), NonZeroU32::new(size.height))
+        else {
             return PanelAction::None;
         };
         if let Err(err) = self.surface.resize(width, height) {
@@ -285,9 +282,7 @@ impl ReaderWindow {
         let mut buffer = match self.surface.buffer_mut() {
             Ok(buffer) => buffer,
             Err(err) => {
-                return PanelAction::DrawFailed(format!(
-                    "Couldn't draw the reading panel: {err}"
-                ));
+                return PanelAction::DrawFailed(format!("Couldn't draw the reading panel: {err}"));
             }
         };
         let label = model.progress_label();
@@ -320,11 +315,11 @@ mod tests {
     #[test]
     fn wheel_deltas_convert_to_pixels() {
         // Line scrolling: 3 lines × 21 px × scale, wheel-up goes negative.
-        assert_eq!(wheel_px(&MouseScrollDelta::LineDelta(0.0, 1.0), 2.0), -126.0);
         assert_eq!(
-            wheel_px(&MouseScrollDelta::LineDelta(0.0, -1.0), 1.0),
-            63.0
+            wheel_px(&MouseScrollDelta::LineDelta(0.0, 1.0), 2.0),
+            -126.0
         );
+        assert_eq!(wheel_px(&MouseScrollDelta::LineDelta(0.0, -1.0), 1.0), 63.0);
         assert_eq!(
             wheel_px(&MouseScrollDelta::LineDelta(5.0, 0.5), 1.5),
             -0.5 * 3.0 * 21.0 * 1.5
