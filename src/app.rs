@@ -949,9 +949,23 @@ impl App {
             PlayerEvent::Chunk { index, count, .. } => {
                 self.active = true;
                 self.last_chunk = Some((index, count));
-                self.paused = false;
-                self.set_status(&format!("Reading {} of {count}", index + 1));
-                self.show_reading_frame();
+                let paused = self.reader_model.state() == PlayerState::Paused;
+                let (status, animate) = chunk_ui(paused);
+                match status {
+                    ChunkStatus::Paused => {
+                        self.paused = true;
+                        self.set_status("Paused");
+                    }
+                    ChunkStatus::Reading => {
+                        self.paused = false;
+                        self.set_status(&format!("Reading {} of {count}", index + 1));
+                    }
+                }
+                if animate {
+                    self.show_reading_frame();
+                } else {
+                    self.show_idle_frame();
+                }
             }
             PlayerEvent::Playlist(_) => {}
             PlayerEvent::Finished => {
@@ -1669,6 +1683,24 @@ impl ApplicationHandler<AppEvent> for App {
     }
 }
 
+/// Status kind for a `Chunk` event: a jump while paused stays "Paused",
+/// otherwise the chunk reads as "Reading i of n".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChunkStatus {
+    Paused,
+    Reading,
+}
+
+/// Decide the `Chunk` UI update from the paused state: the status kind plus
+/// whether to show the reading (animating) icon.
+fn chunk_ui(paused: bool) -> (ChunkStatus, bool) {
+    if paused {
+        (ChunkStatus::Paused, false)
+    } else {
+        (ChunkStatus::Reading, true)
+    }
+}
+
 /// Event-loop deadline: wake for the earliest pending deadline, or plain
 /// `Wait` when there are none (zero wakeups when idle).
 fn next_wake(deadlines: &[Option<Instant>]) -> ControlFlow {
@@ -1738,6 +1770,12 @@ mod tests {
         assert_eq!(unload_duration(0), None);
         assert_eq!(unload_duration(5), Some(Duration::from_secs(300)));
         assert_eq!(unload_duration(60), Some(Duration::from_secs(3600)));
+    }
+
+    #[test]
+    fn chunk_ui_splits_paused_and_reading() {
+        assert_eq!(chunk_ui(true), (ChunkStatus::Paused, false));
+        assert_eq!(chunk_ui(false), (ChunkStatus::Reading, true));
     }
 
     #[test]
