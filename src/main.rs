@@ -11,10 +11,12 @@ use smart_voices::models::{self, ModelError, ModelId};
 use smart_voices::pipeline::prepare;
 use smart_voices::player::{Player, PlayerConfig, PlayerEvent, Synth};
 use smart_voices::pronounce::{Pronunciations, pronunciations_path};
+use smart_voices::reader::bmp::encode_bmp_24;
+use smart_voices::reader::render::{Frame, Painter, Theme};
 use smart_voices::sanitize::SanitizerOptions;
 use smart_voices::settings::{Settings, settings_path};
 
-const USAGE: &str = "Usage: smart-voices (starts the tray app)\n       smart-voices speak \"<text>\" [--voice <name>] [--speed <f>] [--model fast|small] [--persian-voice <id>] [--verbose]\n       smart-voices download [--model fast|small] [--persian] [--persian-voice <id>]\n       smart-voices clean [<file>]\n       smart-voices watch [--auto-read]";
+const USAGE: &str = "Usage: smart-voices (starts the tray app)\n       smart-voices speak \"<text>\" [--voice <name>] [--speed <f>] [--model fast|small] [--persian-voice <id>] [--verbose]\n       smart-voices download [--model fast|small] [--persian] [--persian-voice <id>]\n       smart-voices clean [<file>]\n       smart-voices watch [--auto-read]\n       smart-voices reader-preview <out.bmp> [--dark] [--width 440] [--height 300] [--scale 2]";
 
 fn main() {
     std::process::exit(run());
@@ -46,6 +48,7 @@ fn run() -> i32 {
         Some("download") => download_cmd(&args[1..]),
         Some("clean") => clean(&args[1..]),
         Some("watch") => watch_cmd(&args[1..]),
+        Some("reader-preview") => reader_preview(&args[1..]),
         _ => {
             eprintln!("{USAGE}");
             2
@@ -363,6 +366,138 @@ fn clean(args: &[String]) -> i32 {
         println!("{}\t{}", chunk.pause_after.label(), chunk.text);
     }
     0
+}
+
+/// Sample reading for the `reader-preview` dev command.
+const PREVIEW_CHUNKS: [&str; 6] = [
+    "Smart Voices reads copied text aloud.",
+    "This panel shows the paragraph being read and highlights the current word as the voice speaks it.",
+    "Click any paragraph to jump there, or use the buttons below to skip back and forth.",
+    "سلام! این یک متن فارسی برای آزمایش است.",
+    "Tables are read row by row and code blocks are announced.",
+    "Everything runs on your computer.",
+];
+
+struct PreviewOptions {
+    path: String,
+    dark: bool,
+    width: u32,
+    height: u32,
+    scale: f32,
+}
+
+fn parse_preview(args: &[String]) -> Option<PreviewOptions> {
+    let mut path: Option<String> = None;
+    let mut dark = false;
+    let mut width = 440;
+    let mut height = 300;
+    let mut scale = 2.0;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--dark" => dark = true,
+            "--width" => {
+                i += 1;
+                width = args.get(i)?.parse::<u32>().ok()?;
+                if width == 0 {
+                    return None;
+                }
+            }
+            "--height" => {
+                i += 1;
+                height = args.get(i)?.parse::<u32>().ok()?;
+                if height == 0 {
+                    return None;
+                }
+            }
+            "--scale" => {
+                i += 1;
+                scale = args.get(i)?.parse::<f32>().ok()?;
+                if !scale.is_finite() || scale <= 0.0 {
+                    return None;
+                }
+            }
+            flag if flag.starts_with("--") => return None,
+            positional => {
+                if path.is_some() {
+                    return None;
+                }
+                path = Some(positional.to_string());
+            }
+        }
+        i += 1;
+    }
+    Some(PreviewOptions {
+        path: path?,
+        dark,
+        width,
+        height,
+        scale,
+    })
+}
+
+/// Render the sample reading offscreen and write it as a 24-bit BMP.
+fn reader_preview(args: &[String]) -> i32 {
+    let options = match parse_preview(args) {
+        Some(options) => options,
+        None => {
+            eprintln!("{USAGE}");
+            return 2;
+        }
+    };
+    // Width/height are logical; the BMP holds physical pixels.
+    let width_px = ((options.width as f32 * options.scale).round() as u32).max(1);
+    let height_px = ((options.height as f32 * options.scale).round() as u32).max(1);
+    let theme = if options.dark {
+        Theme::dark()
+    } else {
+        Theme::light()
+    };
+    let mut painter = match Painter::new() {
+        Ok(painter) => painter,
+        Err(err) => {
+            eprintln!("Error: Couldn't open the reading panel: {err}");
+            return 1;
+        }
+    };
+    painter.resize(width_px, height_px, options.scale);
+    let chunks: Vec<String> = PREVIEW_CHUNKS.iter().map(ToString::to_string).collect();
+    painter.set_playlist(&chunks);
+    painter.set_highlight(Some(1), Some(3));
+    painter.scroll_to_current();
+    // Nudge down so the Persian sample row is fully visible at the default
+    // size (clamped, so harmless at other sizes).
+    painter.scroll_by(20.0 * options.scale);
+    let frame = Frame {
+        label: "Sentence 2 of 6",
+        progress: 2.0 / 6.0,
+        can_previous: true,
+        can_next: true,
+        playing: true,
+        theme: &theme,
+    };
+    let count = width_px as u64 * height_px as u64;
+    let mut pixels: Vec<u32> = Vec::new();
+    if count > usize::MAX as u64 || pixels.try_reserve(count as usize).is_err() {
+        eprintln!(
+            "Error: Couldn't write {}: the image is too large ({width_px}×{height_px}).",
+            options.path
+        );
+        return 1;
+    }
+    pixels.resize(count as usize, 0);
+    painter.paint(&frame, &mut pixels);
+    let bmp = encode_bmp_24(width_px, height_px, &pixels);
+    match std::fs::write(&options.path, &bmp) {
+        Ok(()) => {
+            println!("Wrote {} ({width_px}×{height_px})", options.path);
+            0
+        }
+        Err(err) => {
+            eprintln!("Error: Couldn't write {}: {err}", options.path);
+            1
+        }
+    }
 }
 
 /// Watch the clipboard and announce new text; with auto-read, read it aloud.
