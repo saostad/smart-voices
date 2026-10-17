@@ -255,6 +255,7 @@ struct App {
     change_shortcuts_item: Option<MenuItem>,
     quit_item: Option<MenuItem>,
     show_reader_item: Option<CheckMenuItem>,
+    animate_icon_item: Option<CheckMenuItem>,
     open_reader_item: Option<MenuItem>,
     /// Reading panel state, driven by every player event.
     reader_model: ReaderModel,
@@ -332,6 +333,7 @@ impl App {
             change_shortcuts_item: None,
             quit_item: None,
             show_reader_item: None,
+            animate_icon_item: None,
             open_reader_item: None,
             reader_model: ReaderModel::new(),
             reader: None,
@@ -419,6 +421,12 @@ impl App {
             "Show Reading Panel While Reading",
             true,
             self.settings.show_reader,
+            None,
+        );
+        let animate_icon_item = CheckMenuItem::new(
+            "Animate Icon While Reading",
+            true,
+            self.settings.animate_icon,
             None,
         );
         let autoread_item = CheckMenuItem::new(
@@ -518,6 +526,9 @@ impl App {
             .append(&show_reader_item)
             .map_err(menu_build_error)?;
         settings_menu
+            .append(&animate_icon_item)
+            .map_err(menu_build_error)?;
+        settings_menu
             .append(&voice_menu)
             .map_err(menu_build_error)?;
         settings_menu
@@ -595,6 +606,7 @@ impl App {
         self.change_shortcuts_item = Some(change_shortcuts_item);
         self.quit_item = Some(quit_item);
         self.show_reader_item = Some(show_reader_item);
+        self.animate_icon_item = Some(animate_icon_item);
         self.open_reader_item = Some(open_reader_item);
         self.tray = Some(tray);
         if let Some(err) = self.startup_error.take() {
@@ -955,6 +967,17 @@ impl App {
         }
     }
 
+    /// The Animate Icon check already holds its new state (muda flips it on
+    /// click).
+    fn on_animate_icon_toggled(&mut self) {
+        let checked = self
+            .animate_icon_item
+            .as_ref()
+            .is_some_and(CheckMenuItem::is_checked);
+        self.settings.animate_icon = checked;
+        self.save_settings();
+    }
+
     fn on_clipboard_event(&mut self, event: ClipboardEvent) {
         match event {
             ClipboardEvent::Changed { .. } => {
@@ -1037,6 +1060,12 @@ impl App {
             .is_some_and(|item| id == item.id())
         {
             self.on_show_reader_toggled(event_loop);
+        } else if self
+            .animate_icon_item
+            .as_ref()
+            .is_some_and(|item| id == item.id())
+        {
+            self.on_animate_icon_toggled();
         } else if self
             .autoread_item
             .as_ref()

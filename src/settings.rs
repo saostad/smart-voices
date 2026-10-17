@@ -83,6 +83,8 @@ pub struct Settings {
     pub unload_after_minutes: u32,
     /// Show the reading panel while reading.
     pub show_reader: bool,
+    /// Animate the tray icon while reading.
+    pub animate_icon: bool,
     /// Global shortcut bindings (`[shortcuts]` table).
     pub shortcuts: Shortcuts,
 }
@@ -98,6 +100,7 @@ impl Default for Settings {
             auto_read: true,
             unload_after_minutes: 15,
             show_reader: true,
+            animate_icon: true,
             shortcuts: Shortcuts::default(),
         }
     }
@@ -194,6 +197,7 @@ mod tests {
             auto_read: true,
             unload_after_minutes: 0,
             show_reader: false,
+            animate_icon: false,
             shortcuts: Shortcuts {
                 read_or_pause: String::new(),
                 stop: "ctrl+alt+Q".to_string(),
@@ -347,6 +351,39 @@ mod tests {
         assert!(err.is_none(), "unexpected error: {err:?}");
         assert_eq!(loaded, settings);
         assert!(!loaded.show_reader);
+    }
+
+    #[test]
+    fn animate_icon_defaults_to_true() {
+        assert!(Settings::default().animate_icon);
+    }
+
+    #[test]
+    fn old_file_without_animate_icon_loads_true() {
+        let dir = unique_temp_dir();
+        let path = dir.join("settings.toml");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&path, "voice = \"bm_lewis\"\n").unwrap();
+        let (settings, err) = Settings::load(&path);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(err.is_none(), "unexpected error: {err:?}");
+        assert!(settings.animate_icon);
+    }
+
+    #[test]
+    fn animate_icon_false_round_trips() {
+        let dir = unique_temp_dir();
+        let path = dir.join("settings.toml");
+        let settings = Settings {
+            animate_icon: false,
+            ..Settings::default()
+        };
+        settings.save(&path).unwrap();
+        let (loaded, err) = Settings::load(&path);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(err.is_none(), "unexpected error: {err:?}");
+        assert_eq!(loaded, settings);
+        assert!(!loaded.animate_icon);
     }
 
     #[test]

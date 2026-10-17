@@ -66,6 +66,7 @@ The `Settings` submenu holds everything customizable:
 - `Watch the Clipboard` — turn clipboard watching off entirely.
 - `Show Reading Panel While Reading` — show the panel automatically while
   reading.
+- `Animate Icon While Reading` — animate the tray icon while reading.
 - `Voice` — 28 English voices (`Heart — American female`, …).
 - `Persian Voice` — Amir, Gyro, Reza Ibrahim, Ganji, Ganji Adabi.
 - `Speed` — 0.75× to 2×.
