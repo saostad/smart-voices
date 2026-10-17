@@ -81,6 +81,8 @@ pub struct Settings {
     pub auto_read: bool,
     /// Minutes of idleness before unloading the model (0 = keep loaded).
     pub unload_after_minutes: u32,
+    /// Show the reading panel while reading.
+    pub show_reader: bool,
     /// Global shortcut bindings (`[shortcuts]` table).
     pub shortcuts: Shortcuts,
 }
@@ -95,6 +97,7 @@ impl Default for Settings {
             watch_clipboard: true,
             auto_read: true,
             unload_after_minutes: 15,
+            show_reader: true,
             shortcuts: Shortcuts::default(),
         }
     }
@@ -190,6 +193,7 @@ mod tests {
             watch_clipboard: false,
             auto_read: true,
             unload_after_minutes: 0,
+            show_reader: false,
             shortcuts: Shortcuts {
                 read_or_pause: String::new(),
                 stop: "ctrl+alt+Q".to_string(),
@@ -310,6 +314,39 @@ mod tests {
                 ..Shortcuts::default()
             }
         );
+    }
+
+    #[test]
+    fn show_reader_defaults_to_true() {
+        assert!(Settings::default().show_reader);
+    }
+
+    #[test]
+    fn old_file_without_show_reader_loads_true() {
+        let dir = unique_temp_dir();
+        let path = dir.join("settings.toml");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&path, "voice = \"bm_lewis\"\n").unwrap();
+        let (settings, err) = Settings::load(&path);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(err.is_none(), "unexpected error: {err:?}");
+        assert!(settings.show_reader);
+    }
+
+    #[test]
+    fn show_reader_false_round_trips() {
+        let dir = unique_temp_dir();
+        let path = dir.join("settings.toml");
+        let settings = Settings {
+            show_reader: false,
+            ..Settings::default()
+        };
+        settings.save(&path).unwrap();
+        let (loaded, err) = Settings::load(&path);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(err.is_none(), "unexpected error: {err:?}");
+        assert_eq!(loaded, settings);
+        assert!(!loaded.show_reader);
     }
 
     #[test]
