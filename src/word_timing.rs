@@ -79,6 +79,46 @@ pub fn word_index(text: &str, elapsed: f64, duration: f64) -> Option<usize> {
     Some(words.len() - 1)
 }
 
+/// Elapsed time (in seconds) at which [`word_index`] next changes for the same
+/// `text` and `duration`: `duration × cumulative_weight_of_current_word /
+/// total`. Returns `None` when the current word is the last one, or in the
+/// same invalid cases as [`word_index`].
+#[must_use]
+pub fn next_boundary(text: &str, elapsed: f64, duration: f64) -> Option<f64> {
+    let words: Vec<&str> = text
+        .split(char::is_whitespace)
+        .filter(|word| !word.is_empty())
+        .collect();
+    if words.is_empty() {
+        return None;
+    }
+    if elapsed.is_nan() || elapsed < 0.0 || duration.is_nan() || duration <= 0.0 {
+        return None;
+    }
+    if elapsed >= duration {
+        // Past the end is invalid; at the end the current word is the last one.
+        return None;
+    }
+    let weights: Vec<f64> = words.iter().map(|word| weight(word)).collect();
+    let total: f64 = weights.iter().sum();
+    if total <= 0.0 {
+        return None;
+    }
+    let position = (elapsed / duration) * total;
+    let mut cumulative = 0.0;
+    for (index, word_weight) in weights.iter().enumerate() {
+        cumulative += *word_weight;
+        if position < cumulative {
+            if index + 1 >= words.len() {
+                return None;
+            }
+            return Some(duration * cumulative / total);
+        }
+    }
+    // Fell through: the current word is the last one.
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -140,5 +180,30 @@ mod tests {
         assert_eq!(ranges.len(), 2);
         assert_eq!(&text[ranges[0].clone()], "سلام");
         assert_eq!(&text[ranges[1].clone()], "دنیا");
+    }
+
+    #[test]
+    fn boundaries_of_even_words() {
+        assert_eq!(next_boundary("aaa bbb ccc", 0.0, 12.0), Some(4.0));
+        assert_eq!(next_boundary("aaa bbb ccc", 2.0, 12.0), Some(4.0));
+        assert_eq!(next_boundary("aaa bbb ccc", 5.0, 12.0), Some(8.0));
+    }
+
+    #[test]
+    fn no_boundary_on_last_word() {
+        assert_eq!(next_boundary("aaa bbb ccc", 11.0, 12.0), None);
+        assert_eq!(next_boundary("aaa bbb ccc", 12.0, 12.0), None);
+        assert_eq!(next_boundary("solo", 1.0, 10.0), None);
+    }
+
+    #[test]
+    fn boundary_invalid_cases_are_none() {
+        assert_eq!(next_boundary("", 1.0, 10.0), None);
+        assert_eq!(next_boundary("   ", 1.0, 10.0), None);
+        assert_eq!(next_boundary("aaa bbb ccc", 1.0, 0.0), None);
+        assert_eq!(next_boundary("aaa bbb ccc", -1.0, 10.0), None);
+        assert_eq!(next_boundary("aaa bbb ccc", f64::NAN, 10.0), None);
+        assert_eq!(next_boundary("aaa bbb ccc", 1.0, f64::NAN), None);
+        assert_eq!(next_boundary("aaa bbb ccc", 12.5, 12.0), None);
     }
 }

@@ -7,7 +7,7 @@
 use std::time::{Duration, Instant};
 
 use crate::player::{PlayerEvent, PlayerState};
-use crate::word_timing::word_index;
+use crate::word_timing::{next_boundary, word_index, word_ranges};
 
 /// Reading panel state; see the module docs.
 pub struct ReaderModel {
@@ -116,15 +116,41 @@ impl ReaderModel {
         }
     }
 
-    /// Estimated word index within the current chunk.
+    /// Estimated word index within the current chunk. The chunk duration
+    /// excludes the trailing pause silence, so `elapsed` runs past `duration`
+    /// during that silence: the highlight stays on the last word instead of
+    /// blinking off.
     #[must_use]
     pub fn current_word(&self, now: Instant) -> Option<usize> {
         let text = self.chunks.get(self.current?)?;
-        word_index(
-            text,
-            self.elapsed(now).as_secs_f64(),
-            self.duration.as_secs_f64(),
-        )
+        let elapsed = self.elapsed(now).as_secs_f64();
+        let duration = self.duration.as_secs_f64();
+        match word_index(text, elapsed, duration) {
+            Some(index) => Some(index),
+            None => {
+                if elapsed > duration {
+                    let words = word_ranges(text).len();
+                    if words > 0 { Some(words - 1) } else { None }
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    /// When the highlighted word next changes, so the panel can wake then
+    /// instead of polling. `None` unless [`Self::needs_animation`] (or the
+    /// highlight is already on the last word).
+    #[must_use]
+    pub fn next_redraw(&self, now: Instant) -> Option<Instant> {
+        if !self.needs_animation() {
+            return None;
+        }
+        let text = self.chunks.get(self.current?)?;
+        let elapsed = self.elapsed(now).as_secs_f64();
+        let duration = self.duration.as_secs_f64();
+        let boundary = next_boundary(text, elapsed, duration)?;
+        Some(now + Duration::from_secs_f64((boundary - elapsed).max(0.0)))
     }
 
     /// `(current + 1) / count`, or 0 when there is no current chunk.
@@ -451,6 +477,70 @@ mod tests {
         );
         assert_eq!(model.current_word(start + Duration::from_secs(2)), Some(0));
         assert_eq!(model.current_word(start + Duration::from_secs(5)), Some(1));
+    }
+
+    #[test]
+    fn current_word_stays_on_last_word_past_duration() {
+        let start = Instant::now();
+        let mut model = ReaderModel::new();
+        model.apply(&playlist(&["aaa bbb ccc"]), start);
+        model.apply(&PlayerEvent::State(PlayerState::Playing), start);
+        model.apply(
+            &PlayerEvent::Chunk {
+                index: 0,
+                count: 1,
+                text: "aaa bbb ccc".to_string(),
+                duration: Duration::from_secs(12),
+            },
+            start,
+        );
+        // During the pause silence (elapsed > duration) the highlight stays.
+        assert_eq!(model.current_word(start + Duration::from_secs(13)), Some(2));
+        assert_eq!(model.current_word(start + Duration::from_secs(60)), Some(2));
+        // Still None with no current chunk.
+        model.apply(&PlayerEvent::Finished, start + Duration::from_secs(61));
+        assert_eq!(model.current_word(start + Duration::from_secs(62)), None);
+    }
+
+    #[test]
+    fn next_redraw_wakes_at_word_boundaries() {
+        let start = Instant::now();
+        let mut model = ReaderModel::new();
+        model.apply(&playlist(&["aaa bbb ccc"]), start);
+        model.apply(&PlayerEvent::State(PlayerState::Playing), start);
+        model.apply(
+            &PlayerEvent::Chunk {
+                index: 0,
+                count: 1,
+                text: "aaa bbb ccc".to_string(),
+                duration: Duration::from_secs(12),
+            },
+            start,
+        );
+        assert_eq!(
+            model.next_redraw(start),
+            Some(start + Duration::from_secs(4))
+        );
+        assert_eq!(
+            model.next_redraw(start + Duration::from_secs(5)),
+            Some(start + Duration::from_secs(8))
+        );
+        // On the last word there is no next change.
+        assert_eq!(model.next_redraw(start + Duration::from_secs(11)), None);
+    }
+
+    #[test]
+    fn next_redraw_is_none_unless_animating() {
+        let start = Instant::now();
+        let idle = ReaderModel::new();
+        assert_eq!(idle.next_redraw(start), None);
+        let mut model = playing_model(start);
+        model.apply(
+            &PlayerEvent::State(PlayerState::Paused),
+            start + Duration::from_secs(1),
+        );
+        assert_eq!(model.next_redraw(start + Duration::from_secs(1)), None);
+        assert_eq!(model.next_redraw(start + Duration::from_secs(9)), None);
     }
 
     #[test]

@@ -21,9 +21,11 @@ ureq = "=2.12.1"
 bzip2 = "=0.5.2"
 tar = "=0.4.46"
 pulldown-cmark = { version = "=0.13.4", default-features = false }
-winit = { version = "0.30", default-features = false }
+winit = { version = "0.30", default-features = false, features = ["rwh_06"] }
 tray-icon = { version = "=0.26.1", default-features = false }
 global-hotkey = "=0.8.0"
+cosmic-text = "=0.19.0"
+softbuffer = { version = "=0.4.8", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "=0.6.5"
@@ -37,8 +39,9 @@ windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Syst
 x11rb = { version = "=0.14.0", features = ["xfixes"] }
 ashpd = { version = "=0.13.13", default-features = false, features = ["async-io", "global_shortcuts"] }
 async-io = "=2.6.0"
-winit = { version = "0.30", default-features = false, features = ["x11", "wayland", "wayland-dlopen"] }
+winit = { version = "0.30", default-features = false, features = ["x11", "wayland", "wayland-dlopen", "wayland-csd-adwaita-notitle"] }
 tray-icon = { version = "=0.26.1", default-features = false, features = ["ksni"] }
+softbuffer = { version = "=0.4.8", default-features = false, features = ["x11", "x11-dlopen", "wayland", "wayland-dlopen"] }
 
 [profile.release]
 opt-level = 3
