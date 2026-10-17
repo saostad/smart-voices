@@ -82,6 +82,44 @@ fn wheel_px(delta: &MouseScrollDelta, scale: f32) -> f32 {
     }
 }
 
+/// Tag the panel window as device RGB so CoreAnimation skips a per-frame P3
+/// conversion of softbuffer's DeviceRGB frames. Best-effort: any failure only
+/// warns, the panel still works.
+#[cfg(target_os = "macos")]
+fn set_device_rgb_color_space(window: &Window) {
+    use objc2::rc::Retained;
+    use objc2_app_kit::{NSColorSpace, NSView};
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    let ns_view_ptr = match window.window_handle() {
+        Ok(handle) => match handle.as_raw() {
+            RawWindowHandle::AppKit(appkit) => appkit.ns_view.as_ptr() as *mut NSView,
+            _ => {
+                eprintln!(
+                    "Warning: Couldn't set the reading panel's color space: no AppKit handle"
+                );
+                return;
+            }
+        },
+        Err(err) => {
+            eprintln!("Warning: Couldn't set the reading panel's color space: {err}");
+            return;
+        }
+    };
+    // SAFETY: the pointer comes from winit's live AppKit window handle on the
+    // main thread and stays valid while the window lives; `retain` keeps it
+    // alive for this scope.
+    let Some(view) = (unsafe { Retained::retain(ns_view_ptr) }) else {
+        eprintln!("Warning: Couldn't set the reading panel's color space: null view");
+        return;
+    };
+    let Some(ns_window) = view.window() else {
+        eprintln!("Warning: Couldn't set the reading panel's color space: view has no window");
+        return;
+    };
+    ns_window.setColorSpace(Some(&NSColorSpace::deviceRGBColorSpace()));
+}
+
 /// The on-screen reading panel: window, softbuffer surface, painter, theme.
 pub struct ReaderWindow {
     window: Rc<Window>,
@@ -143,6 +181,8 @@ impl ReaderWindow {
                 .create_window(attrs)
                 .map_err(|err| format!("Couldn't open the reading panel: {err}"))?,
         );
+        #[cfg(target_os = "macos")]
+        set_device_rgb_color_space(&window);
         let context = Context::new(Rc::clone(&window))
             .map_err(|err| format!("Couldn't open the reading panel: {err}"))?;
         let surface = Surface::new(&context, Rc::clone(&window))
