@@ -1,3 +1,4 @@
-//! Reading panel state (pure logic; rendering comes later).
+//! Reading panel state and offscreen painter.
 
 pub mod model;
+pub mod render;
