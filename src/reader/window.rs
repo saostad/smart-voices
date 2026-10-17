@@ -359,7 +359,7 @@ impl ReaderWindow {
             .window_handle()
             .ok()
             .and_then(|handle| match handle.as_raw() {
-                RawWindowHandle::Win32(win32) => Some(win32.hwnd.get() as isize),
+                RawWindowHandle::Win32(win32) => Some(win32.hwnd.get()),
                 _ => None,
             });
         if Some(foreground as isize) != own {
