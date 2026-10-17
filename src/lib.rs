@@ -12,6 +12,7 @@ pub mod models;
 pub mod pipeline;
 pub mod player;
 pub mod pronounce;
+pub mod reader;
 pub mod sanitize;
 pub mod settings;
 pub mod shortcuts;
