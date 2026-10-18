@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use smart_voices::app;
 use smart_voices::audio::AudioSink;
 use smart_voices::clipboard::{self, ClipboardEvent, MIN_TEXT_LEN};
-use smart_voices::engine::{KokoroEngine, ModelVariant, PersianVoice, PiperEngine};
+use smart_voices::engine::{KokoroEngine, ModelVariant, PersianVoice};
 use smart_voices::models::{self, ModelError, ModelId};
 use smart_voices::pipeline::prepare;
 use smart_voices::player::{Player, PlayerConfig, PlayerEvent, Synth};
@@ -237,10 +237,7 @@ fn speak(args: &[String]) -> i32 {
         }
     };
     let persian_factory = move || -> Result<Box<dyn Synth>, String> {
-        match PiperEngine::load(&persian_root, persian_voice) {
-            Ok(engine) => Ok(Box::new(engine) as Box<dyn Synth>),
-            Err(err) => Err(err.to_string()),
-        }
+        smart_voices::player::load_persian_engine(&persian_root, persian_voice)
     };
     let (player, events) =
         Player::spawn(config, Box::new(factory), Box::new(persian_factory), sink);
@@ -300,7 +297,7 @@ fn parse_download(args: &[String]) -> Option<DownloadOptions> {
     // `--persian-voice <id>` alone implies the Persian download; `--persian`
     // alone means the default voice. A bare `download` keeps fetching Fast.
     if want_persian && persian.is_none() {
-        persian = Some(PersianVoice::Amir);
+        persian = Some(PersianVoice::Pocket);
     }
     if kokoro.is_none() && persian.is_none() {
         kokoro = Some(ModelVariant::Fast);
@@ -659,10 +656,7 @@ impl LazyPlayer {
             }
         };
         let persian_factory = move || -> Result<Box<dyn Synth>, String> {
-            match PiperEngine::load(&persian_root, persian_voice) {
-                Ok(engine) => Ok(Box::new(engine) as Box<dyn Synth>),
-                Err(err) => Err(err.to_string()),
-            }
+            smart_voices::player::load_persian_engine(&persian_root, persian_voice)
         };
         let (player, player_events) =
             Player::spawn(config, Box::new(factory), Box::new(persian_factory), sink);

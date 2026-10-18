@@ -80,12 +80,15 @@ impl ModelVariant {
     }
 }
 
-/// Persian Piper (VITS) voices, one downloadable model each.
+/// Persian voices: Pocket (best quality, default) plus the Piper voices.
+/// Pocket is one shared model; each Piper voice is its own model.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PersianVoice {
-    /// `amir` (default).
+    /// Pocket TTS Farsi (default, best quality).
     #[default]
+    Pocket,
+    /// `amir`.
     Amir,
     /// `gyro`.
     Gyro,
@@ -97,8 +100,9 @@ pub enum PersianVoice {
     GanjiAdabi,
 }
 
-/// All Persian voices, in menu order.
-pub const PERSIAN_VOICES: [PersianVoice; 5] = [
+/// All Persian voices, in menu order (Pocket first: it is the default).
+pub const PERSIAN_VOICES: [PersianVoice; 6] = [
+    PersianVoice::Pocket,
     PersianVoice::Amir,
     PersianVoice::Gyro,
     PersianVoice::RezaIbrahim,
@@ -107,10 +111,11 @@ pub const PERSIAN_VOICES: [PersianVoice; 5] = [
 ];
 
 impl PersianVoice {
-    /// Parse a CLI value or settings id (`"amir"`, `"gyro"`, `"reza_ibrahim"`,
-    /// `"ganji"`, `"ganji_adabi"`).
+    /// Parse a CLI value or settings id (`"pocket"`, `"amir"`, `"gyro"`,
+    /// `"reza_ibrahim"`, `"ganji"`, `"ganji_adabi"`).
     pub fn parse(s: &str) -> Option<Self> {
         match s {
+            "pocket" => Some(Self::Pocket),
             "amir" => Some(Self::Amir),
             "gyro" => Some(Self::Gyro),
             "reza_ibrahim" => Some(Self::RezaIbrahim),
@@ -123,6 +128,7 @@ impl PersianVoice {
     /// Short id used in settings, the CLI, and file names.
     pub fn id(self) -> &'static str {
         match self {
+            Self::Pocket => "pocket",
             Self::Amir => "amir",
             Self::Gyro => "gyro",
             Self::RezaIbrahim => "reza_ibrahim",
@@ -131,20 +137,23 @@ impl PersianVoice {
         }
     }
 
-    /// Human-readable label for the Settings menu.
+    /// Human-readable label for the Settings menu. Pocket says what it does
+    /// for a beginner; the Piper names are just names.
     pub fn label(self) -> &'static str {
         match self {
-            Self::Amir => "Amir",
-            Self::Gyro => "Gyro",
-            Self::RezaIbrahim => "Reza Ibrahim",
-            Self::Ganji => "Ganji",
-            Self::GanjiAdabi => "Ganji Adabi",
+            Self::Pocket => "Pocket (best quality — recommended)",
+            Self::Amir => "Amir (Piper — smaller, faster)",
+            Self::Gyro => "Gyro (Piper — smaller, faster)",
+            Self::RezaIbrahim => "Reza Ibrahim (Piper — smaller, faster)",
+            Self::Ganji => "Ganji (Piper — smaller, faster)",
+            Self::GanjiAdabi => "Ganji Adabi (Piper — smaller, faster)",
         }
     }
 
     /// Directory name under the models root.
     pub fn dir_name(self) -> &'static str {
         match self {
+            Self::Pocket => "pocket-farsi-v1",
             Self::Amir => "vits-piper-fa_IR-amir-medium",
             Self::Gyro => "vits-piper-fa_IR-gyro-medium",
             Self::RezaIbrahim => "vits-piper-fa_IR-reza_ibrahim-medium",
@@ -156,6 +165,7 @@ impl PersianVoice {
     /// ONNX model file name inside the model dir.
     pub fn model_file(self) -> &'static str {
         match self {
+            Self::Pocket => "pocket-farsi-v1.onnx",
             Self::Amir => "fa_IR-amir-medium.onnx",
             Self::Gyro => "fa_IR-gyro-medium.onnx",
             Self::RezaIbrahim => "fa_IR-reza_ibrahim-medium.onnx",
@@ -164,9 +174,13 @@ impl PersianVoice {
         }
     }
 
-    /// Download URL of the `.tar.bz2` archive.
+    /// Download URL. Pocket is a single `.onnx` file on Hugging Face; the
+    /// Piper voices are `.tar.bz2` archives (see `models::download`).
     pub fn url(self) -> &'static str {
         match self {
+            Self::Pocket => {
+                "https://huggingface.co/saostad/pocket-tts-farsi/resolve/main/pocket-farsi-v1.onnx"
+            }
             Self::Amir => {
                 "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-fa_IR-amir-medium.tar.bz2"
             }
@@ -185,9 +199,19 @@ impl PersianVoice {
         }
     }
 
-    /// Files and dirs that must exist inside the model dir (model file first).
-    pub fn required_files(self) -> [&'static str; 3] {
-        [self.model_file(), "tokens.txt", "espeak-ng-data"]
+    /// Files and dirs that must exist inside the model dir (model file
+    /// first). Pocket is a single self-contained file; Piper needs its
+    /// tokens and espeak data too.
+    pub fn required_files(self) -> Vec<&'static str> {
+        match self {
+            Self::Pocket => vec![self.model_file()],
+            _ => vec![self.model_file(), "tokens.txt", "espeak-ng-data"],
+        }
+    }
+
+    /// True for the Piper voices (Pocket is handled by its own engine).
+    pub fn is_piper(self) -> bool {
+        !matches!(self, Self::Pocket)
     }
 }
 
@@ -267,6 +291,13 @@ pub enum EngineError {
     LoadFailed(PathBuf),
     /// The Persian model files exist but sherpa-onnx refused to load them.
     PersianLoadFailed(PathBuf),
+    /// The Pocket model file exists but ONNX Runtime refused it (the real
+    /// runtime error is kept).
+    PocketLoadFailed(PathBuf, String),
+    /// The ONNX Runtime library itself couldn't be loaded (real error kept).
+    PocketRuntime(String),
+    /// The Pocket model ran but its data or outputs were malformed.
+    PocketData(String),
     /// The requested voice name is not in [`VOICES`].
     UnknownVoice(String),
     /// Synthesis returned no audio samples.
@@ -291,6 +322,18 @@ impl fmt::Display for EngineError {
                 "Couldn't load the Persian voice model from {}. The files may be damaged; delete the folder and run `smart-voices download --persian` again.",
                 dir.display()
             ),
+            EngineError::PocketLoadFailed(dir, message) => write!(
+                f,
+                "Couldn't load the Pocket Persian voice from {}: {message}. The file may be damaged; delete the folder and run `smart-voices download --persian` again.",
+                dir.display()
+            ),
+            EngineError::PocketRuntime(message) => write!(
+                f,
+                "Couldn't load the ONNX Runtime library for the Pocket voice: {message}"
+            ),
+            EngineError::PocketData(message) => {
+                write!(f, "The Pocket voice model gave bad data: {message}")
+            }
             EngineError::UnknownVoice(name) => {
                 write!(
                     f,
@@ -601,37 +644,44 @@ mod tests {
     fn persian_voice_ids_labels_and_paths() {
         let expected = [
             (
+                PersianVoice::Pocket,
+                "pocket",
+                "Pocket (best quality — recommended)",
+                "pocket-farsi-v1",
+                "pocket-farsi-v1.onnx",
+            ),
+            (
                 PersianVoice::Amir,
                 "amir",
-                "Amir",
+                "Amir (Piper — smaller, faster)",
                 "vits-piper-fa_IR-amir-medium",
                 "fa_IR-amir-medium.onnx",
             ),
             (
                 PersianVoice::Gyro,
                 "gyro",
-                "Gyro",
+                "Gyro (Piper — smaller, faster)",
                 "vits-piper-fa_IR-gyro-medium",
                 "fa_IR-gyro-medium.onnx",
             ),
             (
                 PersianVoice::RezaIbrahim,
                 "reza_ibrahim",
-                "Reza Ibrahim",
+                "Reza Ibrahim (Piper — smaller, faster)",
                 "vits-piper-fa_IR-reza_ibrahim-medium",
                 "fa_IR-reza_ibrahim-medium.onnx",
             ),
             (
                 PersianVoice::Ganji,
                 "ganji",
-                "Ganji",
+                "Ganji (Piper — smaller, faster)",
                 "vits-piper-fa_IR-ganji-medium",
                 "fa_IR-ganji-medium.onnx",
             ),
             (
                 PersianVoice::GanjiAdabi,
                 "ganji_adabi",
-                "Ganji Adabi",
+                "Ganji Adabi (Piper — smaller, faster)",
                 "vits-piper-fa_IR-ganji_adabi-medium",
                 "fa_IR-ganji_adabi-medium.onnx",
             ),
@@ -644,28 +694,37 @@ mod tests {
             assert_eq!(voice.label(), label);
             assert_eq!(voice.dir_name(), dir);
             assert_eq!(voice.model_file(), file);
-            assert_eq!(
-                voice.required_files(),
-                [file, "tokens.txt", "espeak-ng-data"]
-            );
-            assert_eq!(
-                voice.url(),
-                format!(
-                    "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/{dir}.tar.bz2"
-                )
-            );
+            if voice == PersianVoice::Pocket {
+                assert_eq!(voice.required_files(), [file]);
+                assert_eq!(
+                    voice.url(),
+                    "https://huggingface.co/saostad/pocket-tts-farsi/resolve/main/pocket-farsi-v1.onnx"
+                );
+            } else {
+                assert_eq!(
+                    voice.required_files(),
+                    [file, "tokens.txt", "espeak-ng-data"]
+                );
+                assert_eq!(
+                    voice.url(),
+                    format!(
+                        "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/{dir}.tar.bz2"
+                    )
+                );
+            }
         }
         assert_eq!(PersianVoice::parse("sara"), None);
         assert_eq!(PersianVoice::parse(""), None);
-        assert_eq!(PersianVoice::default(), PersianVoice::Amir);
+        assert_eq!(PersianVoice::default(), PersianVoice::Pocket);
+        assert_eq!(PERSIAN_VOICES[0], PersianVoice::Pocket);
     }
 
     #[test]
     fn each_persian_voice_missing_model_names_its_onnx_path() {
-        for voice in PERSIAN_VOICES {
+        for voice in PERSIAN_VOICES.iter().filter(|v| v.is_piper()) {
             let dir = unique_temp_dir();
             std::fs::create_dir_all(&dir).unwrap();
-            let result = PiperEngine::load(&dir, voice);
+            let result = PiperEngine::load(&dir, *voice);
             std::fs::remove_dir_all(&dir).unwrap();
             match result {
                 Err(EngineError::MissingModel(path)) => {

@@ -28,8 +28,7 @@ use crate::audio::AudioSink;
 use crate::autostart;
 use crate::clipboard::{self, ClipboardEvent, MIN_TEXT_LEN};
 use crate::engine::{
-    KokoroEngine, ModelVariant, PERSIAN_VOICES, PersianVoice, PiperEngine, VOICES,
-    voice_display_name,
+    KokoroEngine, ModelVariant, PERSIAN_VOICES, PersianVoice, VOICES, voice_display_name,
 };
 use crate::icon;
 use crate::models::{self, ModelId};
@@ -886,10 +885,7 @@ impl App {
             }
         };
         let persian_factory = move || -> Result<Box<dyn Synth>, String> {
-            match PiperEngine::load(&persian_root, persian_voice) {
-                Ok(engine) => Ok(Box::new(engine) as Box<dyn Synth>),
-                Err(err) => Err(err.to_string()),
-            }
+            crate::player::load_persian_engine(&persian_root, persian_voice)
         };
         let (player, events) =
             Player::spawn(config, Box::new(factory), Box::new(persian_factory), sink);
