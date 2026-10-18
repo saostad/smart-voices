@@ -1,2 +1,9 @@
 /target/
 .DS_Store
+
+# Pocket export artifacts (large model + tooling venv)
+/tools/pocket-export/out/
+/tools/pocket-export/.venv/
+/tools/pocket-export/voice/
+
+/tools/pocket-export/tmp/
