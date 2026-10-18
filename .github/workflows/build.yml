@@ -49,8 +49,8 @@ jobs:
           scripts/package-deb.sh
           mkdir -p dist tarball
           cp target/smart-voices-linux-amd64.deb dist/
-          cp target/release/smart-voices packaging/linux/smart-voices.desktop packaging/linux/README-linux.txt tarball/
-          tar -czf dist/smart-voices-linux-x86_64.tar.gz -C tarball smart-voices smart-voices.desktop README-linux.txt
+          cp target/release/smart-voices target/release/*.so packaging/linux/smart-voices.desktop packaging/linux/README-linux.txt tarball/
+          tar -czf dist/smart-voices-linux-x86_64.tar.gz -C tarball .
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
