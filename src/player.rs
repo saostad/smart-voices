@@ -18,6 +18,7 @@ use crate::chunk::SpeechChunk;
 use crate::engine::{EngineError, KokoroEngine, PersianVoice, PiperEngine};
 use crate::lang::{Lang, chunk_language};
 use crate::pipeline::prepare;
+use crate::pocket::PocketEngine;
 use crate::pronounce::Pronunciations;
 use crate::sanitize::SanitizerOptions;
 
@@ -71,6 +72,41 @@ impl Synth for KokoroEngine {
             samples,
             sample_rate: checked_rate(KokoroEngine::sample_rate(self))?,
         })
+    }
+}
+
+impl Synth for PocketEngine {
+    fn synthesize(
+        &mut self,
+        text: &str,
+        _voice: &str,
+        speed: f32,
+    ) -> Result<SynthesizedAudio, String> {
+        // Pocket has one baked voice; the voice string is ignored.
+        let samples = PocketEngine::synthesize(self, text, speed).map_err(|err| err.to_string())?;
+        Ok(SynthesizedAudio {
+            samples,
+            sample_rate: checked_rate(PocketEngine::sample_rate(self))?,
+        })
+    }
+}
+
+/// Load the Persian engine for `voice`: Pocket for the Pocket voice, Piper
+/// for the rest. A Pocket failure is returned verbatim — never a Piper
+/// fallback.
+pub fn load_persian_engine(
+    models_root: &std::path::Path,
+    voice: PersianVoice,
+) -> Result<Box<dyn Synth>, String> {
+    match voice {
+        PersianVoice::Pocket => match PocketEngine::load(models_root) {
+            Ok(engine) => Ok(Box::new(engine) as Box<dyn Synth>),
+            Err(err) => Err(err.to_string()),
+        },
+        _ => match PiperEngine::load(models_root, voice) {
+            Ok(engine) => Ok(Box::new(engine) as Box<dyn Synth>),
+            Err(err) => Err(err.to_string()),
+        },
     }
 }
 

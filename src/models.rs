@@ -41,6 +41,7 @@ impl ModelId {
     pub fn label(self) -> &'static str {
         match self {
             Self::Kokoro(variant) => variant.label(),
+            Self::Persian(PersianVoice::Pocket) => "Persian voice (Pocket, best quality)",
             Self::Persian(PersianVoice::Amir) => "Persian voice (Amir)",
             Self::Persian(PersianVoice::Gyro) => "Persian voice (Gyro)",
             Self::Persian(PersianVoice::RezaIbrahim) => "Persian voice (Reza Ibrahim)",
@@ -53,8 +54,14 @@ impl ModelId {
     pub fn required_files(self) -> Vec<&'static str> {
         match self {
             Self::Kokoro(variant) => variant.required_files().to_vec(),
-            Self::Persian(voice) => voice.required_files().to_vec(),
+            Self::Persian(voice) => voice.required_files(),
         }
+    }
+
+    /// True for the Pocket model, which downloads as a single `.onnx` file
+    /// rather than a `.tar.bz2` archive.
+    pub fn is_pocket(self) -> bool {
+        matches!(self, Self::Persian(PersianVoice::Pocket))
     }
 }
 
@@ -171,6 +178,9 @@ pub fn download(
     model: ModelId,
     mut progress: impl FnMut(u64, Option<u64>),
 ) -> Result<PathBuf, ModelError> {
+    if model.is_pocket() {
+        return download_single_file(root, model, progress);
+    }
     let final_dir = model_dir(root, model);
     let partial = prepare_partial_dir(root, model)?;
     let cleanup = |partial: &Path| {
@@ -252,6 +262,86 @@ pub fn download(
     // Drops the staging remainder (the emptied partial dir when the tarball
     // had a top-level dir; a no-op otherwise).
     cleanup(&partial);
+    Ok(final_dir)
+}
+
+/// Download the Pocket model: one `.onnx` file streamed straight into the
+/// staging dir (no archive to unpack), verified non-empty, then renamed
+/// into place like the archive path.
+fn download_single_file(
+    root: &Path,
+    model: ModelId,
+    mut progress: impl FnMut(u64, Option<u64>),
+) -> Result<PathBuf, ModelError> {
+    use std::io::Write as _;
+
+    let final_dir = model_dir(root, model);
+    let partial = prepare_partial_dir(root, model)?;
+    let cleanup = |partial: &Path| {
+        let _ = std::fs::remove_dir_all(partial);
+    };
+    let url = model.url();
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(15))
+        .timeout_read(Duration::from_secs(30))
+        .try_proxy_from_env(true)
+        .build();
+    let response = agent.get(url).call().map_err(|err| {
+        cleanup(&partial);
+        ModelError::Download {
+            url: url.to_string(),
+            message: err.to_string(),
+        }
+    })?;
+    let total: Option<u64> = response
+        .header("Content-Length")
+        .and_then(|value| value.parse().ok());
+    progress(0, total);
+
+    let file_name = model.required_files()[0];
+    let staging_file = partial.join(file_name);
+    let write_result = (|| -> std::io::Result<u64> {
+        let mut reader = ProgressReader::new(response.into_reader(), total, &mut progress);
+        let mut file = std::fs::File::create(&staging_file)?;
+        let done = std::io::copy(&mut reader, &mut file)?;
+        file.flush()?;
+        Ok(done)
+    })();
+    let done = match write_result {
+        Ok(done) => done,
+        Err(err) => {
+            cleanup(&partial);
+            return Err(ModelError::Unpack {
+                dir: partial.clone(),
+                message: err.to_string(),
+            });
+        }
+    };
+    progress(done, total);
+    if done == 0 {
+        cleanup(&partial);
+        return Err(ModelError::Incomplete {
+            path: final_dir.join(file_name),
+        });
+    }
+    match std::fs::remove_dir_all(&final_dir) {
+        Ok(()) => {}
+        Err(err) if err.kind() == ErrorKind::NotFound => {}
+        Err(err) => {
+            cleanup(&partial);
+            return Err(ModelError::Move {
+                dir: final_dir.clone(),
+                message: err.to_string(),
+            });
+        }
+    }
+    if let Err(err) = std::fs::rename(&partial, &final_dir) {
+        cleanup(&partial);
+        return Err(ModelError::Move {
+            dir: final_dir.clone(),
+            message: err.to_string(),
+        });
+    }
     Ok(final_dir)
 }
 
