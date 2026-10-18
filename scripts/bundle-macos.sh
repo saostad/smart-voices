@@ -12,6 +12,8 @@ cargo build --release --manifest-path "$ROOT_DIR/Cargo.toml"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$ROOT_DIR/target/release/smart-voices" "$APP/Contents/MacOS/smart-voices"
+# The voice runtime ships as dylibs next to the binary (@loader_path).
+cp "$ROOT_DIR"/target/release/*.dylib "$APP/Contents/MacOS/"
 cp "$ROOT_DIR/packaging/macos/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 cat > "$APP/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
