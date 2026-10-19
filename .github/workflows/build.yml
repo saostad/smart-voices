@@ -25,6 +25,12 @@ jobs:
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
+        with:
+          # sherpa-onnx links shared: its build script downloads the runtime
+          # libs into target/sherpa-onnx-prebuilt, which this cache's target
+          # cleanup drops while keeping the build-script "done" marker, so a
+          # cached build cannot link. Cache only the registry/git sources.
+          cache-targets: false
 
       - name: Install Linux audio dependencies
         if: runner.os == 'Linux'
