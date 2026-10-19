@@ -47,13 +47,16 @@ fn trim_silence(
     keep_start_ms: u64,
     keep_end_ms: u64,
 ) -> Vec<f32> {
-    let keep_start =
-        (keep_start_ms as f64 / 1000.0 * f64::from(sample_rate)).round() as usize;
+    let keep_start = (keep_start_ms as f64 / 1000.0 * f64::from(sample_rate)).round() as usize;
     let keep_end = (keep_end_ms as f64 / 1000.0 * f64::from(sample_rate)).round() as usize;
     let first = samples.iter().position(|s| s.abs() > TRIM_THRESHOLD);
     let last = samples.iter().rposition(|s| s.abs() > TRIM_THRESHOLD);
     let (Some(first), Some(last)) = (first, last) else {
-        return samples.iter().take(keep_start + keep_end).copied().collect();
+        return samples
+            .iter()
+            .take(keep_start + keep_end)
+            .copied()
+            .collect();
     };
     let start = first.saturating_sub(keep_start);
     let end = (last + 1 + keep_end).min(samples.len());

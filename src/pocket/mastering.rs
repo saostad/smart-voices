@@ -372,7 +372,10 @@ mod tests {
             }
             offset += 8 + size + (size % 2);
         }
-        (samples.expect("WAV has no data chunk"), rate.expect("WAV has no fmt chunk"))
+        (
+            samples.expect("WAV has no data chunk"),
+            rate.expect("WAV has no fmt chunk"),
+        )
     }
 
     #[test]

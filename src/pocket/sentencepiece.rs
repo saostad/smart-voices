@@ -238,8 +238,7 @@ impl SentencePiece {
             normalized.push(if c == ' ' || c == ZWNJ { SPACE } else { c });
         }
         // One symbol per code point so a merge never splits a surrogate pair.
-        let mut symbols: Vec<String> =
-            normalized.chars().map(|c| c.to_string()).collect();
+        let mut symbols: Vec<String> = normalized.chars().map(|c| c.to_string()).collect();
         // Greedy BPE: each round merges the adjacent pair whose concatenation
         // is a NORMAL or USER_DEFINED piece with the highest score (ties:
         // leftmost).

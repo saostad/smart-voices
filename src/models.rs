@@ -60,7 +60,6 @@ impl ModelId {
             Self::Persian(voice) => voice.required_files(),
         }
     }
-
 }
 
 /// Errors from downloading or installing a voice model.

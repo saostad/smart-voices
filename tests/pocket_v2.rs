@@ -59,7 +59,11 @@ fn golden_rows_match_normalizer_cleaner_translator_and_g2p() {
         );
         let sentences = split_sentences(&normalized);
         let expected = row["sentences"].as_array().unwrap();
-        assert_eq!(sentences.len(), expected.len(), "row {index} sentence count");
+        assert_eq!(
+            sentences.len(),
+            expected.len(),
+            "row {index} sentence count"
+        );
         for (sentence, gold) in sentences.iter().zip(expected) {
             let clean = clean_sentence_for_g2p(sentence);
             assert_eq!(

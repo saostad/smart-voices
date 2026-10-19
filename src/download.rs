@@ -233,7 +233,11 @@ where
         state.failures,
         RESUME_DELAYS.len()
     ));
-    if cancel_aware_sleep(RESUME_DELAYS[state.failures - 1], &hooks.cancelled, &hooks.sleep) {
+    if cancel_aware_sleep(
+        RESUME_DELAYS[state.failures - 1],
+        &hooks.cancelled,
+        &hooks.sleep,
+    ) {
         return Err(DownloadError::Fetch {
             url: url.to_string(),
             message: "Voice download cancelled".to_string(),
@@ -605,19 +609,17 @@ mod tests {
     /// Total slept across ≤ 250 ms back-off slices.
     fn total_slept(sleeps: &[Duration]) -> Duration {
         assert!(
-            sleeps.iter().all(|delay| *delay <= Duration::from_millis(250)),
+            sleeps
+                .iter()
+                .all(|delay| *delay <= Duration::from_millis(250)),
             "back-off sleeps in slices: {sleeps:?}"
         );
         sleeps.iter().sum()
     }
 
-
     #[test]
     fn parses_content_range_start() {
-        assert_eq!(
-            parse_content_range_start(Some("bytes 6-10/11")),
-            Some(6)
-        );
+        assert_eq!(parse_content_range_start(Some("bytes 6-10/11")), Some(6));
         // Kotlin's `removePrefix` keeps a bare range as-is.
         assert_eq!(parse_content_range_start(Some("6-10/11")), Some(6));
         assert_eq!(parse_content_range_start(None), None);
@@ -640,10 +642,10 @@ mod tests {
         let info = std::cell::RefCell::new(Vec::new());
         let sleeps = std::cell::RefCell::new(Vec::new());
         let mut hooks = FetchHooks {
-                progress: |_: u64, _: Option<u64>| {},
-                cancelled: || false,
-                sleep: |delay| sleeps.borrow_mut().push(delay),
-                on_info: |message: &str| info.borrow_mut().push(message.to_string()),
+            progress: |_: u64, _: Option<u64>| {},
+            cancelled: || false,
+            sleep: |delay| sleeps.borrow_mut().push(delay),
+            on_info: |message: &str| info.borrow_mut().push(message.to_string()),
         };
 
         let (done, hasher) =
@@ -675,10 +677,10 @@ mod tests {
             Ok(ScriptedResponse::ok(SegReader::bytes(b"hello world"))),
         ]);
         let mut hooks = FetchHooks {
-                progress: |_: u64, _: Option<u64>| {},
-                cancelled: || false,
-                sleep: |_| {},
-                on_info: |_: &str| {},
+            progress: |_: u64, _: Option<u64>| {},
+            cancelled: || false,
+            sleep: |_| {},
+            on_info: |_: &str| {},
         };
 
         let (done, hasher) =
@@ -708,10 +710,10 @@ mod tests {
         ]);
         let sleeps = std::cell::RefCell::new(Vec::new());
         let mut hooks = FetchHooks {
-                progress: |_: u64, _: Option<u64>| {},
-                cancelled: || false,
-                sleep: |delay| sleeps.borrow_mut().push(delay),
-                on_info: |_: &str| {},
+            progress: |_: u64, _: Option<u64>| {},
+            cancelled: || false,
+            sleep: |delay| sleeps.borrow_mut().push(delay),
+            on_info: |_: &str| {},
         };
 
         let (done, hasher) =
@@ -731,19 +733,18 @@ mod tests {
         let dir = unique_temp_dir();
         std::fs::create_dir_all(&dir).unwrap();
         let target = dir.join("voice.onnx");
-        let mut scripted: Vec<Result<ScriptedResponse, String>> = vec![Ok(
-            ScriptedResponse::ok(SegReader::fail("boom")),
-        )];
+        let mut scripted: Vec<Result<ScriptedResponse, String>> =
+            vec![Ok(ScriptedResponse::ok(SegReader::fail("boom")))];
         for _ in 0..5 {
             scripted.push(Ok(ScriptedResponse::ok(SegReader::fail("boom"))));
         }
         let script = ScriptOpener::new(scripted);
         let sleeps = std::cell::RefCell::new(Vec::new());
         let mut hooks = FetchHooks {
-                progress: |_: u64, _: Option<u64>| {},
-                cancelled: || false,
-                sleep: |delay| sleeps.borrow_mut().push(delay),
-                on_info: |_: &str| {},
+            progress: |_: u64, _: Option<u64>| {},
+            cancelled: || false,
+            sleep: |delay| sleeps.borrow_mut().push(delay),
+            on_info: |_: &str| {},
         };
 
         let err = match stream_download_to_file(&script.opener(), TEST_URL, &target, 11, &mut hooks)
@@ -775,10 +776,10 @@ mod tests {
         let script = ScriptOpener::new(vec![Err("dns boom".to_string())]);
         let sleeps = std::cell::RefCell::new(Vec::new());
         let mut hooks = FetchHooks {
-                progress: |_: u64, _: Option<u64>| {},
-                cancelled: || false,
-                sleep: |delay| sleeps.borrow_mut().push(delay),
-                on_info: |_: &str| {},
+            progress: |_: u64, _: Option<u64>| {},
+            cancelled: || false,
+            sleep: |delay| sleeps.borrow_mut().push(delay),
+            on_info: |_: &str| {},
         };
 
         let err = match stream_download_to_file(&script.opener(), TEST_URL, &target, 11, &mut hooks)
@@ -808,10 +809,10 @@ mod tests {
             body: SegReader::bytes(b""),
         })]);
         let mut hooks = FetchHooks {
-                progress: |_: u64, _: Option<u64>| {},
-                cancelled: || false,
-                sleep: |_| {},
-                on_info: |_: &str| {},
+            progress: |_: u64, _: Option<u64>| {},
+            cancelled: || false,
+            sleep: |_| {},
+            on_info: |_: &str| {},
         };
 
         let err = match stream_download_to_file(&script.opener(), TEST_URL, &target, 11, &mut hooks)
@@ -841,13 +842,16 @@ mod tests {
                 b"hello ",
                 "connection reset",
             ))),
-            Ok(ScriptedResponse::partial(0, SegReader::bytes(b"hello world"))),
+            Ok(ScriptedResponse::partial(
+                0,
+                SegReader::bytes(b"hello world"),
+            )),
         ]);
         let mut hooks = FetchHooks {
-                progress: |_: u64, _: Option<u64>| {},
-                cancelled: || false,
-                sleep: |_| {},
-                on_info: |_: &str| {},
+            progress: |_: u64, _: Option<u64>| {},
+            cancelled: || false,
+            sleep: |_| {},
+            on_info: |_: &str| {},
         };
 
         let err = match stream_download_to_file(&script.opener(), TEST_URL, &target, 11, &mut hooks)
@@ -871,19 +875,20 @@ mod tests {
         let dir = unique_temp_dir();
         std::fs::create_dir_all(&dir).unwrap();
         let target = dir.join("voice.onnx");
-        let script = ScriptOpener::new(vec![Ok(ScriptedResponse::ok(
-            SegReader::bytes_then_fail(b"ab", "connection reset"),
-        ))]);
+        let script = ScriptOpener::new(vec![Ok(ScriptedResponse::ok(SegReader::bytes_then_fail(
+            b"ab",
+            "connection reset",
+        )))]);
         let cancelled = std::cell::Cell::new(false);
         let sleeps = std::cell::RefCell::new(Vec::new());
         let mut hooks = FetchHooks {
-                progress: |_: u64, _: Option<u64>| {},
-                cancelled: || cancelled.get(),
-                sleep: |delay| {
-                    sleeps.borrow_mut().push(delay);
-                    cancelled.set(true);
-                },
-                on_info: |_: &str| {},
+            progress: |_: u64, _: Option<u64>| {},
+            cancelled: || cancelled.get(),
+            sleep: |delay| {
+                sleeps.borrow_mut().push(delay);
+                cancelled.set(true);
+            },
+            on_info: |_: &str| {},
         };
 
         let err = match stream_download_to_file(&script.opener(), TEST_URL, &target, 11, &mut hooks)
@@ -924,17 +929,15 @@ mod tests {
         let mut hasher = ring::digest::Context::new(&ring::digest::SHA256);
         hasher.update(b"hello world");
         let actual = sha256_hex(b"hello world");
-        let err = verify_download(
-            done_of(b"hello world"),
-            hasher,
-            11,
-            &"0".repeat(64),
-        )
-        .expect_err("wrong hash must fail the hash check");
+        let err = verify_download(done_of(b"hello world"), hasher, 11, &"0".repeat(64))
+            .expect_err("wrong hash must fail the hash check");
         match err {
             DownloadError::Verify { message } => assert_eq!(
                 message,
-                format!("Voice download is corrupted: expected SHA-256 {}, got {actual}", "0".repeat(64))
+                format!(
+                    "Voice download is corrupted: expected SHA-256 {}, got {actual}",
+                    "0".repeat(64)
+                )
             ),
             other => panic!("expected a Verify error, got {other}"),
         }

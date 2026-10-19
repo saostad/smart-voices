@@ -36,7 +36,9 @@ fn strip(text: &str) -> &str {
 }
 
 fn split_words(text: &str) -> Vec<&str> {
-    text.split(is_v2_ws).filter(|word| !word.is_empty()).collect()
+    text.split(is_v2_ws)
+        .filter(|word| !word.is_empty())
+        .collect()
 }
 
 /// Split after a break char followed by whitespace (the `HARD_BREAK` /
@@ -177,8 +179,10 @@ pub(crate) fn split_chunks(
             continue;
         }
         while count_tokens(&merged[i]) < min_tokens {
-            let prev_words: Vec<String> =
-                split_words(&merged[i - 1]).iter().map(|s| s.to_string()).collect();
+            let prev_words: Vec<String> = split_words(&merged[i - 1])
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
             if prev_words.len() < 2 {
                 break;
             }
@@ -217,7 +221,13 @@ fn split_recurse(
     let mut chunks = total.div_ceil(max_tokens).max(1);
     let mut packed: Vec<String> = Vec::new();
     for _ in 0..4 {
-        packed = pack(&words, count_tokens, max_tokens, chunks, total.div_ceil(chunks));
+        packed = pack(
+            &words,
+            count_tokens,
+            max_tokens,
+            chunks,
+            total.div_ceil(chunks),
+        );
         if packed.len() <= chunks {
             return packed;
         }
@@ -264,7 +274,10 @@ fn pack(
 
 fn ends_with_break(chunk: &str) -> bool {
     let stripped = chunk.trim_end_matches(is_v2_ws);
-    stripped.chars().last().is_some_and(|c| BREAK_CHARS.contains(&c))
+    stripped
+        .chars()
+        .last()
+        .is_some_and(|c| BREAK_CHARS.contains(&c))
 }
 
 #[cfg(test)]
@@ -273,7 +286,10 @@ mod tests {
 
     #[test]
     fn translates_g2p_symbols_to_phones() {
-        assert_eq!(translate_phonemes("ketabe1 j/dide1 m/n @/st"), "ketAbe1 jadide1 man ?ast");
+        assert_eq!(
+            translate_phonemes("ketabe1 j/dide1 m/n @/st"),
+            "ketAbe1 jadide1 man ?ast"
+        );
         assert_eq!(translate_phonemes("hami$e cera"), "hAmiSe CerA");
         assert_eq!(translate_phonemes(""), "");
     }

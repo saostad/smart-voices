@@ -64,13 +64,14 @@ impl G2p {
         if clean.is_empty() {
             return Ok(String::new());
         }
-        self.phonemise_inner(clean).map_err(|err| EngineError::G2pFailed {
-            sentence: clean.to_string(),
-            message: match err {
-                EngineError::PocketData(message) => message,
-                other => other.to_string(),
-            },
-        })
+        self.phonemise_inner(clean)
+            .map_err(|err| EngineError::G2pFailed {
+                sentence: clean.to_string(),
+                message: match err {
+                    EngineError::PocketData(message) => message,
+                    other => other.to_string(),
+                },
+            })
     }
 
     fn phonemise_inner(&mut self, clean: &str) -> Result<String, EngineError> {
@@ -114,8 +115,9 @@ impl G2p {
         let mut past_k1: Vec<f32> = Vec::new();
         let mut past_v1: Vec<f32> = Vec::new();
         let mut running: Vec<Vec<i64>> = vec![vec![PAD_ID]; NUM_BEAMS];
-        let mut running_scores: Vec<f64> =
-            (0..NUM_BEAMS).map(|b| if b == 0 { 0.0 } else { -1e9 }).collect();
+        let mut running_scores: Vec<f64> = (0..NUM_BEAMS)
+            .map(|b| if b == 0 { 0.0 } else { -1e9 })
+            .collect();
         let mut finalized: Vec<(Vec<i64>, f64, bool)> =
             vec![(vec![PAD_ID], -1e9, false); NUM_BEAMS];
         let mut cur_len = 1usize;
@@ -198,8 +200,15 @@ impl G2p {
             }
         }
         let best = &finalized[best_idx].0;
-        let end = best.iter().position(|&id| id == EOS_ID).unwrap_or(best.len());
-        Ok(best[..end].iter().copied().filter(|&id| id != PAD_ID).collect())
+        let end = best
+            .iter()
+            .position(|&id| id == EOS_ID)
+            .unwrap_or(best.len());
+        Ok(best[..end]
+            .iter()
+            .copied()
+            .filter(|&id| id != PAD_ID)
+            .collect())
     }
 }
 
@@ -219,12 +228,12 @@ fn extract_f32(
     outputs: &ort::session::SessionOutputs<'_>,
     name: &str,
 ) -> Result<Vec<f32>, EngineError> {
-    let value = outputs
-        .get(name)
-        .ok_or_else(|| EngineError::PocketData(format!("Pronunciation model gave no '{name}' output")))?;
-    let (_, data) = value
-        .try_extract_tensor::<f32>()
-        .map_err(|err| EngineError::PocketData(format!("Pronunciation model output '{name}': {err}")))?;
+    let value = outputs.get(name).ok_or_else(|| {
+        EngineError::PocketData(format!("Pronunciation model gave no '{name}' output"))
+    })?;
+    let (_, data) = value.try_extract_tensor::<f32>().map_err(|err| {
+        EngineError::PocketData(format!("Pronunciation model output '{name}': {err}"))
+    })?;
     Ok(data.to_vec())
 }
 
@@ -291,7 +300,9 @@ fn select_beams(
         .collect();
     let hits_stop: Vec<bool> = topk_seqs
         .iter()
-        .map(|seq| *seq.last().expect("top-K seqs are never empty") == EOS_ID || seq.len() >= MAX_LENGTH)
+        .map(|seq| {
+            *seq.last().expect("top-K seqs are never empty") == EOS_ID || seq.len() >= MAX_LENGTH
+        })
         .collect();
     // Running beams for the next step: best non-finished top-K.
     let masked: Vec<f64> = topk_scores
@@ -331,8 +342,11 @@ fn select_beams(
     merged.extend(fresh);
     let mut best_order: Vec<usize> = (0..merged.len()).collect();
     best_order.sort_by(|&a, &b| merged[b].1.total_cmp(&merged[a].1).then(a.cmp(&b)));
-    let done: Vec<(Vec<i64>, f64, bool)> =
-        best_order.into_iter().take(NUM_BEAMS).map(|i| merged[i].clone()).collect();
+    let done: Vec<(Vec<i64>, f64, bool)> = best_order
+        .into_iter()
+        .take(NUM_BEAMS)
+        .map(|i| merged[i].clone())
+        .collect();
     // Early-stop heuristic: the best running score, penalized at the
     // hypothetical best length, can still beat the worst finished beam.
     let hypo_len = (cur_len as f64).powf(LENGTH_PENALTY);
@@ -374,15 +388,17 @@ fn gather_beams(present: &[f32], beams: &[usize], len: usize) -> Vec<f32> {
     let mut out = vec![0.0; beams.len() * beam_size];
     for (b, &beam) in beams.iter().enumerate() {
         let from = beam * beam_size;
-        out[b * beam_size..(b + 1) * beam_size]
-            .copy_from_slice(&present[from..from + beam_size]);
+        out[b * beam_size..(b + 1) * beam_size].copy_from_slice(&present[from..from + beam_size]);
     }
     out
 }
 
 /// ByT5 byte ids: UTF-8 byte b → id b + 3.
 fn encode_bytes(text: &str) -> Vec<i64> {
-    text.as_bytes().iter().map(|&b| i64::from(b) + BYTE_OFFSET).collect()
+    text.as_bytes()
+        .iter()
+        .map(|&b| i64::from(b) + BYTE_OFFSET)
+        .collect()
 }
 
 /// Relative-position buckets for one decode step: query position [past_len]
@@ -482,13 +498,7 @@ mod tests {
         // Running beams skip the finished [0, 1].
         assert_eq!(
             pick.seqs,
-            vec![
-                vec![0, 0],
-                vec![0, 2],
-                vec![0, 3],
-                vec![0, 4],
-                vec![0, 5]
-            ]
+            vec![vec![0, 0], vec![0, 2], vec![0, 3], vec![0, 4], vec![0, 5]]
         );
         assert_eq!(pick.beams, vec![0, 0, 0, 0, 0]);
         // The EOS beam finalizes with the uniform log-prob…
