@@ -5,6 +5,7 @@ pub mod audio;
 pub mod autostart;
 pub mod chunk;
 pub mod clipboard;
+pub mod download;
 pub mod engine;
 pub mod icon;
 pub mod lang;

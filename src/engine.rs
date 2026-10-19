@@ -214,11 +214,28 @@ impl PersianVoice {
         !matches!(self, Self::Pocket)
     }
 
-    /// Expected size of the Pocket v1 `.onnx` download, in bytes.
-    pub const POCKET_SIZE_BYTES: u64 = 226_396_445;
-    /// Expected SHA-256 (hex) of the Pocket v1 `.onnx` download.
-    pub const POCKET_SHA256: &str =
-        "3f3322396a6f8a65e970438f0a58b146e90cd49283cf8c46cef7f3f877cdca30";
+    /// Single-file download coordinates for the Pocket voices (`None` for
+    /// Piper, which ships as `.tar.bz2` archives). Adding a voice is one
+    /// entry here (plus its `url`).
+    pub fn download_spec(self) -> Option<DownloadSpec> {
+        match self {
+            Self::Pocket => Some(DownloadSpec {
+                url: self.url(),
+                size: 226_396_445,
+                sha256: "3f3322396a6f8a65e970438f0a58b146e90cd49283cf8c46cef7f3f877cdca30",
+            }),
+            _ => None,
+        }
+    }
+}
+
+/// One voice's single-file download: URL, expected size in bytes, and
+/// expected SHA-256 (hex). See [`PersianVoice::download_spec`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DownloadSpec {
+    pub url: &'static str,
+    pub size: u64,
+    pub sha256: &'static str,
 }
 
 /// English Kokoro voices in speaker-id order (sid = index).
@@ -706,9 +723,13 @@ mod tests {
                     voice.url(),
                     "https://huggingface.co/saostad/readly-voices/resolve/main/pocket-farsi-v1/pocket-farsi-v1.onnx"
                 );
-                assert_eq!(PersianVoice::POCKET_SIZE_BYTES, 226_396_445);
+                let spec = voice
+                    .download_spec()
+                    .expect("pocket has a download spec");
+                assert_eq!(spec.url, voice.url());
+                assert_eq!(spec.size, 226_396_445);
                 assert_eq!(
-                    PersianVoice::POCKET_SHA256,
+                    spec.sha256,
                     "3f3322396a6f8a65e970438f0a58b146e90cd49283cf8c46cef7f3f877cdca30"
                 );
             } else {
@@ -722,6 +743,7 @@ mod tests {
                         "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/{dir}.tar.bz2"
                     )
                 );
+                assert_eq!(voice.download_spec(), None);
             }
         }
         assert_eq!(PersianVoice::parse("sara"), None);
