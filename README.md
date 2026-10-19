@@ -62,24 +62,25 @@ Next buttons. Close it to hide it for that reading.
 
 The `Settings` submenu holds everything customizable:
 
+- `English Voice` — 28 voices grouped by accent and gender, with
+  `Voice Model` (Fast or Small; switching reloads the voice) below them.
+- `Persian Voice` — `Pocket v2 (best quality — recommended)` is the default
+  and sounds the most natural; `Pocket v1` below it. The Piper voices (Amir,
+  Gyro, Reza Ibrahim, Ganji, Ganji Adabi) are smaller downloads and start
+  faster, with lower quality.
+- `Reading Speed` — 0.75× to 2×.
 - `Launch at Login` — start with your computer (reflects the real system
   state).
 - `Watch the Clipboard` — turn clipboard watching off entirely.
 - `Show Reading Panel While Reading` — show the panel automatically while
   reading.
 - `Animate Icon While Reading` — animate the tray icon while reading.
-- `Voice` — 28 English voices (`Heart — American female`, …).
-- `Persian Voice` — `Pocket (best quality — recommended)` is the default and
-  sounds the most natural. The Piper voices (Amir, Gyro, Reza Ibrahim, Ganji,
-  Ganji Adabi) are smaller downloads and start faster, with lower quality.
-- `Speed` — 0.75× to 2×.
-- `Voice Model` — Fast or Small (switching reloads the voice).
-- `Unload Voice When Idle` — free the voice memory after 1–60 minutes, or
+- `Free Memory When Idle` — free the voice memory after 1–60 minutes, or
   `Never`.
-- `Edit Pronunciations…` / `Open Settings File…` — teach the app words
-  (SQL → "sequel"); edits apply on the next reading.
 - `Shortcuts` — shows the current bindings; change them in `settings.toml`
   and restart.
+- `Edit Pronunciations…` / `Open Settings File…` — teach the app words
+  (SQL → "sequel"); edits apply on the next reading.
 
 ## Shortcuts
 

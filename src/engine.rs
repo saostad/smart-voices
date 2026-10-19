@@ -144,6 +144,22 @@ impl PersianVoice {
         }
     }
 
+    /// Short label for the `Persian Voice` submenu: just the name. The
+    /// submenu's `Piper (smaller, faster)` header already says what Piper
+    /// means; [`label`](Self::label) keeps the full text for the CLI and the
+    /// status line.
+    pub fn short_label(self) -> &'static str {
+        match self {
+            Self::PocketV2 => "Pocket v2",
+            Self::Pocket => "Pocket v1",
+            Self::Amir => "Amir",
+            Self::Gyro => "Gyro",
+            Self::RezaIbrahim => "Reza Ibrahim",
+            Self::Ganji => "Ganji",
+            Self::GanjiAdabi => "Ganji Adabi",
+        }
+    }
+
     /// Human-readable label for the Settings menu. Pocket v2 says what it
     /// does for a beginner; the Piper names are just names.
     pub fn label(self) -> &'static str {
@@ -297,31 +313,111 @@ pub fn voice_id(name: &str) -> Option<i32> {
     VOICES.iter().position(|v| *v == name).map(|i| i as i32)
 }
 
+/// English voice group from the id prefix (`af_` → American female, …).
+/// Groups the `English Voice` submenu; see [`grouped_english_voices`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VoiceGroup {
+    /// `af_*` voices.
+    AmericanFemale,
+    /// `am_*` voices.
+    AmericanMale,
+    /// `bf_*` voices.
+    BritishFemale,
+    /// `bm_*` voices.
+    BritishMale,
+}
+
+impl VoiceGroup {
+    /// All groups in menu order.
+    pub const ALL: [Self; 4] = [
+        Self::AmericanFemale,
+        Self::AmericanMale,
+        Self::BritishFemale,
+        Self::BritishMale,
+    ];
+
+    /// Parse the id prefix (`af_` → American female, …), or `None` if the
+    /// id doesn't start with a known prefix.
+    pub fn parse(id: &str) -> Option<Self> {
+        let mut chars = id.chars();
+        let first = chars.next()?;
+        let second = chars.next()?;
+        if chars.next() != Some('_') {
+            return None;
+        }
+        match (first, second) {
+            ('a', 'f') => Some(Self::AmericanFemale),
+            ('a', 'm') => Some(Self::AmericanMale),
+            ('b', 'f') => Some(Self::BritishFemale),
+            ('b', 'm') => Some(Self::BritishMale),
+            _ => None,
+        }
+    }
+
+    /// Region word for [`voice_display_name`].
+    fn region(self) -> &'static str {
+        match self {
+            Self::AmericanFemale | Self::AmericanMale => "American",
+            Self::BritishFemale | Self::BritishMale => "British",
+        }
+    }
+
+    /// Gender word for [`voice_display_name`].
+    fn gender(self) -> &'static str {
+        match self {
+            Self::AmericanFemale | Self::BritishFemale => "female",
+            Self::AmericanMale | Self::BritishMale => "male",
+        }
+    }
+
+    /// Disabled-header label for the `English Voice` submenu.
+    pub fn header(self) -> &'static str {
+        match self {
+            Self::AmericanFemale => "American · Female",
+            Self::AmericanMale => "American · Male",
+            Self::BritishFemale => "British · Female",
+            Self::BritishMale => "British · Male",
+        }
+    }
+}
+
+/// Short display name for a Kokoro voice id (`"af_heart"` → `"Heart"`), or
+/// `None` if the id is invalid. Shown under the group header, which already
+/// carries the region and gender.
+pub fn voice_short_name(id: &str) -> Option<String> {
+    VoiceGroup::parse(id)?;
+    let suffix = id.get(3..)?;
+    if suffix.is_empty() {
+        return None;
+    }
+    let mut chars = suffix.chars();
+    let capitalized: String = chars.next()?.to_uppercase().collect();
+    let rest: String = chars.collect();
+    Some(format!("{capitalized}{rest}"))
+}
+
 /// Human-readable name for a Kokoro voice id (`"af_heart"` →
 /// `"Heart — American female"`), or `None` if the id is invalid. Port of
 /// Swift's `KokoroVoiceCatalog.displayName`.
 pub fn voice_display_name(id: &str) -> Option<String> {
-    let mut chars = id.chars();
-    let first = chars.next()?;
-    let second = chars.next()?;
-    if chars.next() != Some('_') {
-        return None;
-    }
-    let (region, gender) = match (first, second) {
-        ('a', 'f') => ("American", "female"),
-        ('a', 'm') => ("American", "male"),
-        ('b', 'f') => ("British", "female"),
-        ('b', 'm') => ("British", "male"),
-        _ => return None,
-    };
-    let suffix: String = chars.collect();
-    if suffix.is_empty() {
-        return None;
-    }
-    let mut suffix_chars = suffix.chars();
-    let capitalized: String = suffix_chars.next()?.to_uppercase().collect();
-    let rest: String = suffix_chars.collect();
-    Some(format!("{capitalized}{rest} — {region} {gender}"))
+    let group = VoiceGroup::parse(id)?;
+    let name = voice_short_name(id)?;
+    Some(format!("{name} — {} {}", group.region(), group.gender()))
+}
+
+/// English voices grouped for the `English Voice` submenu: the four
+/// [`VoiceGroup::ALL`] groups in menu order, ids A–Z by short name within
+/// each group.
+pub fn grouped_english_voices() -> [(VoiceGroup, Vec<&'static str>); 4] {
+    VoiceGroup::ALL.map(|group| {
+        let mut ids: Vec<&'static str> = VOICES
+            .iter()
+            .copied()
+            .filter(|id| VoiceGroup::parse(id) == Some(group))
+            .collect();
+        ids.sort_unstable_by_key(|id| voice_short_name(id));
+        (group, ids)
+    })
 }
 
 /// Errors from loading the model or synthesizing speech.
@@ -687,6 +783,54 @@ mod tests {
     }
 
     #[test]
+    fn voice_short_names_are_capitalized_suffixes() {
+        assert_eq!(voice_short_name("af_heart").as_deref(), Some("Heart"));
+        assert_eq!(voice_short_name("am_adam").as_deref(), Some("Adam"));
+        assert_eq!(voice_short_name("bf_alice").as_deref(), Some("Alice"));
+        assert_eq!(voice_short_name("bm_lewis").as_deref(), Some("Lewis"));
+        for id in [
+            "", "af", "af_", "afheart", "xf_heart", "ax_heart", "a_heart",
+        ] {
+            assert_eq!(voice_short_name(id), None, "{id}");
+        }
+    }
+
+    #[test]
+    fn english_voice_groups_cover_all_voices_sorted_a_to_z() {
+        let groups = grouped_english_voices();
+        assert_eq!(groups.len(), 4);
+        let headers: Vec<&str> = groups.iter().map(|(group, _)| group.header()).collect();
+        assert_eq!(
+            headers,
+            [
+                "American · Female",
+                "American · Male",
+                "British · Female",
+                "British · Male",
+            ]
+        );
+        let total: usize = groups.iter().map(|(_, ids)| ids.len()).sum();
+        assert_eq!(total, VOICES.len());
+        let mut seen = Vec::with_capacity(VOICES.len());
+        for (group, ids) in &groups {
+            assert!(!ids.is_empty(), "{group:?} is empty");
+            let names: Vec<String> = ids.iter().map(|id| voice_short_name(id).unwrap()).collect();
+            let mut sorted = names.clone();
+            sorted.sort_unstable();
+            assert_eq!(names, sorted, "{group:?} is not A–Z");
+            for id in ids {
+                assert_eq!(VoiceGroup::parse(id), Some(*group), "{id}");
+                assert!(VOICES.contains(id), "{id}");
+                seen.push(*id);
+            }
+        }
+        seen.sort_unstable();
+        let mut all = VOICES.to_vec();
+        all.sort_unstable();
+        assert_eq!(seen, all);
+    }
+
+    #[test]
     fn missing_model_message_names_download_command() {
         let err = EngineError::MissingModel(PathBuf::from("/x/model.onnx"));
         assert_eq!(
@@ -702,12 +846,14 @@ mod tests {
                 PersianVoice::PocketV2,
                 "pocket-v2",
                 "Pocket v2 (best quality — recommended)",
+                "Pocket v2",
                 "pocket-farsi-v2",
                 "pocket-farsi-v2.onnx",
             ),
             (
                 PersianVoice::Pocket,
                 "pocket",
+                "Pocket v1",
                 "Pocket v1",
                 "pocket-farsi-v1",
                 "pocket-farsi-v1.onnx",
@@ -716,6 +862,7 @@ mod tests {
                 PersianVoice::Amir,
                 "amir",
                 "Amir (Piper — smaller, faster)",
+                "Amir",
                 "vits-piper-fa_IR-amir-medium",
                 "fa_IR-amir-medium.onnx",
             ),
@@ -723,6 +870,7 @@ mod tests {
                 PersianVoice::Gyro,
                 "gyro",
                 "Gyro (Piper — smaller, faster)",
+                "Gyro",
                 "vits-piper-fa_IR-gyro-medium",
                 "fa_IR-gyro-medium.onnx",
             ),
@@ -730,6 +878,7 @@ mod tests {
                 PersianVoice::RezaIbrahim,
                 "reza_ibrahim",
                 "Reza Ibrahim (Piper — smaller, faster)",
+                "Reza Ibrahim",
                 "vits-piper-fa_IR-reza_ibrahim-medium",
                 "fa_IR-reza_ibrahim-medium.onnx",
             ),
@@ -737,6 +886,7 @@ mod tests {
                 PersianVoice::Ganji,
                 "ganji",
                 "Ganji (Piper — smaller, faster)",
+                "Ganji",
                 "vits-piper-fa_IR-ganji-medium",
                 "fa_IR-ganji-medium.onnx",
             ),
@@ -744,16 +894,18 @@ mod tests {
                 PersianVoice::GanjiAdabi,
                 "ganji_adabi",
                 "Ganji Adabi (Piper — smaller, faster)",
+                "Ganji Adabi",
                 "vits-piper-fa_IR-ganji_adabi-medium",
                 "fa_IR-ganji_adabi-medium.onnx",
             ),
         ];
         assert_eq!(PERSIAN_VOICES.len(), expected.len());
-        for (voice, id, label, dir, file) in expected {
+        for (voice, id, label, short, dir, file) in expected {
             assert!(PERSIAN_VOICES.contains(&voice), "{id}");
             assert_eq!(voice.id(), id);
             assert_eq!(PersianVoice::parse(id), Some(voice));
             assert_eq!(voice.label(), label);
+            assert_eq!(voice.short_label(), short);
             assert_eq!(voice.dir_name(), dir);
             assert_eq!(voice.model_file(), file);
             if !voice.is_piper() {

@@ -28,7 +28,8 @@ use crate::audio::AudioSink;
 use crate::autostart;
 use crate::clipboard::{self, ClipboardEvent, MIN_TEXT_LEN};
 use crate::engine::{
-    KokoroEngine, ModelVariant, PERSIAN_VOICES, PersianVoice, VOICES, voice_display_name,
+    KokoroEngine, ModelVariant, PERSIAN_VOICES, PersianVoice, VOICES, grouped_english_voices,
+    voice_short_name,
 };
 use crate::icon;
 use crate::models::{self, ModelId};
@@ -450,18 +451,40 @@ impl App {
         );
         let quit_item = MenuItem::new("Quit Smart Voices", true, None);
 
-        let voice_menu = Submenu::new("Voice", true);
-        let mut voice_items = Vec::with_capacity(VOICES.len());
-        for id in VOICES {
-            let label = voice_display_name(id).unwrap_or_else(|| id.to_string());
-            let item = CheckMenuItem::new(label, true, id == self.settings.voice, None);
-            voice_menu.append(&item).map_err(menu_build_error)?;
-            voice_items.push((id.to_string(), item));
+        let model_menu = Submenu::new("Voice Model", true);
+        let mut model_items = Vec::with_capacity(2);
+        for variant in [ModelVariant::Fast, ModelVariant::Small] {
+            let item = CheckMenuItem::new(variant.label(), true, variant == self.model, None);
+            model_menu.append(&item).map_err(menu_build_error)?;
+            model_items.push((variant, item));
         }
+
+        let english_voice_menu = Submenu::new("English Voice", true);
+        let mut voice_items = Vec::with_capacity(VOICES.len());
+        for (group, ids) in grouped_english_voices() {
+            english_voice_menu
+                .append(&MenuItem::new(group.header(), false, None))
+                .map_err(menu_build_error)?;
+            for id in ids {
+                let name = voice_short_name(id).unwrap_or_else(|| id.to_string());
+                let item = CheckMenuItem::new(name, true, id == self.settings.voice, None);
+                english_voice_menu.append(&item).map_err(menu_build_error)?;
+                voice_items.push((id.to_string(), item));
+            }
+        }
+        english_voice_menu
+            .append(&PredefinedMenuItem::separator())
+            .map_err(menu_build_error)?;
+        english_voice_menu
+            .append(&model_menu)
+            .map_err(menu_build_error)?;
 
         let persian_voice_menu = Submenu::new("Persian Voice", true);
         let mut persian_voice_items = Vec::with_capacity(PERSIAN_VOICES.len());
         for voice in PERSIAN_VOICES {
+            if voice.is_piper() {
+                continue;
+            }
             let item = CheckMenuItem::new(
                 voice.label(),
                 true,
@@ -471,8 +494,27 @@ impl App {
             persian_voice_menu.append(&item).map_err(menu_build_error)?;
             persian_voice_items.push((voice, item));
         }
+        persian_voice_menu
+            .append(&PredefinedMenuItem::separator())
+            .map_err(menu_build_error)?;
+        persian_voice_menu
+            .append(&MenuItem::new("Piper (smaller, faster)", false, None))
+            .map_err(menu_build_error)?;
+        for voice in PERSIAN_VOICES {
+            if !voice.is_piper() {
+                continue;
+            }
+            let item = CheckMenuItem::new(
+                voice.short_label(),
+                true,
+                voice == self.settings.persian_voice,
+                None,
+            );
+            persian_voice_menu.append(&item).map_err(menu_build_error)?;
+            persian_voice_items.push((voice, item));
+        }
 
-        let speed_menu = Submenu::new("Speed", true);
+        let speed_menu = Submenu::new("Reading Speed", true);
         let mut speed_items = Vec::with_capacity(SPEEDS.len());
         for speed in SPEEDS {
             let item =
@@ -481,15 +523,7 @@ impl App {
             speed_items.push((speed, item));
         }
 
-        let model_menu = Submenu::new("Voice Model", true);
-        let mut model_items = Vec::with_capacity(2);
-        for variant in [ModelVariant::Fast, ModelVariant::Small] {
-            let item = CheckMenuItem::new(variant.label(), true, variant == self.model, None);
-            model_menu.append(&item).map_err(menu_build_error)?;
-            model_items.push((variant, item));
-        }
-
-        let unload_menu = Submenu::new("Unload Voice When Idle", true);
+        let unload_menu = Submenu::new("Free Memory When Idle", true);
         let mut unload_items = Vec::with_capacity(UNLOAD_OPTIONS.len());
         for (minutes, label) in UNLOAD_OPTIONS {
             let item = CheckMenuItem::new(
@@ -528,7 +562,21 @@ impl App {
             ))
             .map_err(menu_build_error)?;
 
+        // Top-level order pinned by the `settings_menu_order` test — keep in
+        // sync (tray-icon menus can't be inspected in tests).
         let settings_menu = Submenu::new("Settings", true);
+        settings_menu
+            .append(&english_voice_menu)
+            .map_err(menu_build_error)?;
+        settings_menu
+            .append(&persian_voice_menu)
+            .map_err(menu_build_error)?;
+        settings_menu
+            .append(&speed_menu)
+            .map_err(menu_build_error)?;
+        settings_menu
+            .append(&PredefinedMenuItem::separator())
+            .map_err(menu_build_error)?;
         settings_menu
             .append(&launch_at_login_item)
             .map_err(menu_build_error)?;
@@ -542,31 +590,19 @@ impl App {
             .append(&animate_icon_item)
             .map_err(menu_build_error)?;
         settings_menu
-            .append(&voice_menu)
-            .map_err(menu_build_error)?;
-        settings_menu
-            .append(&persian_voice_menu)
-            .map_err(menu_build_error)?;
-        settings_menu
-            .append(&speed_menu)
-            .map_err(menu_build_error)?;
-        settings_menu
-            .append(&model_menu)
-            .map_err(menu_build_error)?;
-        settings_menu
             .append(&unload_menu)
             .map_err(menu_build_error)?;
         settings_menu
             .append(&PredefinedMenuItem::separator())
             .map_err(menu_build_error)?;
         settings_menu
+            .append(&shortcuts_menu)
+            .map_err(menu_build_error)?;
+        settings_menu
             .append(&edit_pron_item)
             .map_err(menu_build_error)?;
         settings_menu
             .append(&open_settings_item)
-            .map_err(menu_build_error)?;
-        settings_menu
-            .append(&shortcuts_menu)
             .map_err(menu_build_error)?;
 
         menu.append(&status_item).map_err(menu_build_error)?;
@@ -1720,6 +1756,29 @@ fn download_label(model: ModelId) -> &'static str {
     }
 }
 
+/// Top-level titles of the `Settings` submenu in display order (`None` =
+/// separator), mirroring the append order in `create_tray`. The built menu
+/// can't be inspected in tests, so the test below pins this list against the
+/// owner-approved layout instead.
+#[cfg(test)]
+fn settings_menu_order() -> [Option<&'static str>; 13] {
+    [
+        Some("English Voice"),
+        Some("Persian Voice"),
+        Some("Reading Speed"),
+        None,
+        Some("Launch at Login"),
+        Some("Watch the Clipboard"),
+        Some("Show Reading Panel While Reading"),
+        Some("Animate Icon While Reading"),
+        Some("Free Memory When Idle"),
+        None,
+        Some("Shortcuts"),
+        Some("Edit Pronunciations…"),
+        Some("Open Settings File…"),
+    ]
+}
+
 /// Status-line text for a running model download (decimal MB).
 fn download_status(label: &str, done: u64, total: Option<u64>) -> String {
     const MB: f64 = 1_000_000.0;
@@ -1817,6 +1876,28 @@ mod tests {
         }
         assert_eq!(menu_accelerator(""), None);
         assert_eq!(menu_accelerator("ctrl+Space+alt"), None);
+    }
+
+    #[test]
+    fn settings_menu_lists_voices_first_in_owner_order() {
+        assert_eq!(
+            settings_menu_order(),
+            [
+                Some("English Voice"),
+                Some("Persian Voice"),
+                Some("Reading Speed"),
+                None,
+                Some("Launch at Login"),
+                Some("Watch the Clipboard"),
+                Some("Show Reading Panel While Reading"),
+                Some("Animate Icon While Reading"),
+                Some("Free Memory When Idle"),
+                None,
+                Some("Shortcuts"),
+                Some("Edit Pronunciations…"),
+                Some("Open Settings File…"),
+            ]
+        );
     }
 
     #[test]
