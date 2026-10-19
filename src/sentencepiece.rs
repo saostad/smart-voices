@@ -1,18 +1,19 @@
-//! Unigram SentencePiece tokenizer (the model Pocket TTS ships).
+//! Minimal SentencePiece BPE encoder for the tokenizer baked into the Pocket model
+//! (`pocket_tts_tokenizer` metadata).
 //!
-//! Pure-Rust port of the TypeScript runtime in pocket-tts-onnx
-//! (`packages/pocket-tts-onnx/src/sentencepiece.ts`): the exported model is a
-//! plain unigram model with the identity normalizer and byte fallback, so
-//! encoding is Viterbi over the pieces with UTF-8 byte spelling for anything
-//! the vocabulary has never seen. Operates on Unicode scalar values (the TS
-//! original indexes UTF-16 units; identical for the BMP, and code points are
-//! what Python's sentencepiece sees).
+//! Rust port of readly's `SentencePiece.kt`: reads the `ModelProto` bytes
+//! directly and runs the same greedy highest-score merges as SentencePiece,
+//! with byte fallback. Text must already be normalized
+//! ([`crate::normalize_fa`]); this does not apply SentencePiece's own NFKC
+//! character map. Checked against the Python `sentencepiece` package on every
+//! test sentence (`tests/fixtures/pocket/fixtures.json`).
 
 use std::collections::HashMap;
 use std::fmt;
 
 const SPACE: char = '▁';
-const UNK_PENALTY: f64 = 10.0;
+const ZWNJ: char = '\u{200c}';
+const UNK_ID: i64 = 0;
 
 const NORMAL: u32 = 1;
 const UNKNOWN: u32 = 2;
@@ -120,7 +121,6 @@ impl<'a> Reader<'a> {
 #[derive(Debug, Clone)]
 struct Piece {
     text: String,
-    chars: Vec<char>,
     score: f32,
     kind: u32,
 }
@@ -143,13 +143,7 @@ fn parse_piece(bytes: &[u8]) -> Result<Piece, TokenizerError> {
             _ => reader.skip(wire)?,
         }
     }
-    let chars = text.chars().collect();
-    Ok(Piece {
-        text,
-        chars,
-        score,
-        kind,
-    })
+    Ok(Piece { text, score, kind })
 }
 
 fn parse_normalizer_add_dummy_prefix(bytes: &[u8]) -> Result<bool, TokenizerError> {
@@ -167,14 +161,11 @@ fn parse_normalizer_add_dummy_prefix(bytes: &[u8]) -> Result<bool, TokenizerErro
     Ok(add_dummy_prefix)
 }
 
-/// Parsed unigram model: pieces in id order plus the encode index.
+/// Parsed BPE model: piece scores in id order plus the encode index.
 pub struct SentencePiece {
-    pieces: Vec<Piece>,
-    unk_id: i64,
-    ids: HashMap<Vec<char>, i64>,
+    scores: Vec<f32>,
+    ids: HashMap<String, i64>,
     byte_ids: HashMap<u8, i64>,
-    max_piece_len: usize,
-    unk_score: f64,
     add_dummy_prefix: bool,
 }
 
@@ -198,17 +189,13 @@ impl SentencePiece {
         if pieces.is_empty() {
             return Err(TokenizerError("model has no pieces".to_string()));
         }
-        let mut ids: HashMap<Vec<char>, i64> = HashMap::new();
+        let mut ids: HashMap<String, i64> = HashMap::new();
         let mut byte_ids: HashMap<u8, i64> = HashMap::new();
-        let mut min_score = f64::INFINITY;
-        let mut longest = 1usize;
         for (id, piece) in pieces.iter().enumerate() {
             let id = id as i64;
             match piece.kind {
                 NORMAL | USER_DEFINED => {
-                    ids.insert(piece.chars.clone(), id);
-                    longest = longest.max(piece.chars.len());
-                    min_score = min_score.min(f64::from(piece.score));
+                    ids.insert(piece.text.clone(), id);
                 }
                 BYTE => {
                     // Byte pieces look like "<0xNN>".
@@ -218,92 +205,78 @@ impl SentencePiece {
                     }
                 }
                 UNKNOWN => {
-                    ids.remove(&piece.chars);
+                    ids.remove(&piece.text);
                 }
                 _ => {}
             }
         }
         Ok(Self {
-            pieces,
-            unk_id: 0,
+            scores: pieces.iter().map(|piece| piece.score).collect(),
             ids,
             byte_ids,
-            max_piece_len: longest,
-            unk_score: min_score - UNK_PENALTY,
             add_dummy_prefix,
         })
     }
 
     /// Number of pieces in the model.
     pub fn vocab_size(&self) -> usize {
-        self.pieces.len()
+        self.scores.len()
     }
 
-    /// Encode `text` to token ids (Viterbi + byte fallback).
+    /// Encode `text` to token ids (greedy highest-score BPE merges + byte fallback).
     pub fn encode(&self, text: &str) -> Vec<i64> {
         if text.is_empty() {
             return Vec::new();
         }
-        let mut normalized: Vec<char> = Vec::with_capacity(text.chars().count() + 1);
+        let mut normalized = String::with_capacity(text.len() + 1);
         if self.add_dummy_prefix {
             normalized.push(SPACE);
         }
+        // The model's normalizer maps ZWNJ to a word boundary too: no vocab
+        // piece contains U+200C, and Python splits half-spaces ([▁می][▁شود]).
         for c in text.chars() {
-            normalized.push(if c == ' ' { SPACE } else { c });
+            normalized.push(if c == ' ' || c == ZWNJ { SPACE } else { c });
         }
-        let len = normalized.len();
-        let mut best = vec![f64::NEG_INFINITY; len + 1];
-        let mut back = vec![usize::MAX; len + 1];
-        best[0] = 0.0;
-        for end in 1..=len {
-            let earliest = end.saturating_sub(self.max_piece_len);
-            for start in earliest..end {
-                if best[start] == f64::NEG_INFINITY {
-                    continue;
-                }
-                let Some(id) = self.ids.get(&normalized[start..end]) else {
+        // One symbol per code point so a merge never splits a surrogate pair.
+        let mut symbols: Vec<String> =
+            normalized.chars().map(|c| c.to_string()).collect();
+        // Greedy BPE: each round merges the adjacent pair whose concatenation
+        // is a NORMAL or USER_DEFINED piece with the highest score (ties:
+        // leftmost).
+        let mut merged = String::new();
+        while symbols.len() > 1 {
+            let mut best_score = f32::NEG_INFINITY;
+            let mut best_pos: Option<usize> = None;
+            for pos in 0..symbols.len() - 1 {
+                merged.clear();
+                merged.push_str(&symbols[pos]);
+                merged.push_str(&symbols[pos + 1]);
+                let Some(id) = self.ids.get(&merged) else {
                     continue;
                 };
-                let score = best[start] + f64::from(self.pieces[*id as usize].score);
-                if score > best[end] {
-                    best[end] = score;
-                    back[end] = start;
+                let score = self.scores[*id as usize];
+                if score > best_score {
+                    best_score = score;
+                    best_pos = Some(pos);
                 }
             }
-            if best[end] == f64::NEG_INFINITY {
-                // Nothing reaches here: one unknown character, spelled out as
-                // bytes below.
-                let start = end - 1;
-                if best[start] != f64::NEG_INFINITY {
-                    best[end] = best[start] + self.unk_score;
-                    back[end] = start;
-                }
-            }
-        }
-        let mut spans: Vec<(usize, usize)> = Vec::new();
-        let mut end = len;
-        while end > 0 {
-            let start = back[end];
-            if start == usize::MAX {
+            let Some(pos) = best_pos else {
                 break;
-            }
-            spans.push((start, end));
-            end = start;
+            };
+            let next = symbols.remove(pos + 1);
+            symbols[pos].push_str(&next);
         }
-        spans.reverse();
-        let mut out = Vec::new();
-        for (start, end) in spans {
-            let slice = &normalized[start..end];
-            if let Some(id) = self.ids.get(slice) {
+        let mut out = Vec::with_capacity(symbols.len());
+        for symbol in &symbols {
+            if let Some(id) = self.ids.get(symbol) {
                 out.push(*id);
                 continue;
             }
-            let text: String = slice.iter().collect();
-            let bytes = text.as_bytes();
-            if bytes.iter().all(|b| self.byte_ids.contains_key(b)) {
+            let bytes = symbol.as_bytes();
+            if !bytes.is_empty() && bytes.iter().all(|b| self.byte_ids.contains_key(b)) {
                 out.extend(bytes.iter().map(|b| self.byte_ids[b]));
             } else {
-                out.push(self.unk_id);
+                out.push(UNK_ID);
             }
         }
         out
@@ -347,8 +320,8 @@ mod tests {
     }
 
     fn model_bytes() -> Vec<u8> {
-        // ids: 0 <unk>, 1 ▁, 2 ▁a, 3 a, 4 b, 5 <0x61> byte 'a'... byte pieces
-        // only matter for unknowns; give every byte used below a piece.
+        // ids: 0 <unk>, 1 ▁, 2 ▁a, 3 a, 4 b, 5 ab, 6 <0x61> byte 'a',
+        // 7 <0x62> byte 'b'.
         let mut out = Vec::new();
         let pieces: [(&str, f32, u64); 8] = [
             ("<unk>", 0.0, 2),
@@ -372,13 +345,19 @@ mod tests {
     }
 
     #[test]
-    fn encodes_with_dummy_prefix_and_best_scoring_pieces() {
+    fn merges_highest_scoring_pair_first() {
         let sp = SentencePiece::from_bytes(&model_bytes()).unwrap();
-        // " ab" -> ▁ + ▁ab? The vocab has ▁a + b vs ▁ + ab: scores -0.5-2.0
-        // vs -1.0-1.5; the latter wins.
-        assert_eq!(sp.encode("ab"), vec![1, 5]);
+        // "ab" -> ▁ab: pairs ▁a (-0.5) and ab (-1.5); ▁a merges first, then
+        // no pair of [▁a, b] is a piece.
+        assert_eq!(sp.encode("ab"), vec![2, 4]);
         assert_eq!(sp.encode("a"), vec![2]);
         assert_eq!(sp.encode(""), Vec::<i64>::new());
+    }
+
+    #[test]
+    fn zwnj_is_a_word_boundary_like_space() {
+        let sp = SentencePiece::from_bytes(&model_bytes()).unwrap();
+        assert_eq!(sp.encode("a\u{200c}b"), sp.encode("a b"));
     }
 
     #[test]
