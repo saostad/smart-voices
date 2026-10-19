@@ -80,13 +80,17 @@ impl ModelVariant {
     }
 }
 
-/// Persian voices: Pocket (best quality, default) plus the Piper voices.
-/// Pocket is one shared model; each Piper voice is its own model.
+/// Persian voices: Pocket v2 (best quality, default), Pocket v1, plus the
+/// Piper voices. Each Pocket voice is one shared model; each Piper voice is
+/// its own model.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PersianVoice {
-    /// Pocket TTS Farsi (default, best quality).
+    /// Pocket TTS Farsi v2 (default, best quality).
     #[default]
+    #[serde(rename = "pocket-v2")]
+    PocketV2,
+    /// Pocket TTS Farsi v1.
     Pocket,
     /// `amir`.
     Amir,
@@ -100,8 +104,9 @@ pub enum PersianVoice {
     GanjiAdabi,
 }
 
-/// All Persian voices, in menu order (Pocket first: it is the default).
-pub const PERSIAN_VOICES: [PersianVoice; 6] = [
+/// All Persian voices, in menu order (Pocket v2 first: it is the default).
+pub const PERSIAN_VOICES: [PersianVoice; 7] = [
+    PersianVoice::PocketV2,
     PersianVoice::Pocket,
     PersianVoice::Amir,
     PersianVoice::Gyro,
@@ -111,10 +116,11 @@ pub const PERSIAN_VOICES: [PersianVoice; 6] = [
 ];
 
 impl PersianVoice {
-    /// Parse a CLI value or settings id (`"pocket"`, `"amir"`, `"gyro"`,
-    /// `"reza_ibrahim"`, `"ganji"`, `"ganji_adabi"`).
+    /// Parse a CLI value or settings id (`"pocket-v2"`, `"pocket"`,
+    /// `"amir"`, `"gyro"`, `"reza_ibrahim"`, `"ganji"`, `"ganji_adabi"`).
     pub fn parse(s: &str) -> Option<Self> {
         match s {
+            "pocket-v2" => Some(Self::PocketV2),
             "pocket" => Some(Self::Pocket),
             "amir" => Some(Self::Amir),
             "gyro" => Some(Self::Gyro),
@@ -128,6 +134,7 @@ impl PersianVoice {
     /// Short id used in settings, the CLI, and file names.
     pub fn id(self) -> &'static str {
         match self {
+            Self::PocketV2 => "pocket-v2",
             Self::Pocket => "pocket",
             Self::Amir => "amir",
             Self::Gyro => "gyro",
@@ -137,11 +144,12 @@ impl PersianVoice {
         }
     }
 
-    /// Human-readable label for the Settings menu. Pocket says what it does
-    /// for a beginner; the Piper names are just names.
+    /// Human-readable label for the Settings menu. Pocket v2 says what it
+    /// does for a beginner; the Piper names are just names.
     pub fn label(self) -> &'static str {
         match self {
-            Self::Pocket => "Pocket (best quality — recommended)",
+            Self::PocketV2 => "Pocket v2 (best quality — recommended)",
+            Self::Pocket => "Pocket v1",
             Self::Amir => "Amir (Piper — smaller, faster)",
             Self::Gyro => "Gyro (Piper — smaller, faster)",
             Self::RezaIbrahim => "Reza Ibrahim (Piper — smaller, faster)",
@@ -153,6 +161,7 @@ impl PersianVoice {
     /// Directory name under the models root.
     pub fn dir_name(self) -> &'static str {
         match self {
+            Self::PocketV2 => "pocket-farsi-v2",
             Self::Pocket => "pocket-farsi-v1",
             Self::Amir => "vits-piper-fa_IR-amir-medium",
             Self::Gyro => "vits-piper-fa_IR-gyro-medium",
@@ -165,6 +174,7 @@ impl PersianVoice {
     /// ONNX model file name inside the model dir.
     pub fn model_file(self) -> &'static str {
         match self {
+            Self::PocketV2 => "pocket-farsi-v2.onnx",
             Self::Pocket => "pocket-farsi-v1.onnx",
             Self::Amir => "fa_IR-amir-medium.onnx",
             Self::Gyro => "fa_IR-gyro-medium.onnx",
@@ -174,10 +184,14 @@ impl PersianVoice {
         }
     }
 
-    /// Download URL. Pocket is a single `.onnx` file on Hugging Face; the
-    /// Piper voices are `.tar.bz2` archives (see `models::download`).
+    /// Download URL. Each Pocket voice is a single `.onnx` file on
+    /// Hugging Face; the Piper voices are `.tar.bz2` archives (see
+    /// `models::download`).
     pub fn url(self) -> &'static str {
         match self {
+            Self::PocketV2 => {
+                "https://huggingface.co/saostad/readly-voices/resolve/main/pocket-farsi-v2/pocket-farsi-v2.onnx"
+            }
             Self::Pocket => {
                 "https://huggingface.co/saostad/readly-voices/resolve/main/pocket-farsi-v1/pocket-farsi-v1.onnx"
             }
@@ -200,18 +214,18 @@ impl PersianVoice {
     }
 
     /// Files and dirs that must exist inside the model dir (model file
-    /// first). Pocket is a single self-contained file; Piper needs its
-    /// tokens and espeak data too.
+    /// first). Each Pocket voice is a single self-contained file; Piper
+    /// needs its tokens and espeak data too.
     pub fn required_files(self) -> Vec<&'static str> {
         match self {
-            Self::Pocket => vec![self.model_file()],
+            Self::Pocket | Self::PocketV2 => vec![self.model_file()],
             _ => vec![self.model_file(), "tokens.txt", "espeak-ng-data"],
         }
     }
 
     /// True for the Piper voices (Pocket is handled by its own engine).
     pub fn is_piper(self) -> bool {
-        !matches!(self, Self::Pocket)
+        !matches!(self, Self::Pocket | Self::PocketV2)
     }
 
     /// Single-file download coordinates for the Pocket voices (`None` for
@@ -219,6 +233,11 @@ impl PersianVoice {
     /// entry here (plus its `url`).
     pub fn download_spec(self) -> Option<DownloadSpec> {
         match self {
+            Self::PocketV2 => Some(DownloadSpec {
+                url: self.url(),
+                size: 226_378_457,
+                sha256: "53a49a5d2fdf94832a0163939c38eb638789ae1f1678dccdd539240dffcf4703",
+            }),
             Self::Pocket => Some(DownloadSpec {
                 url: self.url(),
                 size: 226_396_445,
@@ -321,6 +340,11 @@ pub enum EngineError {
     PocketRuntime(String),
     /// The Pocket model ran but its data or outputs were malformed.
     PocketData(String),
+    /// The embedded Persian pronunciation (G2P) model for Pocket v2 failed
+    /// to load (the real runtime error is kept).
+    G2pLoadFailed(String),
+    /// Pronouncing one sentence failed (sentence and real error kept).
+    G2pFailed { sentence: String, message: String },
     /// The requested voice name is not in [`VOICES`].
     UnknownVoice(String),
     /// Synthesis returned no audio samples.
@@ -356,6 +380,14 @@ impl fmt::Display for EngineError {
             ),
             EngineError::PocketData(message) => {
                 write!(f, "The Pocket voice model gave bad data: {message}")
+            }
+            EngineError::G2pLoadFailed(message) => write!(
+                f,
+                "Couldn't load the Persian pronunciation model: {message}"
+            ),
+            EngineError::G2pFailed { sentence, message } => {
+                let preview: String = sentence.chars().take(40).collect();
+                write!(f, "Pronunciation step failed for \"{preview}\": {message}")
             }
             EngineError::UnknownVoice(name) => {
                 write!(
@@ -667,9 +699,16 @@ mod tests {
     fn persian_voice_ids_labels_and_paths() {
         let expected = [
             (
+                PersianVoice::PocketV2,
+                "pocket-v2",
+                "Pocket v2 (best quality — recommended)",
+                "pocket-farsi-v2",
+                "pocket-farsi-v2.onnx",
+            ),
+            (
                 PersianVoice::Pocket,
                 "pocket",
-                "Pocket (best quality — recommended)",
+                "Pocket v1",
                 "pocket-farsi-v1",
                 "pocket-farsi-v1.onnx",
             ),
@@ -717,22 +756,30 @@ mod tests {
             assert_eq!(voice.label(), label);
             assert_eq!(voice.dir_name(), dir);
             assert_eq!(voice.model_file(), file);
-            if voice == PersianVoice::Pocket {
+            if !voice.is_piper() {
                 assert_eq!(voice.required_files(), [file]);
-                assert_eq!(
-                    voice.url(),
-                    "https://huggingface.co/saostad/readly-voices/resolve/main/pocket-farsi-v1/pocket-farsi-v1.onnx"
-                );
                 let spec = voice
                     .download_spec()
-                    .expect("pocket has a download spec");
+                    .expect("pocket voices have a download spec");
                 assert_eq!(spec.url, voice.url());
-                assert_eq!(spec.size, 226_396_445);
-                assert_eq!(
-                    spec.sha256,
-                    "3f3322396a6f8a65e970438f0a58b146e90cd49283cf8c46cef7f3f877cdca30"
-                );
-            } else {
+                let (url, size, sha256) = if voice == PersianVoice::PocketV2 {
+                    (
+                        "https://huggingface.co/saostad/readly-voices/resolve/main/pocket-farsi-v2/pocket-farsi-v2.onnx",
+                        226_378_457,
+                        "53a49a5d2fdf94832a0163939c38eb638789ae1f1678dccdd539240dffcf4703",
+                    )
+                } else {
+                    (
+                        "https://huggingface.co/saostad/readly-voices/resolve/main/pocket-farsi-v1/pocket-farsi-v1.onnx",
+                        226_396_445,
+                        "3f3322396a6f8a65e970438f0a58b146e90cd49283cf8c46cef7f3f877cdca30",
+                    )
+                };
+                assert_eq!(voice.url(), url);
+                assert_eq!(spec.size, size);
+                assert_eq!(spec.sha256, sha256);
+            }
+            if voice.is_piper() {
                 assert_eq!(
                     voice.required_files(),
                     [file, "tokens.txt", "espeak-ng-data"]
@@ -748,8 +795,8 @@ mod tests {
         }
         assert_eq!(PersianVoice::parse("sara"), None);
         assert_eq!(PersianVoice::parse(""), None);
-        assert_eq!(PersianVoice::default(), PersianVoice::Pocket);
-        assert_eq!(PERSIAN_VOICES[0], PersianVoice::Pocket);
+        assert_eq!(PersianVoice::default(), PersianVoice::PocketV2);
+        assert_eq!(PERSIAN_VOICES[0], PersianVoice::PocketV2);
     }
 
     #[test]

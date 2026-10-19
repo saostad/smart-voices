@@ -91,18 +91,20 @@ impl Synth for PocketEngine {
     }
 }
 
-/// Load the Persian engine for `voice`: Pocket for the Pocket voice, Piper
-/// for the rest. A Pocket failure is returned verbatim — never a Piper
-/// fallback.
+/// Load the Persian engine for `voice`: Pocket for the Pocket voices,
+/// Piper for the rest. A Pocket failure is returned verbatim — never a
+/// Piper fallback.
 pub fn load_persian_engine(
     models_root: &std::path::Path,
     voice: PersianVoice,
 ) -> Result<Box<dyn Synth>, String> {
     match voice {
-        PersianVoice::Pocket => match PocketEngine::load(models_root) {
-            Ok(engine) => Ok(Box::new(engine) as Box<dyn Synth>),
-            Err(err) => Err(err.to_string()),
-        },
+        PersianVoice::Pocket | PersianVoice::PocketV2 => {
+            match PocketEngine::load(models_root, voice) {
+                Ok(engine) => Ok(Box::new(engine) as Box<dyn Synth>),
+                Err(err) => Err(err.to_string()),
+            }
+        }
         _ => match PiperEngine::load(models_root, voice) {
             Ok(engine) => Ok(Box::new(engine) as Box<dyn Synth>),
             Err(err) => Err(err.to_string()),

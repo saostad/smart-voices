@@ -2,10 +2,16 @@
 //! classification.
 
 /// Prepare one chunk the way the reference runtime does before tokenizing:
-/// flatten line breaks, uppercase the first character, and close a trailing
-/// word character with a period. (The Farsi config disables space padding
-/// and semicolon removal, and Persian has no case to change.)
-pub(crate) fn prepare_text_prompt(chunk: &str) -> String {
+/// flatten line breaks, then (unless the model flags say otherwise)
+/// uppercase the first character and close a trailing word character with a
+/// period. v1 capitalizes and punctuates; v2 speaks G2P phonemes as-is.
+/// (The Farsi config disables space padding and semicolon removal, and
+/// Persian has no case to change.)
+pub(crate) fn prepare_text_prompt(
+    chunk: &str,
+    capitalize_first_letter: bool,
+    append_terminal_punctuation: bool,
+) -> String {
     let mut text = chunk.trim().replace(['\n', '\r'], " ");
     while text.contains("  ") {
         text = text.replace("  ", " ");
@@ -13,12 +19,14 @@ pub(crate) fn prepare_text_prompt(chunk: &str) -> String {
     if text.is_empty() {
         return text;
     }
-    let mut chars = text.chars();
-    if let Some(first) = chars.next() {
-        let upper: String = first.to_uppercase().collect();
-        text = format!("{upper}{}", chars.collect::<String>());
+    if capitalize_first_letter {
+        let mut chars = text.chars();
+        if let Some(first) = chars.next() {
+            let upper: String = first.to_uppercase().collect();
+            text = format!("{upper}{}", chars.collect::<String>());
+        }
     }
-    if text.chars().last().is_some_and(char::is_alphanumeric) {
+    if append_terminal_punctuation && text.chars().last().is_some_and(char::is_alphanumeric) {
         text.push('.');
     }
     text

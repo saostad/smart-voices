@@ -95,7 +95,7 @@ impl Default for Settings {
             voice: DEFAULT_VOICE.to_string(),
             speed: 1.0,
             model: ModelVariant::Fast,
-            persian_voice: PersianVoice::Pocket,
+            persian_voice: PersianVoice::PocketV2,
             watch_clipboard: true,
             auto_read: true,
             unload_after_minutes: 15,
@@ -287,7 +287,7 @@ mod tests {
         assert!(err.is_none(), "unexpected error: {err:?}");
         assert_eq!(settings.voice, "bm_lewis");
         assert_eq!(settings.shortcuts, Shortcuts::default());
-        assert_eq!(settings.persian_voice, PersianVoice::Pocket);
+        assert_eq!(settings.persian_voice, PersianVoice::PocketV2);
     }
 
     #[test]

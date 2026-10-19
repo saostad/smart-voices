@@ -297,7 +297,7 @@ fn parse_download(args: &[String]) -> Option<DownloadOptions> {
     // `--persian-voice <id>` alone implies the Persian download; `--persian`
     // alone means the default voice. A bare `download` keeps fetching Fast.
     if want_persian && persian.is_none() {
-        persian = Some(PersianVoice::Pocket);
+        persian = Some(PersianVoice::default());
     }
     if kokoro.is_none() && persian.is_none() {
         kokoro = Some(ModelVariant::Fast);

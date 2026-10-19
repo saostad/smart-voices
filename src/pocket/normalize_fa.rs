@@ -18,7 +18,7 @@ const PERSIAN_LETTERS: &str = "آابپتثجچحخدذرزژسشصضطظعغف�
 /// Punctuation kept through normalization (prosody the tokenizer learned).
 const KEPT_PUNCT: &str = ".،؛؟!:";
 
-fn is_persian_letter(c: char) -> bool {
+pub(crate) fn is_persian_letter(c: char) -> bool {
     PERSIAN_LETTERS.contains(c)
 }
 

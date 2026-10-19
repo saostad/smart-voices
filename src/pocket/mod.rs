@@ -1,4 +1,4 @@
-//! Pocket TTS (Farsi) engine on ONNX Runtime.
+//! Pocket TTS (Farsi v1/v2) engine on ONNX Runtime.
 //!
 //! The exported `.onnx` is one streaming step: text, voice conditioning, or
 //! the previous latent goes in; one 80 ms audio frame plus the updated caches
@@ -6,8 +6,14 @@
 //! runtimes do (`tts.py` / `tts.ts`): [`PocketEngine`] holds load, voice and
 //! text prefill, the frame loop, and the chunk recipe (retry/split). The text
 //! recipe lives in [`text`], the audio recipe in [`audio`], mastering in
-//! [`mastering`], the ONNX Runtime setup in [`runtime`], and the tokenizer
-//! and normalizer in [`sentencepiece`] and [`normalize_fa`].
+//! [`mastering`], the ONNX Runtime setup in [`runtime`], the tokenizer and
+//! normalizer in [`sentencepiece`] and [`normalize_fa`], and the v2 front
+//! end (phoneme text plus the pronunciation model) in [`text_v2`] and
+//! [`g2p`].
+//!
+//! The front end comes from the model's metadata flags: v1 speaks normalized
+//! Persian script (capitalized, terminal period); v2 speaks G2P phonemes (no
+//! capitalisation, terminal punctuation or padding).
 //!
 //! Runtime sharing: sherpa-onnx is linked shared, so its `libonnxruntime`
 //! sits next to the executable; `ort` (load-dynamic, API 28) loads that same
@@ -15,11 +21,13 @@
 //! fails to load, the error says so; nothing falls back to Piper.
 
 mod audio;
+pub mod g2p;
 mod mastering;
 pub mod normalize_fa;
 mod runtime;
 pub mod sentencepiece;
 mod text;
+pub mod text_v2;
 
 use std::borrow::Cow;
 use std::path::Path;
@@ -28,20 +36,20 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use ort::session::{Session, SessionInputValue, SessionInputs};
 use serde::Deserialize;
 
-use crate::engine::EngineError;
+use crate::engine::{EngineError, PersianVoice};
 
 use self::audio::{RawPiece, finish_speech};
+use self::g2p::G2p;
 use self::normalize_fa::normalize;
 use self::runtime::{
     decode_f16_base64, extract_f32, ort_environment, tensor_f32, tensor_i64, thread_count,
 };
 use self::sentencepiece::SentencePiece;
-use self::text::{classify_piece_end, prepare_text_prompt, split_text};
-
-/// Directory under the models root holding the Pocket model.
-const POCKET_DIR: &str = "pocket-farsi-v1";
-/// The single exported model file inside [`POCKET_DIR`].
-const POCKET_FILE: &str = "pocket-farsi-v1.onnx";
+use self::text::{PieceEnd, classify_piece_end, prepare_text_prompt, split_text};
+use self::text_v2::{
+    MAX_TOKENS as V2_MAX_TOKENS, MIN_TOKENS as V2_MIN_TOKENS, clean_sentence_for_g2p,
+    normalize_for_model, split_chunks, split_sentences, strip_ezafe, translate_phonemes,
+};
 
 /// Farsi-verified generation settings (model card + blind-test harness).
 const TEMPERATURE: f32 = 0.3;
@@ -78,10 +86,25 @@ struct PocketConfig {
     sampler_decode_steps: f32,
     tokens_per_second_estimate: f64,
     gen_seconds_padding: f64,
+    #[serde(default = "default_true")]
+    capitalize_first_letter: bool,
+    #[serde(default = "default_true")]
+    append_terminal_punctuation: bool,
+    #[serde(default)]
+    pad_with_spaces_for_short_inputs: bool,
     voices: std::collections::BTreeMap<String, Vec<usize>>,
 }
 
+fn default_true() -> bool {
+    true
+}
+
 impl PocketConfig {
+    /// v2 speaks G2P phonemes; anything else is the v1 Persian-script path.
+    fn is_v2(&self) -> bool {
+        !self.capitalize_first_letter && !self.append_terminal_punctuation
+    }
+
     fn flow_stride(&self) -> usize {
         self.flow_layers * 2 * self.flow_heads * self.flow_head_dim
     }
@@ -195,11 +218,13 @@ impl Rng {
     }
 }
 
-/// Loaded Pocket TTS (Farsi v1) engine. One baked voice, 24 kHz mono out.
+/// Loaded Pocket TTS (Farsi v1/v2) engine. One baked voice, 24 kHz mono
+/// out. v2 voices also hold the pronunciation model.
 pub struct PocketEngine {
     session: Session,
     config: PocketConfig,
     tokenizer: SentencePiece,
+    g2p: Option<G2p>,
     /// Flow-LM cache rows for the voice prompt, reused by every chunk.
     voice_flow: Vec<f32>,
     voice_len: usize,
@@ -217,10 +242,17 @@ struct StepOutput {
 }
 
 impl PocketEngine {
-    /// Load the Pocket model from `models_root/pocket-farsi-v1/`.
-    pub fn load(models_root: &Path) -> Result<Self, EngineError> {
-        let dir = models_root.join(POCKET_DIR);
-        let file = dir.join(POCKET_FILE);
+    /// Load the Pocket model for `voice` from the models root. The v1/v2
+    /// front end comes from the model's metadata flags, not the voice.
+    pub fn load(models_root: &Path, voice: PersianVoice) -> Result<Self, EngineError> {
+        let dir = models_root.join(voice.dir_name());
+        let file = dir.join(voice.model_file());
+        if !matches!(voice, PersianVoice::Pocket | PersianVoice::PocketV2) {
+            return Err(EngineError::PocketLoadFailed(
+                dir,
+                format!("{} is not a Pocket voice", voice.id()),
+            ));
+        }
         if !file.exists() {
             return Err(EngineError::MissingModel(file));
         }
@@ -256,6 +288,13 @@ impl PocketEngine {
                 return Err(EngineError::PocketLoadFailed(
                     dir.clone(),
                     "model config has a zero sample rate or dimension".to_string(),
+                ));
+            }
+            if config.pad_with_spaces_for_short_inputs {
+                return Err(EngineError::PocketLoadFailed(
+                    dir.clone(),
+                    "model wants space padding for short inputs, which smart-voices doesn't implement"
+                        .to_string(),
                 ));
             }
             let tokenizer_b64 = metadata.custom("pocket_tts_tokenizer").ok_or_else(|| {
@@ -320,10 +359,14 @@ impl PocketEngine {
             session,
             config,
             tokenizer,
+            g2p: None,
             voice_flow: Vec::new(),
             voice_len: 0,
             rng: Rng::new(),
         };
+        if engine.config.is_v2() {
+            engine.g2p = Some(G2p::load()?);
+        }
         // Prefill the voice once; every chunk restarts from this cache.
         let voice_len = voice_shape[0];
         let flow = {
@@ -488,7 +531,11 @@ impl PocketEngine {
 
     /// Generate one chunk in a single attempt (no runaway recovery).
     fn generate_once(&mut self, chunk: &str) -> Result<Vec<f32>, EngineError> {
-        let prepared = prepare_text_prompt(chunk);
+        let prepared = prepare_text_prompt(
+            chunk,
+            self.config.capitalize_first_letter,
+            self.config.append_terminal_punctuation,
+        );
         let tokens = self.tokenizer.encode(&prepared);
         if tokens.is_empty() {
             return Ok(Vec::new());
@@ -709,15 +756,26 @@ impl PocketEngine {
     /// applied as a resample, so pitch moves with speed.
     pub fn synthesize(&mut self, text: &str, speed: f32) -> Result<Vec<f32>, EngineError> {
         let text = text.replace('\0', "");
-        let normalized = normalize(&text);
-        if normalized.is_empty() {
-            return Err(EngineError::NoAudio(text));
-        }
-        let counter = |s: &str| self.tokenizer.encode(s).len();
-        let chunks = split_text(&normalized, &counter, MAX_TOKENS_PER_CHUNK);
-        if chunks.is_empty() {
-            return Err(EngineError::NoAudio(text));
-        }
+        let chunks = if self.config.is_v2() {
+            self.v2_chunks(&text)?
+        } else {
+            let normalized = normalize(&text);
+            if normalized.is_empty() {
+                return Err(EngineError::NoAudio(text));
+            }
+            let counter = |s: &str| self.tokenizer.encode(s).len();
+            let chunks = split_text(&normalized, &counter, MAX_TOKENS_PER_CHUNK);
+            if chunks.is_empty() {
+                return Err(EngineError::NoAudio(text));
+            }
+            chunks
+                .into_iter()
+                .map(|chunk| {
+                    let end = classify_piece_end(&chunk);
+                    (chunk, end)
+                })
+                .collect()
+        };
         let sample_rate = self.config.sample_rate;
         let speed = if speed.is_finite() {
             speed.clamp(0.5, 2.0)
@@ -725,18 +783,61 @@ impl PocketEngine {
             1.0
         };
         let mut pieces = Vec::with_capacity(chunks.len());
-        for chunk in &chunks {
+        for (chunk, end) in &chunks {
             let audio = self.generate_chunk(chunk, 0)?;
-            pieces.push(RawPiece {
-                audio,
-                end: classify_piece_end(chunk),
-            });
+            pieces.push(RawPiece { audio, end: *end });
         }
         let audio = finish_speech(&pieces, sample_rate, speed, None);
         if audio.is_empty() {
             return Err(EngineError::NoAudio(text));
         }
         Ok(audio)
+    }
+
+    /// v2 chunk list: normalize, split into sentences, pronounce each one,
+    /// and split the phonemes into 18/8-token chunks (ezafe marks guide the
+    /// split and are stripped before the model). A piece ending at the end
+    /// of its sentence's phonemes ends a sentence; ezafe/word cuts inside
+    /// carry no punctuation, so they are mid-sentence. Never classified by
+    /// last character: the phoneme alphabet's `?` is a phone, not a
+    /// question mark.
+    fn v2_chunks(&mut self, text: &str) -> Result<Vec<(String, PieceEnd)>, EngineError> {
+        let normalized =
+            normalize_for_model(text).map_err(|_| EngineError::NoAudio(text.to_string()))?;
+        let sentences = split_sentences(&normalized);
+        if sentences.is_empty() {
+            return Err(EngineError::NoAudio(text.to_string()));
+        }
+        let mut chunks = Vec::new();
+        for sentence in &sentences {
+            let clean = clean_sentence_for_g2p(sentence);
+            let g2p = self
+                .g2p
+                .as_mut()
+                .expect("v2 engine without a pronunciation model");
+            let phonemes = g2p.phonemise(&clean)?;
+            if phonemes.trim().is_empty() {
+                let preview: String = sentence.chars().take(40).collect();
+                eprintln!("Pocket TTS: no phonemes for {preview}");
+                continue;
+            }
+            let translated = translate_phonemes(&phonemes);
+            let counter = |piece: &str| self.tokenizer.encode(&strip_ezafe(piece)).len();
+            let units = split_chunks(&translated, &counter, V2_MAX_TOKENS, V2_MIN_TOKENS);
+            let last = units.len().saturating_sub(1);
+            for (index, unit) in units.into_iter().enumerate() {
+                let end = if index == last {
+                    PieceEnd::Sentence
+                } else {
+                    PieceEnd::Mid
+                };
+                chunks.push((strip_ezafe(&unit), end));
+            }
+        }
+        if chunks.is_empty() {
+            return Err(EngineError::NoAudio(text.to_string()));
+        }
+        Ok(chunks)
     }
 }
 
@@ -759,14 +860,32 @@ mod tests {
         let dir =
             std::env::temp_dir().join(format!("smart-voices-pocket-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let result = PocketEngine::load(&dir);
-        std::fs::remove_dir_all(&dir).unwrap();
-        match result {
-            Err(EngineError::MissingModel(path)) => {
-                assert_eq!(path, dir.join(POCKET_DIR).join(POCKET_FILE));
+        for voice in [PersianVoice::PocketV2, PersianVoice::Pocket] {
+            match PocketEngine::load(&dir, voice) {
+                Err(EngineError::MissingModel(path)) => {
+                    assert_eq!(
+                        path,
+                        dir.join(voice.dir_name()).join(voice.model_file()),
+                        "voice {voice:?}"
+                    );
+                }
+                Err(other) => panic!("expected MissingModel, got {other} ({voice:?})"),
+                Ok(_) => panic!("expected MissingModel, got Ok ({voice:?})"),
             }
-            Err(other) => panic!("expected MissingModel, got {other}"),
-            Ok(_) => panic!("expected MissingModel, got Ok"),
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn piper_voice_is_not_a_pocket_voice() {
+        let dir =
+            std::env::temp_dir().join(format!("smart-voices-pocket-test-{}", std::process::id()));
+        match PocketEngine::load(&dir, PersianVoice::Gyro) {
+            Err(EngineError::PocketLoadFailed(_, message)) => {
+                assert!(message.contains("not a Pocket voice"), "{message}");
+            }
+            Err(other) => panic!("expected PocketLoadFailed, got {other}"),
+            Ok(_) => panic!("expected PocketLoadFailed, got Ok"),
         }
     }
 }
