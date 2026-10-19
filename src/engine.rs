@@ -179,7 +179,7 @@ impl PersianVoice {
     pub fn url(self) -> &'static str {
         match self {
             Self::Pocket => {
-                "https://huggingface.co/saostad/pocket-tts-farsi/resolve/main/pocket-farsi-v1.onnx"
+                "https://huggingface.co/saostad/readly-voices/resolve/main/pocket-farsi-v1/pocket-farsi-v1.onnx"
             }
             Self::Amir => {
                 "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-fa_IR-amir-medium.tar.bz2"
@@ -213,6 +213,12 @@ impl PersianVoice {
     pub fn is_piper(self) -> bool {
         !matches!(self, Self::Pocket)
     }
+
+    /// Expected size of the Pocket v1 `.onnx` download, in bytes.
+    pub const POCKET_SIZE_BYTES: u64 = 226_396_445;
+    /// Expected SHA-256 (hex) of the Pocket v1 `.onnx` download.
+    pub const POCKET_SHA256: &str =
+        "3f3322396a6f8a65e970438f0a58b146e90cd49283cf8c46cef7f3f877cdca30";
 }
 
 /// English Kokoro voices in speaker-id order (sid = index).
@@ -698,7 +704,12 @@ mod tests {
                 assert_eq!(voice.required_files(), [file]);
                 assert_eq!(
                     voice.url(),
-                    "https://huggingface.co/saostad/pocket-tts-farsi/resolve/main/pocket-farsi-v1.onnx"
+                    "https://huggingface.co/saostad/readly-voices/resolve/main/pocket-farsi-v1/pocket-farsi-v1.onnx"
+                );
+                assert_eq!(PersianVoice::POCKET_SIZE_BYTES, 226_396_445);
+                assert_eq!(
+                    PersianVoice::POCKET_SHA256,
+                    "3f3322396a6f8a65e970438f0a58b146e90cd49283cf8c46cef7f3f877cdca30"
                 );
             } else {
                 assert_eq!(

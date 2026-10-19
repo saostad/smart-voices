@@ -2668,6 +2668,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "ort",
  "pulldown-cmark",
+ "ring",
  "serde",
  "serde_json",
  "sherpa-onnx",

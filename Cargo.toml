@@ -24,6 +24,7 @@ ureq = "=2.12.1"
 bzip2 = "=0.5.2"
 tar = "=0.4.46"
 pulldown-cmark = { version = "=0.13.4", default-features = false }
+ring = "=0.17.14"
 winit = { version = "0.30", default-features = false, features = ["rwh_06"] }
 tray-icon = { version = "=0.26.1", default-features = false }
 global-hotkey = "=0.8.0"
