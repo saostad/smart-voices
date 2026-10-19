@@ -303,6 +303,38 @@ mod tests {
     }
 
     #[test]
+    fn saved_pocket_voice_stays_v1_while_new_installs_default_to_v2() {
+        // New installs (no key saved) get v2.
+        assert_eq!(Settings::default().persian_voice, PersianVoice::PocketV2);
+        let dir = unique_temp_dir();
+        let path = dir.join("settings.toml");
+        std::fs::create_dir_all(&dir).unwrap();
+        // A voice saved before v2 existed keeps meaning v1: nobody is
+        // silently switched.
+        std::fs::write(&path, "persian_voice = \"pocket\"\n").unwrap();
+        let (settings, err) = Settings::load(&path);
+        assert!(err.is_none(), "unexpected error: {err:?}");
+        assert_eq!(settings.persian_voice, PersianVoice::Pocket);
+        assert_eq!(settings.persian_voice.id(), "pocket");
+        // v2 loads and saves under its own id.
+        std::fs::write(&path, "persian_voice = \"pocket-v2\"\n").unwrap();
+        let (settings, err) = Settings::load(&path);
+        assert!(err.is_none(), "unexpected error: {err:?}");
+        assert_eq!(settings.persian_voice, PersianVoice::PocketV2);
+        let settings = Settings {
+            persian_voice: PersianVoice::PocketV2,
+            ..Settings::default()
+        };
+        settings.save(&path).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            text.contains("persian_voice = \"pocket-v2\""),
+            "saved form: {text}"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn partial_shortcuts_fill_defaults() {
         let dir = unique_temp_dir();
         let path = dir.join("settings.toml");
