@@ -4,7 +4,7 @@
 //! Rust port of readly's `SentencePiece.kt`: reads the `ModelProto` bytes
 //! directly and runs the same greedy highest-score merges as SentencePiece,
 //! with byte fallback. Text must already be normalized
-//! ([`crate::normalize_fa`]); this does not apply SentencePiece's own NFKC
+//! ([`crate::pocket::normalize_fa`]); this does not apply SentencePiece's own NFKC
 //! character map. Checked against the Python `sentencepiece` package on every
 //! test sentence (`tests/fixtures/pocket/fixtures.json`).
 

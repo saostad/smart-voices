@@ -2,8 +2,8 @@
 //! `sentencepiece` package): every row's text must normalize to `normalized`
 //! and encode to `ids`.
 
-use smart_voices::normalize_fa::normalize;
-use smart_voices::sentencepiece::SentencePiece;
+use smart_voices::pocket::normalize_fa::normalize;
+use smart_voices::pocket::sentencepiece::SentencePiece;
 
 #[test]
 fn fixtures_normalize_and_encode() {
