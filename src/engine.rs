@@ -10,23 +10,27 @@ use sherpa_onnx::{
     OfflineTtsModelConfig, OfflineTtsVitsModelConfig,
 };
 
-/// Downloadable model variant: full-precision (fast) or int8 (small).
+/// Downloadable English model variant: full-precision Kokoro (fast), int8
+/// Kokoro (small), or Phonon (best quality).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ModelVariant {
-    /// Full-precision model: larger download, faster synthesis.
+    /// Full-precision Kokoro model: larger download, faster synthesis.
     #[default]
     Fast,
-    /// Quantized int8 model: smaller download, slower synthesis.
+    /// Quantized int8 Kokoro model: smaller download, slower synthesis.
     Small,
+    /// Phonon-31m English: best quality, smaller download.
+    Phonon,
 }
 
 impl ModelVariant {
-    /// Parse a CLI value (`"fast"` or `"small"`).
+    /// Parse a CLI value (`"fast"`, `"small"` or `"phonon"`).
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "fast" => Some(Self::Fast),
             "small" => Some(Self::Small),
+            "phonon" => Some(Self::Phonon),
             _ => None,
         }
     }
@@ -36,18 +40,22 @@ impl ModelVariant {
         match self {
             Self::Fast => "kokoro-multi-lang-v1_0",
             Self::Small => "kokoro-int8-multi-lang-v1_0",
+            Self::Phonon => "phonon-31m-en",
         }
     }
 
-    /// ONNX model file name inside the model dir.
+    /// Model file name inside the model dir.
     pub fn model_file(self) -> &'static str {
         match self {
             Self::Fast => "model.onnx",
             Self::Small => "model.int8.onnx",
+            Self::Phonon => "model.safetensors",
         }
     }
 
-    /// Download URL of the `.tar.bz2` archive.
+    /// Download URL: the `.tar.bz2` archive for the Kokoro variants, the
+    /// model page for Phonon (its real URLs are per file; see
+    /// [`download_files`](Self::download_files)). Used only in messages.
     pub fn url(self) -> &'static str {
         match self {
             Self::Fast => {
@@ -56,6 +64,7 @@ impl ModelVariant {
             Self::Small => {
                 "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-int8-multi-lang-v1_0.tar.bz2"
             }
+            Self::Phonon => "https://huggingface.co/gradium/phonon-31m-en",
         }
     }
 
@@ -64,19 +73,78 @@ impl ModelVariant {
         match self {
             Self::Fast => "Fast (larger download, ~350 MB)",
             Self::Small => "Small (slower, ~130 MB)",
+            Self::Phonon => "Phonon (best quality, ~103 MB)",
         }
     }
 
     /// Files and dirs that must exist inside the model dir (model file first).
-    pub fn required_files(self) -> [&'static str; 6] {
-        [
-            self.model_file(),
-            "voices.bin",
-            "tokens.txt",
-            "espeak-ng-data",
-            "dict",
-            "lexicon-us-en.txt",
-        ]
+    pub fn required_files(self) -> &'static [&'static str] {
+        match self {
+            Self::Fast => &[
+                "model.onnx",
+                "voices.bin",
+                "tokens.txt",
+                "espeak-ng-data",
+                "dict",
+                "lexicon-us-en.txt",
+            ],
+            Self::Small => &[
+                "model.int8.onnx",
+                "voices.bin",
+                "tokens.txt",
+                "espeak-ng-data",
+                "dict",
+                "lexicon-us-en.txt",
+            ],
+            Self::Phonon => &[
+                "model.safetensors",
+                "config.json",
+                "tokenizer.json",
+                "default-voice.safetensors",
+            ],
+        }
+    }
+
+    /// Per-file downloads for variants that don't ship as one archive:
+    /// empty for the Kokoro variants, the four Phonon files otherwise.
+    pub fn download_files(self) -> &'static [DownloadFile] {
+        match self {
+            Self::Fast | Self::Small => &[],
+            Self::Phonon => &[
+                DownloadFile {
+                    name: "model.safetensors",
+                    spec: DownloadSpec {
+                        url: "https://huggingface.co/gradium/phonon-31m-en/resolve/52433c46975bfa13144c56204c9f4ee1c5b148aa/model.safetensors",
+                        size: 102_823_920,
+                        sha256: "8a04cf833cfe69b67c2ec968b2d31244655b9accc84ade9c0ebcc176f2074607",
+                    },
+                },
+                DownloadFile {
+                    name: "config.json",
+                    spec: DownloadSpec {
+                        url: "https://huggingface.co/gradium/phonon-31m-en/resolve/52433c46975bfa13144c56204c9f4ee1c5b148aa/config.json",
+                        size: 2851,
+                        sha256: "7062ea376e6b158543c8abec8e5af67df171c49ad70eb7e2a0fb25c16f265e06",
+                    },
+                },
+                DownloadFile {
+                    name: "tokenizer.json",
+                    spec: DownloadSpec {
+                        url: "https://huggingface.co/gradium/phonon-31m-en/resolve/52433c46975bfa13144c56204c9f4ee1c5b148aa/tokenizer.json",
+                        size: 277_967,
+                        sha256: "691a00068fa7b989f2f3e5ae5daa2d1a5bb319f2d5360deafcfb19a8bb6e7936",
+                    },
+                },
+                DownloadFile {
+                    name: "default-voice.safetensors",
+                    spec: DownloadSpec {
+                        url: "https://huggingface.co/gradium/phonon-31m-en/resolve/52433c46975bfa13144c56204c9f4ee1c5b148aa/default-voice.safetensors",
+                        size: 256_136,
+                        sha256: "f739e8c4c76ee7f92e7c94a82002748c8cd22e99582ac49f7b9b94cd63786e18",
+                    },
+                },
+            ],
+        }
     }
 }
 
@@ -271,6 +339,14 @@ pub struct DownloadSpec {
     pub url: &'static str,
     pub size: u64,
     pub sha256: &'static str,
+}
+
+/// One file of a multi-file model download: its name inside the model dir
+/// plus its download coordinates. See [`ModelVariant::download_files`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DownloadFile {
+    pub name: &'static str,
+    pub spec: DownloadSpec,
 }
 
 /// English Kokoro voices in speaker-id order (sid = index).
@@ -980,5 +1056,50 @@ mod tests {
             err.to_string(),
             "Couldn't load the Persian voice model from /models/vits-piper-fa_IR-amir-medium. The files may be damaged; delete the folder and run `smart-voices download --persian` again."
         );
+    }
+
+    #[test]
+    fn phonon_model_definition() {
+        let variant = ModelVariant::Phonon;
+        assert_eq!(ModelVariant::parse("phonon"), Some(variant));
+        assert_eq!(variant.dir_name(), "phonon-31m-en");
+        assert_eq!(variant.label(), "Phonon (best quality, ~103 MB)");
+        assert_eq!(variant.model_file(), "model.safetensors");
+        assert_eq!(
+            variant.url(),
+            "https://huggingface.co/gradium/phonon-31m-en"
+        );
+        assert_eq!(
+            variant.required_files(),
+            [
+                "model.safetensors",
+                "config.json",
+                "tokenizer.json",
+                "default-voice.safetensors",
+            ]
+        );
+        // The Kokoro variants ship as one archive: no per-file downloads.
+        assert!(ModelVariant::Fast.download_files().is_empty());
+        assert!(ModelVariant::Small.download_files().is_empty());
+        // Four files with non-zero sizes and 64-hex hashes, matching the
+        // required files by name.
+        let files = variant.download_files();
+        assert_eq!(files.len(), 4);
+        let names: Vec<&str> = files.iter().map(|file| file.name).collect();
+        assert_eq!(names, variant.required_files());
+        for file in files {
+            assert!(file.spec.size > 0, "{}", file.name);
+            assert_eq!(file.spec.sha256.len(), 64, "{}", file.name);
+            assert!(
+                file.spec.sha256.bytes().all(|b| b.is_ascii_hexdigit()),
+                "{}",
+                file.name
+            );
+            assert!(
+                file.spec.url.ends_with(&format!("/{0}", file.name)),
+                "{}",
+                file.spec.url
+            );
+        }
     }
 }

@@ -30,8 +30,9 @@ impl ModelId {
         }
     }
 
-    /// Download URL: the `.tar.bz2` archive, or the single `.onnx` for a
-    /// voice with a [`DownloadSpec`].
+    /// Download URL: the `.tar.bz2` archive, the single `.onnx` for a
+    /// voice with a [`DownloadSpec`], or the model page for a variant with
+    /// per-file downloads (used only in messages; never fetched).
     pub fn url(self) -> &'static str {
         match self {
             Self::Kokoro(variant) => variant.url(),
@@ -175,7 +176,16 @@ pub fn download(
     if let ModelId::Persian(voice) = model
         && let Some(spec) = voice.download_spec()
     {
-        return download_single_file(root, model, &spec, progress);
+        let files = [(model.required_files()[0], spec)];
+        return download_files(root, model, &files, progress);
+    }
+    if let ModelId::Kokoro(variant) = model {
+        let files = variant.download_files();
+        if !files.is_empty() {
+            let files: Vec<(&'static str, DownloadSpec)> =
+                files.iter().map(|file| (file.name, file.spec)).collect();
+            return download_files(root, model, &files, progress);
+        }
     }
     let final_dir = model_dir(root, model);
     let partial = prepare_partial_dir(root, model)?;
@@ -261,38 +271,45 @@ pub fn download(
     Ok(final_dir)
 }
 
-/// Download a single-file voice model (a Pocket voice): stream the `.onnx`
-/// from `spec` into a staging file (resuming across dropped connections),
-/// verify it by size and hash, then rename the staging dir into place.
-fn download_single_file(
+/// Download one file per `files` entry (a Pocket voice is the one-entry
+/// case): stream each file into the same staging dir (resuming across
+/// dropped connections), verify it by size and hash, then rename the staging
+/// dir into place. Progress is cumulative: bytes of finished files plus the
+/// current file's bytes, over the sum of all sizes. Any failure removes the
+/// staging dir.
+fn download_files(
     root: &Path,
     model: ModelId,
-    spec: &DownloadSpec,
-    progress: impl FnMut(u64, Option<u64>),
+    files: &[(&'static str, DownloadSpec)],
+    mut progress: impl FnMut(u64, Option<u64>),
 ) -> Result<PathBuf, ModelError> {
     let final_dir = model_dir(root, model);
     let partial = prepare_partial_dir(root, model)?;
     let cleanup = |partial: &Path| {
         let _ = std::fs::remove_dir_all(partial);
     };
-    let file_name = model.required_files()[0];
-    let staging_file = partial.join(file_name);
-    if let Err(err) = download_file(
-        spec.url,
-        spec.size,
-        spec.sha256,
-        &staging_file,
-        progress,
-        || false,
-    ) {
-        cleanup(&partial);
-        return Err(match err {
-            DownloadError::Fetch { url, message } => ModelError::Download { url, message },
-            DownloadError::Verify { message } => ModelError::Unpack {
-                dir: partial.clone(),
-                message,
-            },
-        });
+    let total: u64 = files.iter().map(|(_, spec)| spec.size).sum();
+    let mut finished: u64 = 0;
+    for (name, spec) in files {
+        let staging_file = partial.join(name);
+        if let Err(err) = download_file(
+            spec.url,
+            spec.size,
+            spec.sha256,
+            &staging_file,
+            |done, _| progress(finished + done, Some(total)),
+            || false,
+        ) {
+            cleanup(&partial);
+            return Err(match err {
+                DownloadError::Fetch { url, message } => ModelError::Download { url, message },
+                DownloadError::Verify { message } => ModelError::Unpack {
+                    dir: partial.clone(),
+                    message,
+                },
+            });
+        }
+        finished += spec.size;
     }
     match std::fs::remove_dir_all(&final_dir) {
         Ok(()) => {}
@@ -385,6 +402,7 @@ mod tests {
         let mut models = vec![
             ModelId::Kokoro(ModelVariant::Fast),
             ModelId::Kokoro(ModelVariant::Small),
+            ModelId::Kokoro(ModelVariant::Phonon),
         ];
         models.extend(
             crate::engine::PERSIAN_VOICES
