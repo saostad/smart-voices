@@ -199,16 +199,20 @@ fn speak(args: &[String]) -> i32 {
     if voice_flag && model == ModelVariant::Phonon {
         eprintln!("Note: --voice is ignored with --model phonon; Phonon uses its own voice.");
     }
+    // An unknown saved id must not fail silently: warn loudly and use the
+    // default.
+    let mut phonon_voice = settings.phonon_voice;
+    if !smart_voices::phonon::is_known_voice(&phonon_voice) {
+        eprintln!(
+            "Warning: Unknown Phonon voice '{phonon_voice}' in settings; using the default Phonon voice."
+        );
+        phonon_voice = smart_voices::phonon::DEFAULT_PHONON_VOICE.to_string();
+    }
 
     // Download whichever models this text needs; English-only text never
     // downloads the Persian voice.
     let chunks = prepare(&options.text, &SanitizerOptions::default(), &pronunciations);
-    for needed in models::models_for_chunks(
-        &chunks,
-        model,
-        persian_voice,
-        smart_voices::phonon::DEFAULT_PHONON_VOICE,
-    ) {
+    for needed in models::models_for_chunks(&chunks, model, persian_voice, &phonon_voice) {
         if let Err(err) = download_with_progress(&models_root, needed) {
             eprintln!("Error: {err}");
             return 1;

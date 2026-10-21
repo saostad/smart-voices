@@ -207,7 +207,10 @@ pub fn run() -> i32 {
         && let Err(message) = app.start_watcher()
     {
         eprintln!("Error: {message}");
-        app.startup_error = Some(message);
+        app.startup_error = Some(match app.startup_error.take() {
+            Some(existing) => format!("{existing}\n{message}"),
+            None => message,
+        });
     }
     match event_loop.run_app(&mut app) {
         Ok(()) => app.exit_code,
@@ -318,6 +321,19 @@ impl App {
         models_root: PathBuf,
         debug_latency: bool,
     ) -> Self {
+        let mut settings = settings;
+        // An unknown saved id must not fail silently: warn loudly and use
+        // the default (shown in the status line once the menu exists).
+        let mut startup_error = None;
+        if !crate::phonon::is_known_voice(&settings.phonon_voice) {
+            let message = format!(
+                "Unknown Phonon voice '{}' in settings; using the default Phonon voice.",
+                settings.phonon_voice
+            );
+            eprintln!("Warning: {message}");
+            startup_error = Some(message);
+            settings.phonon_voice = crate::phonon::DEFAULT_PHONON_VOICE.to_string();
+        }
         let model = settings.model;
         Self {
             proxy,
@@ -328,7 +344,7 @@ impl App {
             model,
             player: None,
             watcher: None,
-            startup_error: None,
+            startup_error,
             tray: None,
             tray_idle_icon: None,
             tray_speaking_icons: Vec::new(),

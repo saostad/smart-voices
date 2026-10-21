@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::engine::{DEFAULT_VOICE, ModelVariant, PersianVoice};
+use crate::phonon::DEFAULT_PHONON_VOICE;
 
 /// Errors from loading or saving the settings file.
 #[derive(Debug)]
@@ -69,6 +70,9 @@ impl Default for Shortcuts {
 pub struct Settings {
     /// Voice name (see `engine::VOICES`).
     pub voice: String,
+    /// Phonon voice id: `"default"` (the checkpoint's own voice) or a
+    /// catalog id (see `phonon::PHONON_VOICES`).
+    pub phonon_voice: String,
     /// Speech speed multiplier.
     pub speed: f32,
     /// Model variant.
@@ -93,6 +97,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             voice: DEFAULT_VOICE.to_string(),
+            phonon_voice: DEFAULT_PHONON_VOICE.to_string(),
             speed: 1.0,
             model: ModelVariant::Fast,
             persian_voice: PersianVoice::PocketV2,
@@ -190,6 +195,7 @@ mod tests {
         let path = dir.join("sub").join("settings.toml");
         let settings = Settings {
             voice: "bm_lewis".to_string(),
+            phonon_voice: "NbpkqMVS3CJeq2j8".to_string(),
             speed: 1.25,
             model: ModelVariant::Small,
             persian_voice: PersianVoice::Gyro,
@@ -227,6 +233,39 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
         assert!(err.is_none(), "unexpected error: {err:?}");
         assert_eq!(reloaded.model, ModelVariant::Phonon);
+    }
+
+    #[test]
+    fn phonon_voice_round_trips() {
+        let dir = unique_temp_dir();
+        let path = dir.join("settings.toml");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&path, "phonon_voice = \"NbpkqMVS3CJeq2j8\"\n").unwrap();
+        let (settings, err) = Settings::load(&path);
+        assert!(err.is_none(), "unexpected error: {err:?}");
+        assert_eq!(settings.phonon_voice, "NbpkqMVS3CJeq2j8");
+        settings.save(&path).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            text.contains("phonon_voice = \"NbpkqMVS3CJeq2j8\""),
+            "saved form: {text}"
+        );
+        let (reloaded, err) = Settings::load(&path);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(err.is_none(), "unexpected error: {err:?}");
+        assert_eq!(reloaded.phonon_voice, "NbpkqMVS3CJeq2j8");
+    }
+
+    #[test]
+    fn old_file_without_phonon_voice_loads_default() {
+        let dir = unique_temp_dir();
+        let path = dir.join("settings.toml");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&path, "voice = \"bm_lewis\"\n").unwrap();
+        let (settings, err) = Settings::load(&path);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(err.is_none(), "unexpected error: {err:?}");
+        assert_eq!(settings.phonon_voice, DEFAULT_PHONON_VOICE);
     }
 
     #[test]
