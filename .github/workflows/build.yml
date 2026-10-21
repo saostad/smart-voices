@@ -8,6 +8,12 @@ on:
   pull_request:
   workflow_dispatch:
 
+# A newer push to the same branch replaces an unfinished build; on main its release
+# includes the same commits.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ${{ matrix.os }}
@@ -25,12 +31,49 @@ jobs:
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
+
+      # sherpa-onnx links shared. Left alone, its build script downloads the runtime
+      # libs into target/, where the dependency cache drops them but keeps the build
+      # script's result, so a cached build cannot link. Keep them outside target/.
+      - name: Choose sherpa-onnx runtime
+        id: sherpa
+        shell: bash
+        run: |
+          set -eu
+          VERSION="$(grep -A1 '^name = "sherpa-onnx-sys"$' Cargo.lock | sed -n 's/^version = "\(.*\)"$/\1/p')"
+          case "$RUNNER_OS" in
+            Linux) PLATFORM=linux-x64-shared-lib ;;
+            macOS) PLATFORM=osx-arm64-shared-lib ;;
+            Windows) PLATFORM=win-x64-shared-MT-Release-lib ;;
+          esac
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "stem=sherpa-onnx-v$VERSION-$PLATFORM" >> "$GITHUB_OUTPUT"
+
+      - name: Cache sherpa-onnx runtime
+        uses: actions/cache@v4
         with:
-          # sherpa-onnx links shared: its build script downloads the runtime
-          # libs into target/sherpa-onnx-prebuilt, which this cache's target
-          # cleanup drops while keeping the build-script "done" marker, so a
-          # cached build cannot link. Cache only the registry/git sources.
-          cache-targets: false
+          path: ~/sherpa-onnx
+          key: ${{ steps.sherpa.outputs.stem }}
+
+      - name: Download sherpa-onnx runtime
+        shell: bash
+        env:
+          VERSION: ${{ steps.sherpa.outputs.version }}
+          STEM: ${{ steps.sherpa.outputs.stem }}
+        run: |
+          set -eu
+          ROOT="$HOME/sherpa-onnx"
+          if [ ! -d "$ROOT/$STEM/lib" ]; then
+            mkdir -p "$ROOT"
+            curl -fsSL -o "$ROOT/$STEM.tar.bz2" "https://github.com/k2-fsa/sherpa-onnx/releases/download/v$VERSION/$STEM.tar.bz2"
+            tar -xjf "$ROOT/$STEM.tar.bz2" -C "$ROOT"
+            rm "$ROOT/$STEM.tar.bz2"
+          fi
+          LIB="$ROOT/$STEM/lib"
+          if [ "$RUNNER_OS" = Windows ]; then LIB="$(cygpath -w "$LIB")"; fi
+          echo "SHERPA_ONNX_LIB_DIR=$LIB" >> "$GITHUB_ENV"
+          # Windows tests find the DLLs on PATH; Linux and macOS use the rpath.
+          echo "$LIB" >> "$GITHUB_PATH"
 
       - name: Install Linux audio dependencies
         if: runner.os == 'Linux'
@@ -48,6 +91,18 @@ jobs:
 
       - name: Build release
         run: cargo build --release
+
+      # The build script only copies the runtime libs next to the binary when it
+      # runs, which a cached build skips.
+      - name: Put runtime libs next to the binary
+        shell: bash
+        run: |
+          set -eu
+          shopt -s nullglob
+          for f in "$SHERPA_ONNX_LIB_DIR"/*.so* "$SHERPA_ONNX_LIB_DIR"/*.dylib "$SHERPA_ONNX_LIB_DIR"/*.dll; do
+            cp -L "$f" target/release/
+          done
+          ls target/release
 
       - name: Package (Linux)
         if: runner.os == 'Linux'
