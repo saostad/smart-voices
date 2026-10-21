@@ -40,12 +40,13 @@ Models download automatically when first needed:
 |---|---|---|
 | Fast (default English voice) | ~350 MB | First English reading |
 | Small (slower, low-memory English) | ~130 MB | Only if you pick it in Settings |
+| Phonon (best-quality English) | ~103 MB | Only if you pick it in Settings |
 | Persian voice (Pocket, best quality) | ~230 MB | First Persian reading (English-only use never downloads it) |
 | Persian voice (Piper, smaller) | ~67 MB | Only if you pick a Piper voice in Settings |
 
 You can also pre-download from a terminal:
-`smart-voices download`, `smart-voices download --model small`, or
-`smart-voices download --persian`.
+`smart-voices download`, `smart-voices download --model small`,
+`smart-voices download --model phonon`, or `smart-voices download --persian`.
 
 ## The tray menu
 
@@ -63,7 +64,7 @@ Next buttons. Close it to hide it for that reading.
 The `Settings` submenu holds everything customizable:
 
 - `English Voice` — 28 voices grouped by accent and gender, with
-  `Voice Model` (Fast or Small; switching reloads the voice) below them.
+  `Voice Model` (Fast, Small or Phonon; switching reloads the voice) below them.
 - `Persian Voice` — `Pocket v2 (best quality — recommended)` is the default
   and sounds the most natural; `Pocket v1` below it. The Piper voices (Amir,
   Gyro, Reza Ibrahim, Ganji, Ganji Adabi) are smaller downloads and start
