@@ -12,6 +12,9 @@ use ptts::synth::{DeviceKind, Quant, SpeechOptions, Synth};
 use crate::engine::{EngineError, ModelVariant, clamp_speed};
 use crate::pocket::audio::apply_speed;
 
+/// Voice embedding file inside the model dir, registered as `"default"`.
+pub(crate) const DEFAULT_VOICE_FILE: &str = "default-voice.safetensors";
+
 /// Loaded Phonon TTS engine.
 pub struct PhononEngine {
     tts: Synth,
@@ -43,8 +46,11 @@ impl PhononEngine {
             .device(DeviceKind::Cpu)
             .build()
             .map_err(|err| EngineError::PhononLoadFailed(dir.clone(), err.to_string()))?;
-        // Picks up `default-voice.safetensors` as "default".
-        checkpoint.register_voices(&mut tts);
+        // Load the default voice loudly: `register_voices` only warns (and this
+        // app installs no tracing subscriber), which would leave synthesis
+        // running unconditioned in a random-sounding voice.
+        tts.add_voice_file("default", &dir.join(DEFAULT_VOICE_FILE))
+            .map_err(|err| EngineError::PhononLoadFailed(dir.clone(), err.to_string()))?;
         Ok(Self { tts })
     }
 
@@ -64,7 +70,7 @@ impl PhononEngine {
         let speed = clamp_speed(speed);
         let pcm = self
             .tts
-            .say_with(&text, &SpeechOptions::default())
+            .say_with(&text, &SpeechOptions::default().voice("default"))
             .map_err(|err| EngineError::PhononFailed(err.to_string()))?;
         if pcm.is_empty() {
             return Err(EngineError::NoAudio(text));
@@ -150,5 +156,22 @@ mod tests {
             fast.len(),
             slow.len()
         );
+
+        // A damaged voice file must fail the load loudly, never fall back to
+        // an unconditioned voice.
+        let scratch = unique_temp_dir();
+        let source = root.join(ModelVariant::Phonon.dir_name());
+        let damaged = scratch.join(ModelVariant::Phonon.dir_name());
+        std::fs::create_dir_all(&damaged).unwrap();
+        for name in ModelVariant::Phonon.required_files() {
+            std::fs::copy(source.join(name), damaged.join(name)).unwrap();
+        }
+        std::fs::write(damaged.join(DEFAULT_VOICE_FILE), b"not a voice").unwrap();
+        match PhononEngine::load(&scratch) {
+            Err(EngineError::PhononLoadFailed(_, _)) => {}
+            Ok(_) => panic!("expected PhononLoadFailed, got Ok"),
+            Err(other) => panic!("expected PhononLoadFailed, got {other}"),
+        }
+        std::fs::remove_dir_all(&scratch).unwrap();
     }
 }

@@ -100,7 +100,7 @@ impl ModelVariant {
                 "model.safetensors",
                 "config.json",
                 "tokenizer.json",
-                "default-voice.safetensors",
+                crate::phonon::DEFAULT_VOICE_FILE,
             ],
         }
     }
