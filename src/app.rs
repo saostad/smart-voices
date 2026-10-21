@@ -1445,10 +1445,18 @@ impl App {
         if phonon == self.phonon_note_shown {
             return;
         }
-        let updated = match (&self.english_voice_menu, &self.phonon_note_item) {
-            (Some(menu), Some(note)) if phonon => menu.insert(note, 0).is_ok(),
-            (Some(menu), Some(note)) => menu.remove(note).is_ok(),
-            _ => false,
+        let result = match (&self.english_voice_menu, &self.phonon_note_item) {
+            (Some(menu), Some(note)) if phonon => Some(menu.insert(note, 0)),
+            (Some(menu), Some(note)) => Some(menu.remove(note)),
+            _ => None,
+        };
+        let updated = match result {
+            Some(Ok(())) => true,
+            Some(Err(err)) => {
+                eprintln!("Warning: Couldn't update the English Voice menu: {err}");
+                false
+            }
+            None => false,
         };
         if updated {
             self.phonon_note_shown = phonon;
