@@ -212,6 +212,24 @@ mod tests {
     }
 
     #[test]
+    fn phonon_model_round_trips() {
+        let dir = unique_temp_dir();
+        let path = dir.join("settings.toml");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&path, "model = \"phonon\"\n").unwrap();
+        let (settings, err) = Settings::load(&path);
+        assert!(err.is_none(), "unexpected error: {err:?}");
+        assert_eq!(settings.model, ModelVariant::Phonon);
+        settings.save(&path).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("model = \"phonon\""), "saved form: {text}");
+        let (reloaded, err) = Settings::load(&path);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(err.is_none(), "unexpected error: {err:?}");
+        assert_eq!(reloaded.model, ModelVariant::Phonon);
+    }
+
+    #[test]
     fn missing_file_yields_defaults_without_error() {
         let dir = unique_temp_dir();
         let (settings, err) = Settings::load(&dir.join("settings.toml"));
@@ -274,6 +292,18 @@ mod tests {
                 ..Settings::default()
             }
         );
+    }
+
+    #[test]
+    fn old_file_without_model_loads_fast() {
+        let dir = unique_temp_dir();
+        let path = dir.join("settings.toml");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&path, "voice = \"bm_lewis\"\n").unwrap();
+        let (settings, err) = Settings::load(&path);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(err.is_none(), "unexpected error: {err:?}");
+        assert_eq!(settings.model, ModelVariant::Fast);
     }
 
     #[test]

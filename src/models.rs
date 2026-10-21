@@ -14,10 +14,10 @@ use crate::download::{DownloadError, PROGRESS_INTERVAL, download_file};
 use crate::engine::{DownloadSpec, ModelVariant, PersianVoice};
 use crate::lang::{Lang, chunk_language};
 
-/// A downloadable voice model: a Kokoro variant or a Persian Piper voice.
+/// A downloadable voice model: an English variant or a Persian voice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModelId {
-    Kokoro(ModelVariant),
+    English(ModelVariant),
     Persian(PersianVoice),
 }
 
@@ -25,7 +25,7 @@ impl ModelId {
     /// Directory name under the models root.
     pub fn dir_name(self) -> &'static str {
         match self {
-            Self::Kokoro(variant) => variant.dir_name(),
+            Self::English(variant) => variant.dir_name(),
             Self::Persian(voice) => voice.dir_name(),
         }
     }
@@ -35,7 +35,7 @@ impl ModelId {
     /// per-file downloads (used only in messages; never fetched).
     pub fn url(self) -> &'static str {
         match self {
-            Self::Kokoro(variant) => variant.url(),
+            Self::English(variant) => variant.url(),
             Self::Persian(voice) => voice.url(),
         }
     }
@@ -43,7 +43,7 @@ impl ModelId {
     /// Human-readable label for download progress.
     pub fn label(self) -> &'static str {
         match self {
-            Self::Kokoro(variant) => variant.label(),
+            Self::English(variant) => variant.label(),
             Self::Persian(PersianVoice::PocketV2) => "Persian voice (Pocket v2, best quality)",
             Self::Persian(PersianVoice::Pocket) => "Persian voice (Pocket v1)",
             Self::Persian(PersianVoice::Amir) => "Persian voice (Amir)",
@@ -57,7 +57,7 @@ impl ModelId {
     /// Files and dirs that must exist inside the model dir (model file first).
     pub fn required_files(self) -> Vec<&'static str> {
         match self {
-            Self::Kokoro(variant) => variant.required_files().to_vec(),
+            Self::English(variant) => variant.required_files().to_vec(),
             Self::Persian(voice) => voice.required_files(),
         }
     }
@@ -103,8 +103,8 @@ impl fmt::Display for ModelError {
 
 impl Error for ModelError {}
 
-/// Models needed to read `chunks`: the Kokoro `variant` when any chunk is
-/// English, the Persian `voice` when any chunk is Persian (Kokoro first).
+/// Models needed to read `chunks`: the English `variant` when any chunk is
+/// English, the Persian `voice` when any chunk is Persian (English first).
 /// English-only text never asks for the Persian model.
 #[must_use]
 pub fn models_for_chunks(
@@ -117,7 +117,7 @@ pub fn models_for_chunks(
         .iter()
         .any(|chunk| chunk_language(&chunk.text) == Lang::English)
     {
-        models.push(ModelId::Kokoro(variant));
+        models.push(ModelId::English(variant));
     }
     if chunks
         .iter()
@@ -179,7 +179,7 @@ pub fn download(
         let files = [(model.required_files()[0], spec)];
         return download_files(root, model, &files, progress);
     }
-    if let ModelId::Kokoro(variant) = model {
+    if let ModelId::English(variant) = model {
         let files = variant.download_files();
         if !files.is_empty() {
             let files: Vec<(&'static str, DownloadSpec)> =
@@ -400,9 +400,9 @@ mod tests {
 
     fn all_models() -> Vec<ModelId> {
         let mut models = vec![
-            ModelId::Kokoro(ModelVariant::Fast),
-            ModelId::Kokoro(ModelVariant::Small),
-            ModelId::Kokoro(ModelVariant::Phonon),
+            ModelId::English(ModelVariant::Fast),
+            ModelId::English(ModelVariant::Small),
+            ModelId::English(ModelVariant::Phonon),
         ];
         models.extend(
             crate::engine::PERSIAN_VOICES
@@ -448,7 +448,7 @@ mod tests {
         let voice = PersianVoice::Gyro;
         assert_eq!(
             models_for_chunks(&[chunk("Hello."), chunk("World.")], variant, voice),
-            [ModelId::Kokoro(variant)]
+            [ModelId::English(variant)]
         );
         assert_eq!(
             models_for_chunks(&[chunk("سلام.")], variant, voice),
@@ -456,7 +456,7 @@ mod tests {
         );
         assert_eq!(
             models_for_chunks(&[chunk("سلام."), chunk("Hello.")], variant, voice),
-            [ModelId::Kokoro(variant), ModelId::Persian(voice)]
+            [ModelId::English(variant), ModelId::Persian(voice)]
         );
         assert!(models_for_chunks(&[], variant, voice).is_empty());
     }
@@ -464,7 +464,7 @@ mod tests {
     #[test]
     fn prepare_partial_dir_removes_leftover() {
         let dir = unique_temp_dir();
-        let model = ModelId::Kokoro(ModelVariant::Fast);
+        let model = ModelId::English(ModelVariant::Fast);
         // Simulate a leftover from an interrupted run.
         let leftover = partial_path(&dir, model);
         std::fs::create_dir_all(leftover.join("nested")).unwrap();

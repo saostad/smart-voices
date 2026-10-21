@@ -28,8 +28,7 @@ use crate::audio::AudioSink;
 use crate::autostart;
 use crate::clipboard::{self, ClipboardEvent, MIN_TEXT_LEN};
 use crate::engine::{
-    KokoroEngine, ModelVariant, PERSIAN_VOICES, PersianVoice, VOICES, grouped_english_voices,
-    voice_short_name,
+    ModelVariant, PERSIAN_VOICES, PersianVoice, VOICES, grouped_english_voices, voice_short_name,
 };
 use crate::icon;
 use crate::models::{self, ModelId};
@@ -256,6 +255,13 @@ struct App {
     watch_item: Option<CheckMenuItem>,
     autoread_item: Option<CheckMenuItem>,
     voice_items: Vec<(String, CheckMenuItem)>,
+    /// The "English Voice" submenu handle (for the Phonon note insert/remove).
+    english_voice_menu: Option<Submenu>,
+    /// Disabled "Phonon uses its own voice" note, inserted at the top of the
+    /// "English Voice" submenu while Phonon is selected.
+    phonon_note_item: Option<MenuItem>,
+    /// Whether the Phonon note is currently in the menu.
+    phonon_note_shown: bool,
     persian_voice_items: Vec<(PersianVoice, CheckMenuItem)>,
     speed_items: Vec<(f32, CheckMenuItem)>,
     model_items: Vec<(ModelVariant, CheckMenuItem)>,
@@ -338,6 +344,9 @@ impl App {
             watch_item: None,
             autoread_item: None,
             voice_items: Vec::new(),
+            english_voice_menu: None,
+            phonon_note_item: None,
+            phonon_note_shown: false,
             persian_voice_items: Vec::new(),
             speed_items: Vec::new(),
             model_items: Vec::new(),
@@ -452,14 +461,19 @@ impl App {
         let quit_item = MenuItem::new("Quit Smart Voices", true, None);
 
         let model_menu = Submenu::new("Voice Model", true);
-        let mut model_items = Vec::with_capacity(2);
-        for variant in [ModelVariant::Fast, ModelVariant::Small] {
+        let mut model_items = Vec::with_capacity(3);
+        for variant in [
+            ModelVariant::Fast,
+            ModelVariant::Small,
+            ModelVariant::Phonon,
+        ] {
             let item = CheckMenuItem::new(variant.label(), true, variant == self.model, None);
             model_menu.append(&item).map_err(menu_build_error)?;
             model_items.push((variant, item));
         }
 
         let english_voice_menu = Submenu::new("English Voice", true);
+        let phonon_note_item = MenuItem::new("Phonon uses its own voice", false, None);
         let mut voice_items = Vec::with_capacity(VOICES.len());
         for (group, ids) in grouped_english_voices() {
             english_voice_menu
@@ -653,6 +667,8 @@ impl App {
         self.watch_item = Some(watch_item);
         self.autoread_item = Some(autoread_item);
         self.voice_items = voice_items;
+        self.english_voice_menu = Some(english_voice_menu);
+        self.phonon_note_item = Some(phonon_note_item);
         self.persian_voice_items = persian_voice_items;
         self.speed_items = speed_items;
         self.model_items = model_items;
@@ -665,6 +681,7 @@ impl App {
         self.animate_icon_item = Some(animate_icon_item);
         self.open_reader_item = Some(open_reader_item);
         self.tray = Some(tray);
+        self.update_english_voice_state();
         if let Some(err) = self.startup_error.take() {
             self.show_error(&err);
         }
@@ -790,7 +807,7 @@ impl App {
     fn play_text(&mut self, text: String) {
         self.reload_pronunciations();
         // Download whichever models this reading needs (English chunks need
-        // the Kokoro variant, Persian chunks the Persian voice), one after the
+        // the English variant, Persian chunks the Persian voice), one after the
         // other, then play. English-only text never downloads the Persian
         // voice.
         let chunks = prepare(&text, &SanitizerOptions::default(), &self.pronunciations);
@@ -915,10 +932,7 @@ impl App {
         let model = self.model;
         let persian_root = models_root.clone();
         let factory = move || -> Result<Box<dyn Synth>, String> {
-            match KokoroEngine::load(&models_root, model) {
-                Ok(engine) => Ok(Box::new(engine) as Box<dyn Synth>),
-                Err(err) => Err(err.to_string()),
-            }
+            crate::player::load_english_engine(&models_root, model)
         };
         let persian_factory = move || -> Result<Box<dyn Synth>, String> {
             crate::player::load_persian_engine(&persian_root, persian_voice)
@@ -1410,11 +1424,34 @@ impl App {
             self.save_settings();
         }
         self.update_model_checks();
+        self.update_english_voice_state();
     }
 
     fn update_model_checks(&self) {
         for (variant, item) in &self.model_items {
             item.set_checked(*variant == self.model);
+        }
+    }
+
+    /// Sync the "English Voice" submenu with the selected model: while Phonon
+    /// is selected the Kokoro voice items are disabled and the Phonon note
+    /// sits above the voices; otherwise the items are enabled and the note is
+    /// removed.
+    fn update_english_voice_state(&mut self) {
+        let phonon = self.model == ModelVariant::Phonon;
+        for (_, item) in &self.voice_items {
+            item.set_enabled(!phonon);
+        }
+        if phonon == self.phonon_note_shown {
+            return;
+        }
+        let updated = match (&self.english_voice_menu, &self.phonon_note_item) {
+            (Some(menu), Some(note)) if phonon => menu.insert(note, 0).is_ok(),
+            (Some(menu), Some(note)) => menu.remove(note).is_ok(),
+            _ => false,
+        };
+        if updated {
+            self.phonon_note_shown = phonon;
         }
     }
 
@@ -1751,7 +1788,7 @@ fn tray_icon(rgba: &[u8]) -> Option<Icon> {
 /// Status-line label for a running model download.
 fn download_label(model: ModelId) -> &'static str {
     match model {
-        ModelId::Kokoro(_) => "Downloading voice",
+        ModelId::English(_) => "Downloading voice",
         ModelId::Persian(_) => "Downloading Persian voice",
     }
 }
@@ -1919,7 +1956,7 @@ mod tests {
             "Downloading Persian voice: 30/67 MB"
         );
         assert_eq!(
-            download_label(ModelId::Kokoro(crate::engine::ModelVariant::Fast)),
+            download_label(ModelId::English(crate::engine::ModelVariant::Fast)),
             "Downloading voice"
         );
     }

@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use smart_voices::app;
 use smart_voices::audio::AudioSink;
 use smart_voices::clipboard::{self, ClipboardEvent, MIN_TEXT_LEN};
-use smart_voices::engine::{KokoroEngine, ModelVariant, PersianVoice};
+use smart_voices::engine::{ModelVariant, PersianVoice};
 use smart_voices::models::{self, ModelError, ModelId};
 use smart_voices::pipeline::prepare;
 use smart_voices::player::{Player, PlayerConfig, PlayerEvent, Synth};
@@ -231,10 +231,7 @@ fn speak(args: &[String]) -> i32 {
     };
     let persian_root = models_root.clone();
     let factory = move || -> Result<Box<dyn Synth>, String> {
-        match KokoroEngine::load(&models_root, model) {
-            Ok(engine) => Ok(Box::new(engine) as Box<dyn Synth>),
-            Err(err) => Err(err.to_string()),
-        }
+        smart_voices::player::load_english_engine(&models_root, model)
     };
     let persian_factory = move || -> Result<Box<dyn Synth>, String> {
         smart_voices::player::load_persian_engine(&persian_root, persian_voice)
@@ -318,7 +315,7 @@ fn download_cmd(args: &[String]) -> i32 {
     };
     let mut models = Vec::with_capacity(2);
     if let Some(variant) = options.kokoro {
-        models.push(ModelId::Kokoro(variant));
+        models.push(ModelId::English(variant));
     }
     if let Some(voice) = options.persian {
         models.push(ModelId::Persian(voice));
@@ -650,10 +647,7 @@ impl LazyPlayer {
         let model = self.model;
         let persian_root = models_root.clone();
         let factory = move || -> Result<Box<dyn Synth>, String> {
-            match KokoroEngine::load(&models_root, model) {
-                Ok(engine) => Ok(Box::new(engine) as Box<dyn Synth>),
-                Err(err) => Err(err.to_string()),
-            }
+            smart_voices::player::load_english_engine(&models_root, model)
         };
         let persian_factory = move || -> Result<Box<dyn Synth>, String> {
             smart_voices::player::load_persian_engine(&persian_root, persian_voice)

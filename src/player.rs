@@ -1,8 +1,8 @@
 //! Playback controller: gapless lookahead playback with transport controls and
 //! idle model unload. The tray app drives this; the `speak` CLI wraps it once.
 //!
-//! A controller thread owns the voice engines (English Kokoro plus a lazily
-//! loaded Persian Piper synth, routed per chunk) and the audio output. It
+//! A controller thread owns the voice engines (the English engine plus a
+//! lazily loaded Persian synth, routed per chunk) and the audio output. It
 //! synthesizes at most 2 chunks ahead of the one playing, checks the command
 //! channel between chunks (so `stop`/`play` take effect within one chunk's
 //! synth time), and idles in `recv_timeout` (never a polling loop): the stream
@@ -15,8 +15,9 @@ use std::time::{Duration, Instant};
 
 use crate::audio::{AudioSink, SinkEvent};
 use crate::chunk::SpeechChunk;
-use crate::engine::{EngineError, KokoroEngine, PersianVoice, PiperEngine};
+use crate::engine::{EngineError, KokoroEngine, ModelVariant, PersianVoice, PiperEngine};
 use crate::lang::{Lang, chunk_language};
+use crate::phonon::PhononEngine;
 use crate::pipeline::prepare;
 use crate::pocket::PocketEngine;
 use crate::pronounce::Pronunciations;
@@ -91,6 +92,22 @@ impl Synth for PocketEngine {
     }
 }
 
+impl Synth for PhononEngine {
+    fn synthesize(
+        &mut self,
+        text: &str,
+        _voice: &str,
+        speed: f32,
+    ) -> Result<SynthesizedAudio, String> {
+        // Phonon ships one voice; the voice string is ignored.
+        let samples = PhononEngine::synthesize(self, text, speed).map_err(|err| err.to_string())?;
+        Ok(SynthesizedAudio {
+            samples,
+            sample_rate: checked_rate(PhononEngine::sample_rate(self))?,
+        })
+    }
+}
+
 /// Load the Persian engine for `voice`: Pocket for the Pocket voices,
 /// Piper for the rest. A Pocket failure is returned verbatim — never a
 /// Piper fallback.
@@ -109,6 +126,25 @@ pub fn load_persian_engine(
             Ok(engine) => Ok(Box::new(engine) as Box<dyn Synth>),
             Err(err) => Err(err.to_string()),
         },
+    }
+}
+
+/// Load the English engine for `variant`: Phonon for Phonon, Kokoro for the
+/// Kokoro variants. Errors come back via `to_string()`.
+pub fn load_english_engine(
+    models_root: &std::path::Path,
+    variant: ModelVariant,
+) -> Result<Box<dyn Synth>, String> {
+    if variant == ModelVariant::Phonon {
+        match PhononEngine::load(models_root) {
+            Ok(engine) => Ok(Box::new(engine) as Box<dyn Synth>),
+            Err(err) => Err(err.to_string()),
+        }
+    } else {
+        match KokoroEngine::load(models_root, variant) {
+            Ok(engine) => Ok(Box::new(engine) as Box<dyn Synth>),
+            Err(err) => Err(err.to_string()),
+        }
     }
 }
 
