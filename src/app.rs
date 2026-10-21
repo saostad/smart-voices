@@ -544,12 +544,6 @@ impl App {
         for entry in active_entries {
             english_voice_menu.append(entry).map_err(menu_build_error)?;
         }
-        english_voice_menu
-            .append(&PredefinedMenuItem::separator())
-            .map_err(menu_build_error)?;
-        english_voice_menu
-            .append(&model_menu)
-            .map_err(menu_build_error)?;
 
         let persian_voice_menu = Submenu::new("Persian Voice", true);
         let mut persian_voice_items = Vec::with_capacity(PERSIAN_VOICES.len());
@@ -637,6 +631,9 @@ impl App {
         // Top-level order pinned by the `settings_menu_order` test — keep in
         // sync (tray-icon menus can't be inspected in tests).
         let settings_menu = Submenu::new("Settings", true);
+        settings_menu
+            .append(&model_menu)
+            .map_err(menu_build_error)?;
         settings_menu
             .append(&english_voice_menu)
             .map_err(menu_build_error)?;
@@ -1936,8 +1933,8 @@ fn phonon_voice_entries<'a>(
 }
 
 /// Swap the "English Voice" submenu's voice set: remove every entry of the
-/// old set, then insert the new set's entries at positions 0..n, so the
-/// separator and Voice Model submenu stay at the bottom.
+/// old set, then insert the new set's entries at positions 0..n (the voices
+/// are the whole submenu).
 fn swap_voice_sets(
     menu: &Submenu,
     old: &[&dyn IsMenuItem],
@@ -1966,8 +1963,9 @@ fn download_label(model: ModelId) -> &'static str {
 /// can't be inspected in tests, so the test below pins this list against the
 /// owner-approved layout instead.
 #[cfg(test)]
-fn settings_menu_order() -> [Option<&'static str>; 13] {
+fn settings_menu_order() -> [Option<&'static str>; 14] {
     [
+        Some("Voice Model"),
         Some("English Voice"),
         Some("Persian Voice"),
         Some("Reading Speed"),
@@ -2084,10 +2082,11 @@ mod tests {
     }
 
     #[test]
-    fn settings_menu_lists_voices_first_in_owner_order() {
+    fn settings_menu_lists_model_and_voices_first_in_owner_order() {
         assert_eq!(
             settings_menu_order(),
             [
+                Some("Voice Model"),
                 Some("English Voice"),
                 Some("Persian Voice"),
                 Some("Reading Speed"),

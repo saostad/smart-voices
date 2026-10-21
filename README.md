@@ -64,10 +64,11 @@ Next buttons. Close it to hide it for that reading.
 
 The `Settings` submenu holds everything customizable:
 
-- `English Voice` — the selected model's voices, with `Voice Model`
-  (Fast, Small or Phonon; switching reloads the voice) below them: 28 Kokoro
-  voices grouped by accent and gender for Fast/Small, or Default plus 37
-  catalog voices in American, British and Characters groups for Phonon.
+- `Voice Model` — Fast, Small or Phonon; switching reloads the voice and
+  changes which voices `English Voice` lists.
+- `English Voice` — the selected model's voices: 28 Kokoro voices grouped by
+  accent and gender for Fast/Small, or Default plus 37 catalog voices in
+  American, British and Characters groups for Phonon.
 - `Persian Voice` — `Pocket v2 (best quality — recommended)` is the default
   and sounds the most natural; `Pocket v1` below it. The Piper voices (Amir,
   Gyro, Reza Ibrahim, Ganji, Ganji Adabi) are smaller downloads and start
