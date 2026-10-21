@@ -72,8 +72,21 @@ jobs:
           LIB="$ROOT/$STEM/lib"
           if [ "$RUNNER_OS" = Windows ]; then LIB="$(cygpath -w "$LIB")"; fi
           echo "SHERPA_ONNX_LIB_DIR=$LIB" >> "$GITHUB_ENV"
-          # Windows tests find the DLLs on PATH; Linux and macOS use the rpath.
-          echo "$LIB" >> "$GITHUB_PATH"
+
+      # The build script copies the runtime libs next to the binaries only when it
+      # runs, which a cached build skips; tests and packaging look for them there.
+      - name: Put runtime libs next to the binaries
+        shell: bash
+        run: |
+          set -eu
+          shopt -s nullglob
+          LIB="$SHERPA_ONNX_LIB_DIR"
+          if [ "$RUNNER_OS" = Windows ]; then LIB="$(cygpath -u "$LIB")"; fi
+          mkdir -p target/debug target/release
+          for f in "$LIB"/*.so* "$LIB"/*.dylib "$LIB"/*.dll; do
+            cp -L "$f" target/debug/
+            cp -L "$f" target/release/
+          done
 
       - name: Install Linux audio dependencies
         if: runner.os == 'Linux'
@@ -91,18 +104,6 @@ jobs:
 
       - name: Build release
         run: cargo build --release
-
-      # The build script only copies the runtime libs next to the binary when it
-      # runs, which a cached build skips.
-      - name: Put runtime libs next to the binary
-        shell: bash
-        run: |
-          set -eu
-          shopt -s nullglob
-          for f in "$SHERPA_ONNX_LIB_DIR"/*.so* "$SHERPA_ONNX_LIB_DIR"/*.dylib "$SHERPA_ONNX_LIB_DIR"/*.dll; do
-            cp -L "$f" target/release/
-          done
-          ls target/release
 
       - name: Package (Linux)
         if: runner.os == 'Linux'
