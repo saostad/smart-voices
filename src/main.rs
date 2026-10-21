@@ -203,7 +203,12 @@ fn speak(args: &[String]) -> i32 {
     // Download whichever models this text needs; English-only text never
     // downloads the Persian voice.
     let chunks = prepare(&options.text, &SanitizerOptions::default(), &pronunciations);
-    for needed in models::models_for_chunks(&chunks, model, persian_voice) {
+    for needed in models::models_for_chunks(
+        &chunks,
+        model,
+        persian_voice,
+        smart_voices::phonon::DEFAULT_PHONON_VOICE,
+    ) {
         if let Err(err) = download_with_progress(&models_root, needed) {
             eprintln!("Error: {err}");
             return 1;
@@ -626,7 +631,12 @@ impl LazyPlayer {
                 .to_string()
         })?;
         let chunks = prepare(text, &SanitizerOptions::default(), &self.pronunciations);
-        for needed in models::models_for_chunks(&chunks, self.model, self.persian_voice) {
+        for needed in models::models_for_chunks(
+            &chunks,
+            self.model,
+            self.persian_voice,
+            smart_voices::phonon::DEFAULT_PHONON_VOICE,
+        ) {
             download_with_progress(&models_root, needed).map_err(|err| err.to_string())?;
         }
         Ok(())

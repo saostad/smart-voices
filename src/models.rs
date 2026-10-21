@@ -13,12 +13,17 @@ use crate::chunk::SpeechChunk;
 use crate::download::{DownloadError, PROGRESS_INTERVAL, download_file};
 use crate::engine::{DownloadSpec, ModelVariant, PersianVoice};
 use crate::lang::{Lang, chunk_language};
+use crate::phonon::{DEFAULT_PHONON_VOICE, PHONON_VOICES, VOICES_DIR};
 
-/// A downloadable voice model: an English variant or a Persian voice.
+/// A downloadable voice model: an English variant, a Persian voice, or the
+/// Phonon catalog voice bundle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModelId {
     English(ModelVariant),
     Persian(PersianVoice),
+    /// All 37 `gradium/phonon-voices` English voice files, downloaded
+    /// together (only needed for a non-default Phonon voice).
+    PhononVoices,
 }
 
 impl ModelId {
@@ -27,6 +32,7 @@ impl ModelId {
         match self {
             Self::English(variant) => variant.dir_name(),
             Self::Persian(voice) => voice.dir_name(),
+            Self::PhononVoices => VOICES_DIR,
         }
     }
 
@@ -37,6 +43,7 @@ impl ModelId {
         match self {
             Self::English(variant) => variant.url(),
             Self::Persian(voice) => voice.url(),
+            Self::PhononVoices => "https://huggingface.co/gradium/phonon-voices",
         }
     }
 
@@ -51,6 +58,7 @@ impl ModelId {
             Self::Persian(PersianVoice::RezaIbrahim) => "Persian voice (Reza Ibrahim)",
             Self::Persian(PersianVoice::Ganji) => "Persian voice (Ganji)",
             Self::Persian(PersianVoice::GanjiAdabi) => "Persian voice (Ganji Adabi)",
+            Self::PhononVoices => "Phonon voices (~9.5 MB)",
         }
     }
 
@@ -59,6 +67,7 @@ impl ModelId {
         match self {
             Self::English(variant) => variant.required_files().to_vec(),
             Self::Persian(voice) => voice.required_files(),
+            Self::PhononVoices => PHONON_VOICES.iter().map(|voice| voice.file.name).collect(),
         }
     }
 }
@@ -105,19 +114,25 @@ impl Error for ModelError {}
 
 /// Models needed to read `chunks`: the English `variant` when any chunk is
 /// English, the Persian `voice` when any chunk is Persian (English first).
-/// English-only text never asks for the Persian model.
+/// English-only text never asks for the Persian model. With Phonon, the
+/// catalog voice bundle follows the model unless the chosen Phonon voice is
+/// the checkpoint's own (`default`) voice.
 #[must_use]
 pub fn models_for_chunks(
     chunks: &[SpeechChunk],
     variant: ModelVariant,
     voice: PersianVoice,
+    phonon_voice: &str,
 ) -> Vec<ModelId> {
-    let mut models = Vec::with_capacity(2);
+    let mut models = Vec::with_capacity(3);
     if chunks
         .iter()
         .any(|chunk| chunk_language(&chunk.text) == Lang::English)
     {
         models.push(ModelId::English(variant));
+        if variant == ModelVariant::Phonon && phonon_voice != DEFAULT_PHONON_VOICE {
+            models.push(ModelId::PhononVoices);
+        }
     }
     if chunks
         .iter()
@@ -186,6 +201,13 @@ pub fn download(
                 files.iter().map(|file| (file.name, file.spec)).collect();
             return download_files(root, model, &files, progress);
         }
+    }
+    if model == ModelId::PhononVoices {
+        let files: Vec<(&'static str, DownloadSpec)> = PHONON_VOICES
+            .iter()
+            .map(|voice| (voice.file.name, voice.file.spec))
+            .collect();
+        return download_files(root, model, &files, progress);
     }
     let final_dir = model_dir(root, model);
     let partial = prepare_partial_dir(root, model)?;
@@ -403,6 +425,7 @@ mod tests {
             ModelId::English(ModelVariant::Fast),
             ModelId::English(ModelVariant::Small),
             ModelId::English(ModelVariant::Phonon),
+            ModelId::PhononVoices,
         ];
         models.extend(
             crate::engine::PERSIAN_VOICES
@@ -447,18 +470,68 @@ mod tests {
         let variant = ModelVariant::Small;
         let voice = PersianVoice::Gyro;
         assert_eq!(
-            models_for_chunks(&[chunk("Hello."), chunk("World.")], variant, voice),
+            models_for_chunks(
+                &[chunk("Hello."), chunk("World.")],
+                variant,
+                voice,
+                DEFAULT_PHONON_VOICE
+            ),
             [ModelId::English(variant)]
         );
         assert_eq!(
-            models_for_chunks(&[chunk("سلام.")], variant, voice),
+            models_for_chunks(&[chunk("سلام.")], variant, voice, DEFAULT_PHONON_VOICE),
             [ModelId::Persian(voice)]
         );
         assert_eq!(
-            models_for_chunks(&[chunk("سلام."), chunk("Hello.")], variant, voice),
+            models_for_chunks(
+                &[chunk("سلام."), chunk("Hello.")],
+                variant,
+                voice,
+                DEFAULT_PHONON_VOICE
+            ),
             [ModelId::English(variant), ModelId::Persian(voice)]
         );
-        assert!(models_for_chunks(&[], variant, voice).is_empty());
+        assert!(models_for_chunks(&[], variant, voice, DEFAULT_PHONON_VOICE).is_empty());
+    }
+
+    #[test]
+    fn models_for_chunks_adds_phonon_voices_only_for_catalog_voice() {
+        use crate::sanitize::SpeechPause;
+
+        let chunk = |text: &str| SpeechChunk {
+            text: text.to_string(),
+            pause_after: SpeechPause::None,
+        };
+        let english = [chunk("Hello.")];
+        let voice = PersianVoice::Gyro;
+        // The checkpoint's own voice needs no bundle.
+        assert_eq!(
+            models_for_chunks(&english, ModelVariant::Phonon, voice, DEFAULT_PHONON_VOICE),
+            [ModelId::English(ModelVariant::Phonon)]
+        );
+        // A catalog voice (Zoey) pulls the bundle right after the model.
+        assert_eq!(
+            models_for_chunks(&english, ModelVariant::Phonon, voice, "NbpkqMVS3CJeq2j8"),
+            [
+                ModelId::English(ModelVariant::Phonon),
+                ModelId::PhononVoices
+            ]
+        );
+        // The Kokoro variants never pull the bundle, whatever the voice id.
+        assert_eq!(
+            models_for_chunks(&english, ModelVariant::Fast, voice, "NbpkqMVS3CJeq2j8"),
+            [ModelId::English(ModelVariant::Fast)]
+        );
+        // Persian-only text with Phonon selected stays Persian-only.
+        assert_eq!(
+            models_for_chunks(
+                &[chunk("سلام.")],
+                ModelVariant::Phonon,
+                voice,
+                "NbpkqMVS3CJeq2j8"
+            ),
+            [ModelId::Persian(voice)]
+        );
     }
 
     #[test]

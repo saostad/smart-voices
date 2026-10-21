@@ -96,11 +96,11 @@ impl Synth for PhononEngine {
     fn synthesize(
         &mut self,
         text: &str,
-        _voice: &str,
+        voice: &str,
         speed: f32,
     ) -> Result<SynthesizedAudio, String> {
-        // Phonon ships one voice; the voice string is ignored.
-        let samples = PhononEngine::synthesize(self, text, speed).map_err(|err| err.to_string())?;
+        let samples =
+            PhononEngine::synthesize(self, text, voice, speed).map_err(|err| err.to_string())?;
         Ok(SynthesizedAudio {
             samples,
             sample_rate: checked_rate(PhononEngine::sample_rate(self))?,

@@ -811,11 +811,15 @@ impl App {
         // other, then play. English-only text never downloads the Persian
         // voice.
         let chunks = prepare(&text, &SanitizerOptions::default(), &self.pronunciations);
-        let missing: Vec<ModelId> =
-            models::models_for_chunks(&chunks, self.model, self.settings.persian_voice)
-                .into_iter()
-                .filter(|model| !models::is_installed(&self.models_root, *model))
-                .collect();
+        let missing: Vec<ModelId> = models::models_for_chunks(
+            &chunks,
+            self.model,
+            self.settings.persian_voice,
+            crate::phonon::DEFAULT_PHONON_VOICE,
+        )
+        .into_iter()
+        .filter(|model| !models::is_installed(&self.models_root, *model))
+        .collect();
         if !missing.is_empty() {
             // Download on a worker thread, then play; a newer request while
             // a download runs replaces the pending text (and the next check
@@ -1798,6 +1802,7 @@ fn download_label(model: ModelId) -> &'static str {
     match model {
         ModelId::English(_) => "Downloading voice",
         ModelId::Persian(_) => "Downloading Persian voice",
+        ModelId::PhononVoices => "Downloading Phonon voices",
     }
 }
 
