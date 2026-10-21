@@ -20,7 +20,7 @@
 //! library — one ONNX Runtime in the process. If the library or the model
 //! fails to load, the error says so; nothing falls back to Piper.
 
-mod audio;
+pub(crate) mod audio;
 pub mod g2p;
 mod mastering;
 pub mod normalize_fa;

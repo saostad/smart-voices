@@ -12,6 +12,7 @@ name = "smart-voices"
 path = "src/main.rs"
 
 [dependencies]
+ptts = { version = "=0.4.0", default-features = false, features = ["hf"] }
 sherpa-onnx = { version = "=1.13.8", default-features = false, features = ["shared"] }
 ort = { version = "=2.0.0-rc.14", default-features = false, features = ["std", "load-dynamic", "api-28"] }
 serde_json = "=1.0.145"

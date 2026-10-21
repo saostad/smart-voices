@@ -122,7 +122,7 @@ pub(crate) fn finish_speech(
 }
 
 /// Resample by linear interpolation so playback lasts `1/speed` as long.
-fn apply_speed(samples: &[f32], speed: f32) -> Vec<f32> {
+pub(crate) fn apply_speed(samples: &[f32], speed: f32) -> Vec<f32> {
     if !speed.is_finite() || (speed - 1.0).abs() < f32::EPSILON || samples.len() < 2 {
         return samples.to_vec();
     }

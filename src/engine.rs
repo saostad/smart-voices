@@ -517,6 +517,11 @@ pub enum EngineError {
     G2pLoadFailed(String),
     /// Pronouncing one sentence failed (sentence and real error kept).
     G2pFailed { sentence: String, message: String },
+    /// The Phonon model files exist but ptts refused to load them (the real
+    /// error is kept).
+    PhononLoadFailed(PathBuf, String),
+    /// Phonon synthesis failed (the real error is kept).
+    PhononFailed(String),
     /// The requested voice name is not in [`VOICES`].
     UnknownVoice(String),
     /// Synthesis returned no audio samples.
@@ -561,6 +566,14 @@ impl fmt::Display for EngineError {
                 let preview: String = sentence.chars().take(40).collect();
                 write!(f, "Pronunciation step failed for \"{preview}\": {message}")
             }
+            EngineError::PhononLoadFailed(dir, message) => write!(
+                f,
+                "Couldn't load the Phonon voice model from {}: {message}. The files may be damaged; delete the folder and run `smart-voices download --model phonon` again.",
+                dir.display()
+            ),
+            EngineError::PhononFailed(message) => {
+                write!(f, "The Phonon voice failed: {message}")
+            }
             EngineError::UnknownVoice(name) => {
                 write!(
                     f,
@@ -592,7 +605,7 @@ fn thread_count() -> i32 {
 }
 
 /// Clamp `speed` to 0.5..=2.0 (non-finite values become 1.0).
-fn clamp_speed(speed: f32) -> f32 {
+pub(crate) fn clamp_speed(speed: f32) -> f32 {
     if speed.is_finite() {
         speed.clamp(0.5, 2.0)
     } else {

@@ -10,6 +10,7 @@ pub mod engine;
 pub mod icon;
 pub mod lang;
 pub mod models;
+pub mod phonon;
 pub mod pipeline;
 pub mod player;
 pub mod pocket;
