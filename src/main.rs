@@ -191,10 +191,14 @@ fn speak(args: &[String]) -> i32 {
     if let Some(err) = &pronunciations_err {
         eprintln!("Warning: {err}");
     }
+    let voice_flag = options.voice.is_some();
     let voice = options.voice.unwrap_or(settings.voice);
     let speed = options.speed.unwrap_or(settings.speed);
     let model = options.model.unwrap_or(settings.model);
     let persian_voice = options.persian_voice.unwrap_or(settings.persian_voice);
+    if voice_flag && model == ModelVariant::Phonon {
+        eprintln!("Note: --voice is ignored with --model phonon; Phonon uses its own voice.");
+    }
 
     // Download whichever models this text needs; English-only text never
     // downloads the Persian voice.
