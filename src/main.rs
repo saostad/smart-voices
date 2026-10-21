@@ -158,6 +158,25 @@ fn parse_speak(args: &[String]) -> Option<SpeakOptions> {
     })
 }
 
+/// Resolve a `speak --voice` value for Phonon: `default` (any case) or a
+/// catalog voice name (any case) or id, returning the voice id.
+fn resolve_phonon_voice(query: &str) -> Option<&'static str> {
+    if query.eq_ignore_ascii_case(smart_voices::phonon::DEFAULT_PHONON_VOICE) {
+        return Some(smart_voices::phonon::DEFAULT_PHONON_VOICE);
+    }
+    smart_voices::phonon::find_voice(query).map(|voice| voice.id)
+}
+
+/// All catalog voice display names, comma-separated, for the unknown-voice
+/// error.
+fn phonon_voice_names() -> String {
+    smart_voices::phonon::PHONON_VOICES
+        .iter()
+        .map(|voice| voice.name)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 fn models_root() -> Option<PathBuf> {
     match std::env::var("SMART_VOICES_MODELS") {
         Ok(dir) if !dir.is_empty() => Some(PathBuf::from(dir)),
@@ -191,14 +210,9 @@ fn speak(args: &[String]) -> i32 {
     if let Some(err) = &pronunciations_err {
         eprintln!("Warning: {err}");
     }
-    let voice_flag = options.voice.is_some();
-    let voice = options.voice.unwrap_or(settings.voice);
     let speed = options.speed.unwrap_or(settings.speed);
     let model = options.model.unwrap_or(settings.model);
     let persian_voice = options.persian_voice.unwrap_or(settings.persian_voice);
-    if voice_flag && model == ModelVariant::Phonon {
-        eprintln!("Note: --voice is ignored with --model phonon; Phonon uses its own voice.");
-    }
     // An unknown saved id must not fail silently: warn loudly and use the
     // default.
     let mut phonon_voice = settings.phonon_voice;
@@ -208,11 +222,33 @@ fn speak(args: &[String]) -> i32 {
         );
         phonon_voice = smart_voices::phonon::DEFAULT_PHONON_VOICE.to_string();
     }
+    // With Phonon, `--voice` names a catalog voice (or `default`); otherwise
+    // it names a Kokoro voice.
+    let voice = match (model, options.voice.as_deref()) {
+        (ModelVariant::Phonon, Some(query)) => match resolve_phonon_voice(query) {
+            Some(id) => id.to_string(),
+            None => {
+                eprintln!(
+                    "Error: Unknown Phonon voice '{query}'. Available voices: Default, {}.",
+                    phonon_voice_names()
+                );
+                return 2;
+            }
+        },
+        (ModelVariant::Phonon, None) => phonon_voice.clone(),
+        (_, voice) => voice.map(str::to_string).unwrap_or(settings.voice),
+    };
+    // The Phonon voice id this reading needs (only used for Phonon).
+    let phonon_needed: &str = if model == ModelVariant::Phonon {
+        &voice
+    } else {
+        &phonon_voice
+    };
 
     // Download whichever models this text needs; English-only text never
     // downloads the Persian voice.
     let chunks = prepare(&options.text, &SanitizerOptions::default(), &pronunciations);
-    for needed in models::models_for_chunks(&chunks, model, persian_voice, &phonon_voice) {
+    for needed in models::models_for_chunks(&chunks, model, persian_voice, phonon_needed) {
         if let Err(err) = download_with_progress(&models_root, needed) {
             eprintln!("Error: {err}");
             return 1;
@@ -326,9 +362,13 @@ fn download_cmd(args: &[String]) -> i32 {
         );
         return 1;
     };
-    let mut models = Vec::with_capacity(2);
+    let mut models = Vec::with_capacity(3);
     if let Some(variant) = options.kokoro {
         models.push(ModelId::English(variant));
+        if variant == ModelVariant::Phonon {
+            // The catalog voices, so offline use works afterwards.
+            models.push(ModelId::PhononVoices);
+        }
     }
     if let Some(voice) = options.persian {
         models.push(ModelId::Persian(voice));
@@ -582,6 +622,7 @@ fn watch_cmd(args: &[String]) -> i32 {
 struct LazyPlayer {
     player: Option<Player>,
     voice: String,
+    phonon_voice: String,
     speed: f32,
     model: ModelVariant,
     persian_voice: PersianVoice,
@@ -591,9 +632,19 @@ struct LazyPlayer {
 
 impl LazyPlayer {
     fn new(settings: &Settings, pronunciations: Pronunciations) -> Self {
+        // An unknown saved id must not fail silently: warn loudly and use
+        // the default (like `speak`).
+        let mut phonon_voice = settings.phonon_voice.clone();
+        if !smart_voices::phonon::is_known_voice(&phonon_voice) {
+            eprintln!(
+                "Warning: Unknown Phonon voice '{phonon_voice}' in settings; using the default Phonon voice."
+            );
+            phonon_voice = smart_voices::phonon::DEFAULT_PHONON_VOICE.to_string();
+        }
         Self {
             player: None,
             voice: settings.voice.clone(),
+            phonon_voice,
             speed: settings.speed,
             model: settings.model,
             persian_voice: settings.persian_voice,
@@ -635,12 +686,9 @@ impl LazyPlayer {
                 .to_string()
         })?;
         let chunks = prepare(text, &SanitizerOptions::default(), &self.pronunciations);
-        for needed in models::models_for_chunks(
-            &chunks,
-            self.model,
-            self.persian_voice,
-            smart_voices::phonon::DEFAULT_PHONON_VOICE,
-        ) {
+        for needed in
+            models::models_for_chunks(&chunks, self.model, self.persian_voice, &self.phonon_voice)
+        {
             download_with_progress(&models_root, needed).map_err(|err| err.to_string())?;
         }
         Ok(())
@@ -653,8 +701,13 @@ impl LazyPlayer {
         })?;
         let sink = AudioSink::new().map_err(|err| err.to_string())?;
         let persian_voice = self.persian_voice;
+        let voice = if self.model == ModelVariant::Phonon {
+            self.phonon_voice.clone()
+        } else {
+            self.voice.clone()
+        };
         let config = PlayerConfig {
-            voice: self.voice.clone(),
+            voice,
             speed: self.speed,
             unload_after: self.unload_after,
             sanitizer_options: SanitizerOptions::default(),
@@ -704,4 +757,30 @@ fn download_with_progress(root: &Path, model: ModelId) -> Result<PathBuf, ModelE
     });
     eprintln!();
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_phonon_voice_accepts_default_name_and_id() {
+        assert_eq!(resolve_phonon_voice("default"), Some("default"));
+        assert_eq!(resolve_phonon_voice("Default"), Some("default"));
+        assert_eq!(resolve_phonon_voice("zoey"), Some("NbpkqMVS3CJeq2j8"));
+        assert_eq!(resolve_phonon_voice("ZOEY"), Some("NbpkqMVS3CJeq2j8"));
+        assert_eq!(
+            resolve_phonon_voice("NbpkqMVS3CJeq2j8"),
+            Some("NbpkqMVS3CJeq2j8")
+        );
+        assert_eq!(resolve_phonon_voice("no such voice"), None);
+    }
+
+    #[test]
+    fn phonon_voice_names_lists_every_catalog_voice() {
+        let names = phonon_voice_names();
+        assert_eq!(names.split(", ").count(), 37);
+        assert!(names.contains("Zoey"), "{names}");
+        assert!(names.contains("Delia"), "{names}");
+    }
 }

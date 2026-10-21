@@ -41,6 +41,7 @@ Models download automatically when first needed:
 | Fast (default English voice) | ~350 MB | First English reading |
 | Small (slower, low-memory English) | ~130 MB | Only if you pick it in Settings |
 | Phonon (best-quality English) | ~103 MB | Only if you pick it in Settings |
+| Phonon voices (37 English voices) | ~9.5 MB | First reading with a Phonon voice other than Default |
 | Persian voice (Pocket, best quality) | ~230 MB | First Persian reading (English-only use never downloads it) |
 | Persian voice (Piper, smaller) | ~67 MB | Only if you pick a Piper voice in Settings |
 
@@ -63,8 +64,10 @@ Next buttons. Close it to hide it for that reading.
 
 The `Settings` submenu holds everything customizable:
 
-- `English Voice` — 28 voices grouped by accent and gender, with
-  `Voice Model` (Fast, Small or Phonon; switching reloads the voice) below them.
+- `English Voice` — the selected model's voices, with `Voice Model`
+  (Fast, Small or Phonon; switching reloads the voice) below them: 28 Kokoro
+  voices grouped by accent and gender for Fast/Small, or Default plus 37
+  catalog voices in American, British and Characters groups for Phonon.
 - `Persian Voice` — `Pocket v2 (best quality — recommended)` is the default
   and sounds the most natural; `Pocket v1` below it. The Piper voices (Amir,
   Gyro, Reza Ibrahim, Ganji, Ganji Adabi) are smaller downloads and start
@@ -141,7 +144,8 @@ Running `smart-voices` with no arguments starts the tray app. It also has
 headless commands (handy for scripts and testing):
 
 - `smart-voices speak "<text>"` — read text aloud (`--voice`, `--speed`,
-  `--model fast|small`, `--persian-voice pocket|amir|gyro|reza_ibrahim|ganji|ganji_adabi`, `--verbose`).
+  `--model fast|small|phonon`, `--persian-voice pocket|amir|gyro|reza_ibrahim|ganji|ganji_adabi`, `--verbose`).
+  With `--model phonon`, `--voice` takes a catalog voice name (e.g. `Zoey`) or `default`.
 - `smart-voices clean [<file>]` — print how text would be cleaned for speech,
   one chunk per line (reads stdin without a file).
 - `smart-voices download` — fetch voice models up front (`--model`,
