@@ -13,7 +13,8 @@ use std::time::{Duration, Instant};
 
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 use tray_icon::menu::{
-    CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu, accelerator::Accelerator,
+    CheckMenuItem, IsMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu,
+    accelerator::Accelerator,
 };
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use winit::application::ApplicationHandler;
@@ -32,6 +33,7 @@ use crate::engine::{
 };
 use crate::icon;
 use crate::models::{self, ModelId};
+use crate::phonon::{DEFAULT_PHONON_VOICE, PHONON_VOICES, PhononVoiceGroup};
 use crate::pipeline::prepare;
 use crate::player::{Player, PlayerConfig, PlayerEvent, PlayerState, Synth};
 use crate::pronounce::{Pronunciations, pronunciations_path};
@@ -258,13 +260,18 @@ struct App {
     watch_item: Option<CheckMenuItem>,
     autoread_item: Option<CheckMenuItem>,
     voice_items: Vec<(String, CheckMenuItem)>,
-    /// The "English Voice" submenu handle (for the Phonon note insert/remove).
+    /// Disabled Kokoro group headers in `VoiceGroup::ALL` order (kept so the
+    /// Kokoro/Phonon voice sets can be swapped).
+    voice_headers: Vec<MenuItem>,
+    /// The "English Voice" submenu handle (for the voice-set swap).
     english_voice_menu: Option<Submenu>,
-    /// Disabled "Phonon uses its own voice" note, inserted at the top of the
-    /// "English Voice" submenu while Phonon is selected.
-    phonon_note_item: Option<MenuItem>,
-    /// Whether the Phonon note is currently in the menu.
-    phonon_note_shown: bool,
+    /// Phonon voice checks: the `"Default"` item first, then every catalog
+    /// voice (`voice.id`, labeled `voice.name`).
+    phonon_voice_items: Vec<(&'static str, CheckMenuItem)>,
+    /// Disabled Phonon group headers in `PhononVoiceGroup::ALL` order.
+    phonon_voice_headers: Vec<MenuItem>,
+    /// Whether the Phonon voice set is currently shown in the submenu.
+    phonon_voices_shown: bool,
     persian_voice_items: Vec<(PersianVoice, CheckMenuItem)>,
     speed_items: Vec<(f32, CheckMenuItem)>,
     model_items: Vec<(ModelVariant, CheckMenuItem)>,
@@ -360,9 +367,11 @@ impl App {
             watch_item: None,
             autoread_item: None,
             voice_items: Vec::new(),
+            voice_headers: Vec::new(),
             english_voice_menu: None,
-            phonon_note_item: None,
-            phonon_note_shown: false,
+            phonon_voice_items: Vec::new(),
+            phonon_voice_headers: Vec::new(),
+            phonon_voices_shown: false,
             persian_voice_items: Vec::new(),
             speed_items: Vec::new(),
             model_items: Vec::new(),
@@ -489,18 +498,51 @@ impl App {
         }
 
         let english_voice_menu = Submenu::new("English Voice", true);
-        let phonon_note_item = MenuItem::new("Phonon uses its own voice", false, None);
+        // Both voice sets are built; only the selected model's set is
+        // appended (the other stays stored for the swap in
+        // `update_english_voice_state`).
+        let mut voice_headers = Vec::with_capacity(4);
         let mut voice_items = Vec::with_capacity(VOICES.len());
         for (group, ids) in grouped_english_voices() {
-            english_voice_menu
-                .append(&MenuItem::new(group.header(), false, None))
-                .map_err(menu_build_error)?;
+            voice_headers.push(MenuItem::new(group.header(), false, None));
             for id in ids {
                 let name = voice_short_name(id).unwrap_or_else(|| id.to_string());
                 let item = CheckMenuItem::new(name, true, id == self.settings.voice, None);
-                english_voice_menu.append(&item).map_err(menu_build_error)?;
                 voice_items.push((id.to_string(), item));
             }
+        }
+        let mut phonon_voice_headers = Vec::with_capacity(PhononVoiceGroup::ALL.len());
+        let mut phonon_voice_items: Vec<(&'static str, CheckMenuItem)> =
+            Vec::with_capacity(PHONON_VOICES.len() + 1);
+        phonon_voice_items.push((
+            DEFAULT_PHONON_VOICE,
+            CheckMenuItem::new(
+                "Default",
+                true,
+                self.settings.phonon_voice == DEFAULT_PHONON_VOICE,
+                None,
+            ),
+        ));
+        for group in PhononVoiceGroup::ALL {
+            phonon_voice_headers.push(MenuItem::new(group.header(), false, None));
+            for voice in PHONON_VOICES.iter().filter(|voice| voice.group == group) {
+                let item = CheckMenuItem::new(
+                    voice.name,
+                    true,
+                    voice.id == self.settings.phonon_voice,
+                    None,
+                );
+                phonon_voice_items.push((voice.id, item));
+            }
+        }
+        let phonon_voices_shown = self.model == ModelVariant::Phonon;
+        let active_entries = if phonon_voices_shown {
+            phonon_voice_entries(&phonon_voice_headers, &phonon_voice_items)
+        } else {
+            kokoro_voice_entries(&voice_headers, &voice_items)
+        };
+        for entry in active_entries {
+            english_voice_menu.append(entry).map_err(menu_build_error)?;
         }
         english_voice_menu
             .append(&PredefinedMenuItem::separator())
@@ -683,8 +725,11 @@ impl App {
         self.watch_item = Some(watch_item);
         self.autoread_item = Some(autoread_item);
         self.voice_items = voice_items;
+        self.voice_headers = voice_headers;
         self.english_voice_menu = Some(english_voice_menu);
-        self.phonon_note_item = Some(phonon_note_item);
+        self.phonon_voice_items = phonon_voice_items;
+        self.phonon_voice_headers = phonon_voice_headers;
+        self.phonon_voices_shown = phonon_voices_shown;
         self.persian_voice_items = persian_voice_items;
         self.speed_items = speed_items;
         self.model_items = model_items;
@@ -831,7 +876,7 @@ impl App {
             &chunks,
             self.model,
             self.settings.persian_voice,
-            crate::phonon::DEFAULT_PHONON_VOICE,
+            &self.settings.phonon_voice,
         )
         .into_iter()
         .filter(|model| !models::is_installed(&self.models_root, *model))
@@ -939,8 +984,13 @@ impl App {
         let sink = AudioSink::new().map_err(|err| err.to_string())?;
         let unload_after = unload_duration(self.settings.unload_after_minutes);
         let persian_voice = self.settings.persian_voice;
+        let voice = if self.model == ModelVariant::Phonon {
+            self.settings.phonon_voice.clone()
+        } else {
+            self.settings.voice.clone()
+        };
         let config = PlayerConfig {
-            voice: self.settings.voice.clone(),
+            voice,
             speed: self.settings.speed,
             unload_after,
             sanitizer_options: SanitizerOptions::default(),
@@ -1269,6 +1319,13 @@ impl App {
             .map(|(voice, _)| voice.clone())
         {
             self.on_voice_selected(&voice);
+        } else if let Some(id) = self
+            .phonon_voice_items
+            .iter()
+            .find(|(_, item)| id == item.id())
+            .map(|(id, _)| *id)
+        {
+            self.on_phonon_voice_selected(id);
         } else if let Some(voice) = self
             .persian_voice_items
             .iter()
@@ -1391,6 +1448,23 @@ impl App {
         }
     }
 
+    /// A Phonon voice item was clicked (muda already flipped its check;
+    /// re-sync all of them so exactly one stays checked).
+    fn on_phonon_voice_selected(&mut self, id: &'static str) {
+        self.settings.phonon_voice = id.to_string();
+        if let Some(player) = &self.player {
+            player.set_voice(id);
+        }
+        self.update_phonon_voice_checks();
+        self.save_settings();
+    }
+
+    fn update_phonon_voice_checks(&self) {
+        for (id, item) in &self.phonon_voice_items {
+            item.set_checked(*id == self.settings.phonon_voice);
+        }
+    }
+
     /// A Persian voice item was clicked (muda already flipped its check;
     /// re-sync all of them so exactly one stays checked). Applies from the
     /// next chunk; if its model isn't installed it downloads on the next
@@ -1453,33 +1527,39 @@ impl App {
         }
     }
 
-    /// Sync the "English Voice" submenu with the selected model: while Phonon
-    /// is selected the Kokoro voice items are disabled and the Phonon note
-    /// sits above the voices; otherwise the items are enabled and the note is
-    /// removed.
+    /// Sync the "English Voice" submenu with the selected model: it lists
+    /// only that model's voices (Kokoro for Fast/Small, the catalog for
+    /// Phonon). A change between the Kokoro family and Phonon swaps the whole
+    /// set; Fast↔Small shows the same set and is a no-op.
     fn update_english_voice_state(&mut self) {
         let phonon = self.model == ModelVariant::Phonon;
-        for (_, item) in &self.voice_items {
-            item.set_enabled(!phonon);
-        }
-        if phonon == self.phonon_note_shown {
+        if phonon == self.phonon_voices_shown {
             return;
         }
-        let result = match (&self.english_voice_menu, &self.phonon_note_item) {
-            (Some(menu), Some(note)) if phonon => Some(menu.insert(note, 0)),
-            (Some(menu), Some(note)) => Some(menu.remove(note)),
-            _ => None,
-        };
-        let updated = match result {
-            Some(Ok(())) => true,
-            Some(Err(err)) => {
-                eprintln!("Warning: Couldn't update the English Voice menu: {err}");
-                false
+        let result = match &self.english_voice_menu {
+            Some(menu) => {
+                let (old, new) = if phonon {
+                    (
+                        kokoro_voice_entries(&self.voice_headers, &self.voice_items),
+                        phonon_voice_entries(&self.phonon_voice_headers, &self.phonon_voice_items),
+                    )
+                } else {
+                    (
+                        phonon_voice_entries(&self.phonon_voice_headers, &self.phonon_voice_items),
+                        kokoro_voice_entries(&self.voice_headers, &self.voice_items),
+                    )
+                };
+                swap_voice_sets(menu, &old, &new)
             }
-            None => false,
+            None => return,
         };
-        if updated {
-            self.phonon_note_shown = phonon;
+        match result {
+            Ok(()) => self.phonon_voices_shown = phonon,
+            Err(err) => {
+                let message = format!("Couldn't update the English Voice menu: {err}");
+                eprintln!("Warning: {message}");
+                self.show_error(&message);
+            }
         }
     }
 
@@ -1811,6 +1891,65 @@ fn next_wake(deadlines: &[Option<Instant>]) -> ControlFlow {
 /// Build a tray icon from 32×32 RGBA bytes (`None` on invalid data).
 fn tray_icon(rgba: &[u8]) -> Option<Icon> {
     Icon::from_rgba(rgba.to_vec(), icon::SIZE, icon::SIZE).ok()
+}
+
+/// Ordered "English Voice" submenu entries of the Kokoro set: per group, the
+/// disabled header then that group's voice checks.
+fn kokoro_voice_entries<'a>(
+    headers: &'a [MenuItem],
+    items: &'a [(String, CheckMenuItem)],
+) -> Vec<&'a dyn IsMenuItem> {
+    let mut entries: Vec<&dyn IsMenuItem> = Vec::with_capacity(headers.len() + items.len());
+    for ((_group, ids), header) in grouped_english_voices().into_iter().zip(headers.iter()) {
+        entries.push(header);
+        for id in ids {
+            let (_, item) = items
+                .iter()
+                .find(|(voice, _)| voice == id)
+                .expect("a voice item is built for every Kokoro id");
+            entries.push(item);
+        }
+    }
+    entries
+}
+
+/// Ordered "English Voice" submenu entries of the Phonon set: the "Default"
+/// check first, then per group the disabled header and that group's voices.
+fn phonon_voice_entries<'a>(
+    headers: &'a [MenuItem],
+    items: &'a [(&'static str, CheckMenuItem)],
+) -> Vec<&'a dyn IsMenuItem> {
+    let mut entries: Vec<&dyn IsMenuItem> = Vec::with_capacity(headers.len() + items.len());
+    let (_, default) = items.first().expect("the Default item is built first");
+    entries.push(default);
+    for (group, header) in PhononVoiceGroup::ALL.into_iter().zip(headers.iter()) {
+        entries.push(header);
+        for voice in PHONON_VOICES.iter().filter(|voice| voice.group == group) {
+            let (_, item) = items
+                .iter()
+                .find(|(id, _)| *id == voice.id)
+                .expect("a voice item is built for every catalog voice");
+            entries.push(item);
+        }
+    }
+    entries
+}
+
+/// Swap the "English Voice" submenu's voice set: remove every entry of the
+/// old set, then insert the new set's entries at positions 0..n, so the
+/// separator and Voice Model submenu stay at the bottom.
+fn swap_voice_sets(
+    menu: &Submenu,
+    old: &[&dyn IsMenuItem],
+    new: &[&dyn IsMenuItem],
+) -> Result<(), tray_icon::menu::Error> {
+    for entry in old {
+        menu.remove(*entry)?;
+    }
+    for (position, entry) in new.iter().enumerate() {
+        menu.insert(*entry, position)?;
+    }
+    Ok(())
 }
 
 /// Status-line label for a running model download.
