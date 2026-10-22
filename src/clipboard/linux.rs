@@ -336,6 +336,33 @@ fn request_selection(
 }
 
 pub(super) fn read_text() -> Result<Option<String>, ClipboardError> {
+    // On Wayland, XWayland may refuse selection requests from X clients while
+    // a native Wayland window has focus (Hyprland does), so ask `wl-paste`
+    // first and only fall back to X11 when it isn't installed.
+    if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+        if let Some(result) = read_text_wayland() {
+            return result;
+        }
+    }
+    read_text_x11()
+}
+
+/// Read the clipboard via `wl-paste` (`None` when `wl-paste` can't be run).
+/// `--type text` picks the best text type; a non-text copy exits non-zero.
+fn read_text_wayland() -> Option<Result<Option<String>, ClipboardError>> {
+    let output = std::process::Command::new("wl-paste")
+        .args(["--no-newline", "--type", "text"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return Some(Ok(None));
+    }
+    Some(Ok(Some(
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+    )))
+}
+
+fn read_text_x11() -> Result<Option<String>, ClipboardError> {
     // Its own connection: the watcher thread (if any) blocks in
     // `wait_for_event` on its connection and can't share it.
     let (conn, screen) =
