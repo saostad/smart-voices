@@ -188,6 +188,7 @@ pub fn download(
     model: ModelId,
     mut progress: impl FnMut(u64, Option<u64>),
 ) -> Result<PathBuf, ModelError> {
+    progress(0, None);
     if let ModelId::Persian(voice) = model
         && let Some(spec) = voice.download_spec()
     {
@@ -311,6 +312,7 @@ fn download_files(
         let _ = std::fs::remove_dir_all(partial);
     };
     let total: u64 = files.iter().map(|(_, spec)| spec.size).sum();
+    progress(0, Some(total));
     let mut finished: u64 = 0;
     for (name, spec) in files {
         let staging_file = partial.join(name);

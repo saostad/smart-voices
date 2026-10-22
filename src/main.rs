@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 use smart_voices::app;
 use smart_voices::audio::AudioSink;
 use smart_voices::clipboard::{self, ClipboardEvent, MIN_TEXT_LEN};
+use smart_voices::download::{ProgressThrottle, progress_text};
 use smart_voices::engine::{ModelVariant, PersianVoice};
 use smart_voices::models::{self, ModelError, ModelId};
 use smart_voices::pipeline::prepare;
@@ -743,16 +744,11 @@ fn download_with_progress(root: &Path, model: ModelId) -> Result<PathBuf, ModelE
     if models::is_installed(root, model) {
         return Ok(models::model_dir(root, model));
     }
-    let label = model.label();
+    let label = format!("Downloading {}", model.label());
+    let mut throttle = ProgressThrottle::default();
     let result = models::download(root, model, |done, total| {
-        const MB: f64 = 1_000_000.0;
-        match total {
-            Some(total) => eprint!(
-                "\rDownloading {label}: {:.1}/{:.1} MB",
-                done as f64 / MB,
-                total as f64 / MB
-            ),
-            None => eprint!("\rDownloading {label}: {:.1} MB", done as f64 / MB),
+        if throttle.should_report(done, total, Instant::now()) {
+            eprint!("\r{}", progress_text(&label, done, total));
         }
     });
     eprintln!();

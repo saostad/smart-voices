@@ -22,6 +22,9 @@ pub struct ReaderModel {
     anchor: Option<Instant>,
     reading_id: u64,
     dismissed_reading: Option<u64>,
+    activity: Option<(String, Option<f32>)>,
+    pending_playlist: bool,
+    error: Option<String>,
 }
 
 impl ReaderModel {
@@ -33,6 +36,18 @@ impl ReaderModel {
     pub fn apply(&mut self, event: &PlayerEvent, now: Instant) {
         match event {
             PlayerEvent::Playlist(texts) => {
+                self.error = None;
+                if self.pending_playlist && self.chunks == *texts {
+                    self.pending_playlist = false;
+                    self.activity = None;
+                    // A warm controller already playing emits no new Playing
+                    // state for a replacement playlist. Loading, if needed,
+                    // follows this event before synthesis begins.
+                    self.state = PlayerState::Playing;
+                    return;
+                }
+                self.pending_playlist = false;
+                self.activity = None;
                 self.chunks = texts.clone();
                 self.reading_id = self.reading_id.wrapping_add(1);
                 self.current = None;
@@ -41,6 +56,7 @@ impl ReaderModel {
             PlayerEvent::Chunk {
                 index, duration, ..
             } => {
+                self.activity = None;
                 self.current = Some(*index);
                 self.duration = *duration;
                 self.frozen = Duration::ZERO;
@@ -68,12 +84,20 @@ impl ReaderModel {
                     self.state = PlayerState::Loading;
                 }
                 PlayerState::Idle => {
+                    self.activity = None;
+                    self.pending_playlist = false;
                     self.state = PlayerState::Idle;
                     self.current = None;
                     self.reset_timing();
                 }
             },
             PlayerEvent::Finished | PlayerEvent::Error(_) => {
+                self.activity = None;
+                self.pending_playlist = false;
+                self.error = match event {
+                    PlayerEvent::Error(message) => Some(message.clone()),
+                    _ => None,
+                };
                 self.state = PlayerState::Idle;
                 self.current = None;
                 self.reset_timing();
@@ -86,6 +110,24 @@ impl ReaderModel {
         self.duration = Duration::ZERO;
         self.frozen = Duration::ZERO;
         self.anchor = None;
+    }
+
+    /// Show the copied text immediately, while its models are still downloading.
+    pub fn prepare(&mut self, texts: Vec<String>, now: Instant) {
+        self.apply(&PlayerEvent::Playlist(texts), now);
+        self.state = PlayerState::Loading;
+        self.activity = Some(("Preparing…".to_string(), None));
+        self.pending_playlist = true;
+    }
+
+    pub fn set_activity(&mut self, text: String, progress: Option<f32>) {
+        self.activity = Some((text, progress));
+    }
+
+    /// Transport controls need a player, rather than a pending download/load.
+    #[must_use]
+    pub fn can_play_pause(&self) -> bool {
+        matches!(self.state, PlayerState::Playing | PlayerState::Paused)
     }
 
     /// Chunk texts of the current (or most recent) reading.
@@ -156,6 +198,9 @@ impl ReaderModel {
     /// `(current + 1) / count`, or 0 when there is no current chunk.
     #[must_use]
     pub fn progress(&self) -> f32 {
+        if let Some((_, progress)) = &self.activity {
+            return progress.unwrap_or(0.0);
+        }
         match (self.current, self.chunks.len()) {
             (Some(current), count) if count > 0 => (current + 1) as f32 / count as f32,
             _ => 0.0,
@@ -164,6 +209,15 @@ impl ReaderModel {
 
     #[must_use]
     pub fn progress_label(&self) -> String {
+        if let Some(error) = &self.error {
+            return format!("Error: {error}");
+        }
+        if let Some((text, _)) = &self.activity {
+            return text.clone();
+        }
+        if self.state == PlayerState::Loading {
+            return "Loading voice…".to_string();
+        }
         if self.chunks.is_empty() {
             return "Nothing to read yet.".to_string();
         }
@@ -171,7 +225,7 @@ impl ReaderModel {
             return format!("Sentence {} of {}", current + 1, self.chunks.len());
         }
         if self.is_active() {
-            "Starting…".to_string()
+            "Preparing…".to_string()
         } else {
             "Not reading".to_string()
         }
@@ -239,6 +293,9 @@ impl Default for ReaderModel {
             anchor: None,
             reading_id: 0,
             dismissed_reading: None,
+            activity: None,
+            pending_playlist: false,
+            error: None,
         }
     }
 }
@@ -266,6 +323,65 @@ mod tests {
         model.apply(&PlayerEvent::State(PlayerState::Playing), start);
         model.apply(&chunk_event(0, "One.", Duration::from_secs(10)), start);
         model
+    }
+
+    #[test]
+    fn pending_download_stays_visible_and_preserves_dismissal_into_playback() {
+        let now = Instant::now();
+        let mut model = ReaderModel::new();
+        model.prepare(vec!["Hello.".to_string()], now);
+        assert!(model.should_show(true));
+        assert!(!model.can_play_pause());
+        assert_eq!(model.progress_label(), "Preparing…");
+        model.set_activity(
+            "Downloading English voice… 42% (147.0 of 350.0 MB)".to_string(),
+            Some(0.42),
+        );
+        assert_eq!(model.progress(), 0.42);
+        assert!(model.progress_label().contains("42%"));
+        let id = model.reading_id();
+        model.dismiss();
+        model.apply(&playlist(&["Hello."]), now);
+        assert_eq!(model.reading_id(), id);
+        assert!(!model.should_show(true));
+        model.apply(&PlayerEvent::State(PlayerState::Loading), now);
+        assert_eq!(model.progress_label(), "Loading voice…");
+        model.apply(&PlayerEvent::State(PlayerState::Playing), now);
+        assert_eq!(model.progress_label(), "Preparing…");
+        assert!(model.can_play_pause());
+        model.apply(&chunk_event(0, "Hello.", Duration::from_secs(1)), now);
+        assert_eq!(model.progress_label(), "Sentence 1 of 1");
+        assert_eq!(model.progress(), 1.0);
+        model.prepare(vec!["New copy.".to_string()], now);
+        assert!(model.should_show(true));
+        assert_ne!(model.reading_id(), id);
+    }
+
+    #[test]
+    fn warm_replacement_playlist_needs_no_playing_state_event() {
+        let now = Instant::now();
+        let mut model = playing_model(now);
+        model.prepare(vec!["A new copy.".to_string()], now);
+        model.apply(&playlist(&["A new copy."]), now);
+        model.apply(&chunk_event(0, "A new copy.", Duration::from_secs(1)), now);
+        assert!(model.needs_animation());
+        assert!(model.can_play_pause());
+        assert_eq!(model.progress_label(), "Sentence 1 of 1");
+    }
+
+    #[test]
+    fn failure_survives_idle_until_the_next_reading() {
+        let now = Instant::now();
+        let mut model = ReaderModel::new();
+        model.prepare(vec!["Hello.".to_string()], now);
+        model.set_activity("Downloading…".to_string(), Some(0.5));
+        model.apply(&PlayerEvent::Error("Connection failed".to_string()), now);
+        model.apply(&PlayerEvent::State(PlayerState::Idle), now);
+        assert_eq!(model.progress_label(), "Error: Connection failed");
+        assert!(!model.is_active());
+        assert_eq!(model.progress(), 0.0);
+        model.prepare(vec!["Try again.".to_string()], now);
+        assert_eq!(model.progress_label(), "Preparing…");
     }
 
     #[test]
@@ -372,9 +488,9 @@ mod tests {
         // Idle with chunks (no state yet).
         assert_eq!(model.progress_label(), "Not reading");
         model.apply(&PlayerEvent::State(PlayerState::Loading), start);
-        assert_eq!(model.progress_label(), "Starting…");
+        assert_eq!(model.progress_label(), "Loading voice…");
         model.apply(&PlayerEvent::State(PlayerState::Playing), start);
-        assert_eq!(model.progress_label(), "Starting…");
+        assert_eq!(model.progress_label(), "Preparing…");
         model.apply(&chunk_event(0, "One.", Duration::from_secs(10)), start);
         assert_eq!(model.progress_label(), "Sentence 1 of 2");
         model.apply(&chunk_event(1, "Two.", Duration::from_secs(10)), start);

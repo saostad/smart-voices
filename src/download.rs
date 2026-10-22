@@ -13,6 +13,43 @@ use std::time::{Duration, Instant};
 /// Minimum time between progress callback invocations (at most ~10×/s).
 pub(crate) const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
 
+/// Shared tray, panel and terminal download text (decimal MB).
+pub fn progress_text(label: &str, done: u64, total: Option<u64>) -> String {
+    match total.filter(|total| *total > 0) {
+        Some(total) => format!(
+            "{label}… {}% ({:.1} of {:.1} MB)",
+            (u128::from(done) * 100 / u128::from(total)).min(100),
+            done as f64 / 1_000_000.0,
+            total as f64 / 1_000_000.0,
+        ),
+        None => format!("{label}… {:.1} MB", done as f64 / 1_000_000.0),
+    }
+}
+
+/// Limit UI updates to twice per second, always keeping the first and last.
+#[derive(Default)]
+pub struct ProgressThrottle {
+    last_report: Option<Instant>,
+    completed: bool,
+    total: Option<u64>,
+}
+
+impl ProgressThrottle {
+    pub fn should_report(&mut self, done: u64, total: Option<u64>, now: Instant) -> bool {
+        let complete = total.is_some_and(|total| total > 0 && done >= total);
+        let due = self
+            .last_report
+            .is_none_or(|last| now.saturating_duration_since(last) >= Duration::from_millis(500));
+        let report = due || total != self.total || (complete && !self.completed);
+        if report {
+            self.last_report = Some(now);
+        }
+        self.completed = complete;
+        self.total = total;
+        report
+    }
+}
+
 /// Errors from [`download_file`].
 #[derive(Debug)]
 pub enum DownloadError {
@@ -460,6 +497,35 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
+
+    #[test]
+    fn progress_formats_known_unknown_and_zero_totals() {
+        assert_eq!(
+            progress_text("Downloading English voice", 147_000_000, Some(350_000_000)),
+            "Downloading English voice… 42% (147.0 of 350.0 MB)"
+        );
+        assert_eq!(
+            progress_text("Downloading voice", 12_345, None),
+            "Downloading voice… 0.0 MB"
+        );
+        assert_eq!(
+            progress_text("Downloading voice", 1_500_000, Some(0)),
+            "Downloading voice… 1.5 MB"
+        );
+        assert!(progress_text("Voice", u64::MAX, Some(1)).contains("100%"));
+    }
+
+    #[test]
+    fn progress_throttle_keeps_initial_total_changes_and_completion() {
+        let now = Instant::now();
+        let mut throttle = ProgressThrottle::default();
+        assert!(throttle.should_report(0, None, now));
+        assert!(throttle.should_report(0, Some(100), now));
+        assert!(!throttle.should_report(10, Some(100), now + Duration::from_millis(100)));
+        assert!(throttle.should_report(50, Some(100), now + Duration::from_millis(500)));
+        assert!(throttle.should_report(100, Some(100), now + Duration::from_millis(501)));
+        assert!(!throttle.should_report(100, Some(100), now + Duration::from_millis(502)));
+    }
 
     static TEST_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 

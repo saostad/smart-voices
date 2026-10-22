@@ -28,11 +28,13 @@ use winit::window::WindowId;
 use crate::audio::AudioSink;
 use crate::autostart;
 use crate::clipboard::{self, ClipboardEvent, MIN_TEXT_LEN};
+use crate::download::{ProgressThrottle, progress_text};
 use crate::engine::{
     ModelVariant, PERSIAN_VOICES, PersianVoice, VOICES, grouped_english_voices, voice_short_name,
 };
 use crate::icon;
 use crate::models::{self, ModelId};
+use crate::notification;
 use crate::phonon::{DEFAULT_PHONON_VOICE, PHONON_VOICES, PhononVoiceGroup};
 use crate::pipeline::prepare;
 use crate::player::{Player, PlayerConfig, PlayerEvent, PlayerState, Synth};
@@ -47,7 +49,7 @@ use crate::shortcuts::{ShortcutAction, format_binding, parse_binding};
 /// tray/menu global handlers.
 #[derive(Debug)]
 enum AppEvent {
-    Player(PlayerEvent),
+    Player(u64, PlayerEvent),
     Clipboard(ClipboardEvent),
     Tray(TrayIconEvent),
     Menu(MenuEvent),
@@ -56,6 +58,7 @@ enum AppEvent {
     PortalShortcut(ShortcutAction),
     #[cfg(target_os = "linux")]
     PortalError(String),
+    DownloadStarted(ModelId),
     DownloadProgress(ModelId, u64, Option<u64>),
     DownloadDone(Result<(), String>),
 }
@@ -239,6 +242,11 @@ struct App {
     models_root: PathBuf,
     model: ModelVariant,
     player: Option<Player>,
+    player_generation: u64,
+    awaiting_playlist: bool,
+    load_notice_at: Option<Instant>,
+    busy_notified: bool,
+    download_activity: Option<(String, Option<f32>)>,
     watcher: Option<clipboard::Watcher>,
     /// Watcher error to show in the status line once the menu exists.
     startup_error: Option<String>,
@@ -350,6 +358,11 @@ impl App {
             models_root,
             model,
             player: None,
+            player_generation: 0,
+            awaiting_playlist: false,
+            load_notice_at: None,
+            busy_notified: false,
+            download_activity: None,
             watcher: None,
             startup_error,
             tray: None,
@@ -769,10 +782,10 @@ impl App {
             pause.set_text(if self.paused { "Resume" } else { "Pause" });
             pause.set_enabled(self.active);
         }
-        for item in [&self.stop_item, &self.prev_item, &self.next_item]
-            .into_iter()
-            .flatten()
-        {
+        if let Some(stop) = &self.stop_item {
+            stop.set_enabled(self.active || self.pending_text.is_some());
+        }
+        for item in [&self.prev_item, &self.next_item].into_iter().flatten() {
             item.set_enabled(self.active);
         }
     }
@@ -863,12 +876,27 @@ impl App {
     }
 
     fn play_text(&mut self, text: String) {
+        self.set_status("Preparing…");
+        self.load_notice_at = None;
+        self.busy_notified = self.downloading;
         self.reload_pronunciations();
         // Download whichever models this reading needs (English chunks need
         // the English variant, Persian chunks the Persian voice), one after the
         // other, then play. English-only text never downloads the Persian
         // voice.
         let chunks = prepare(&text, &SanitizerOptions::default(), &self.pronunciations);
+        self.reader_model.prepare(
+            chunks.iter().map(|chunk| chunk.text.clone()).collect(),
+            Instant::now(),
+        );
+        if self.downloading {
+            self.pending_text = Some(text);
+            if let Some((status, progress)) = self.download_activity.clone() {
+                self.set_status(&status);
+                self.reader_model.set_activity(status, progress);
+            }
+            return;
+        }
         let missing: Vec<ModelId> = models::models_for_chunks(
             &chunks,
             self.model,
@@ -889,9 +917,13 @@ impl App {
             return;
         }
         if let Err(message) = self.ensure_player() {
+            self.reader_model
+                .apply(&PlayerEvent::Error(message.clone()), Instant::now());
             self.show_error(&message);
+            notification::show("Couldn’t start reading", &message);
             return;
         }
+        self.awaiting_playlist = true;
         if let Some(player) = &self.player {
             if self.debug_latency {
                 let copy_ms = self
@@ -909,18 +941,29 @@ impl App {
     /// reporting progress into the loop at most ~2×/s for the status line.
     fn start_download(&mut self, queue: Vec<ModelId>) {
         self.downloading = true;
+        self.busy_notified = true;
+        // Retire the old controller so its queued events cannot hide download
+        // progress or restart the old reading after a new copy.
+        if let Some(player) = self.player.take() {
+            player.stop();
+        }
+        self.player_generation = self.player_generation.wrapping_add(1);
+        self.awaiting_playlist = false;
+        self.active = false;
+        self.last_chunk = None;
+        self.paused = false;
+        self.show_idle_frame();
         self.set_status("Downloading voice…");
+        self.reader_model
+            .set_activity("Downloading voice…".to_string(), None);
         let proxy = self.proxy.clone();
         let root = self.models_root.clone();
         std::thread::spawn(move || {
-            let mut last_report: Option<Instant> = None;
             for model in queue {
+                let _ = proxy.send_event(AppEvent::DownloadStarted(model));
+                let mut throttle = ProgressThrottle::default();
                 let result = models::download(&root, model, |done, total| {
-                    let now = Instant::now();
-                    let due =
-                        last_report.is_none_or(|last| now - last >= Duration::from_millis(500));
-                    if due {
-                        last_report = Some(now);
+                    if throttle.should_report(done, total, Instant::now()) {
                         let _ = proxy.send_event(AppEvent::DownloadProgress(model, done, total));
                     }
                 });
@@ -933,23 +976,45 @@ impl App {
         });
     }
 
+    fn on_download_started(&mut self, model: ModelId) {
+        self.on_download_progress(model, 0, None);
+        notification::show(
+            "Downloading voice model",
+            &format!("{} — reading will start when it’s ready.", model.label()),
+        );
+    }
+
     fn on_download_progress(&mut self, model: ModelId, done: u64, total: Option<u64>) {
-        self.set_status(&download_status(download_label(model), done, total));
+        let status = progress_text(download_label(model), done, total);
+        let progress = total
+            .filter(|total| *total > 0)
+            .map(|total| (done as f64 / total as f64).clamp(0.0, 1.0) as f32);
+        self.download_activity = Some((status.clone(), progress));
+        self.set_status(&status);
+        if self.pending_text.is_some() {
+            self.reader_model.set_activity(status, progress);
+        }
     }
 
     fn on_download_done(&mut self, result: Result<(), String>) {
         self.downloading = false;
+        self.download_activity = None;
         match result {
             Ok(()) => {
                 if let Some(text) = self.pending_text.take() {
                     self.play_text(text);
+                    // The download already explained this wait.
+                    self.busy_notified = true;
                 } else {
                     self.set_status("Ready");
                 }
             }
             Err(message) => {
                 self.pending_text = None;
+                self.reader_model
+                    .apply(&PlayerEvent::Error(message.clone()), Instant::now());
                 self.show_error(&message);
+                notification::show("Voice download failed", &message);
             }
         }
     }
@@ -1006,10 +1071,15 @@ impl App {
         };
         let (player, events) =
             Player::spawn(config, Box::new(factory), Box::new(persian_factory), sink);
+        self.player_generation = self.player_generation.wrapping_add(1);
+        let generation = self.player_generation;
         let proxy = self.proxy.clone();
         std::thread::spawn(move || {
             for event in events {
-                if proxy.send_event(AppEvent::Player(event)).is_err() {
+                if proxy
+                    .send_event(AppEvent::Player(generation, event))
+                    .is_err()
+                {
                     break;
                 }
             }
@@ -1019,6 +1089,12 @@ impl App {
     }
 
     fn on_player_event(&mut self, event_loop: &ActiveEventLoop, event: PlayerEvent) {
+        if self.awaiting_playlist {
+            if !matches!(event, PlayerEvent::Playlist(_) | PlayerEvent::Error(_)) {
+                return;
+            }
+            self.awaiting_playlist = false;
+        }
         self.reader_model.apply(&event, Instant::now());
         self.update_reader(event_loop);
         match event {
@@ -1026,13 +1102,16 @@ impl App {
                 self.active = true;
                 self.last_chunk = None;
                 self.paused = false;
+                self.load_notice_at =
+                    (!self.busy_notified).then(|| Instant::now() + Duration::from_secs(3));
                 self.set_status("Loading voice…");
                 self.show_idle_frame();
             }
             PlayerEvent::State(PlayerState::Playing) => {
-                // A fresh play keeps "Loading voice…" (or "Ready" when the
-                // engine was already loaded) until the first chunk; a resume
-                // restores the last reading position.
+                self.load_notice_at = None;
+                if self.reader_model.current().is_none() {
+                    self.set_status("Preparing…");
+                }
                 if self.paused {
                     self.paused = false;
                     if let Some((index, count)) = self.last_chunk {
@@ -1051,6 +1130,7 @@ impl App {
                 self.show_idle_frame();
             }
             PlayerEvent::State(PlayerState::Idle) => {
+                self.load_notice_at = None;
                 if !self.showing_error {
                     self.active = false;
                     self.last_chunk = None;
@@ -1080,7 +1160,12 @@ impl App {
                     self.show_idle_frame();
                 }
             }
-            PlayerEvent::Playlist(_) => {}
+            PlayerEvent::Playlist(_) => {
+                self.last_chunk = None;
+                self.active = true;
+                self.paused = false;
+                self.set_status("Preparing…");
+            }
             PlayerEvent::Finished => {
                 self.active = false;
                 self.last_chunk = None;
@@ -1089,6 +1174,8 @@ impl App {
                 self.show_idle_frame();
             }
             PlayerEvent::Error(message) => {
+                self.load_notice_at = None;
+                notification::show("Couldn’t read text", &message);
                 self.active = false;
                 self.last_chunk = None;
                 self.paused = false;
@@ -1261,9 +1348,7 @@ impl App {
                 }
             }
         } else if self.stop_item.as_ref().is_some_and(|item| id == item.id()) {
-            if let Some(player) = &self.player {
-                player.stop();
-            }
+            self.stop_reading();
         } else if self.prev_item.as_ref().is_some_and(|item| id == item.id()) {
             if let Some(player) = &self.player {
                 player.previous();
@@ -1505,12 +1590,23 @@ impl App {
             // the old engine; the new variant loads on the next play (and
             // downloads first if it isn't installed, via the existing flow).
             self.player = None;
+            self.player_generation = self.player_generation.wrapping_add(1);
+            self.awaiting_playlist = false;
+            self.load_notice_at = None;
+            if self.pending_text.is_none() {
+                self.reader_model
+                    .apply(&PlayerEvent::State(PlayerState::Idle), Instant::now());
+            }
             self.model = variant;
             self.settings.model = variant;
             self.active = false;
             self.last_chunk = None;
             self.paused = false;
-            self.set_status("Ready");
+            if let Some((status, _)) = self.download_activity.clone() {
+                self.set_status(&status);
+            } else {
+                self.set_status("Ready");
+            }
             self.update_transport();
             self.save_settings();
         }
@@ -1695,6 +1791,17 @@ impl App {
         }
     }
 
+    fn stop_reading(&mut self) {
+        self.pending_text = None;
+        self.load_notice_at = None;
+        self.awaiting_playlist = false;
+        self.reader_model
+            .apply(&PlayerEvent::State(PlayerState::Idle), Instant::now());
+        if let Some(player) = &self.player {
+            player.stop();
+        }
+    }
+
     fn on_shortcut_action(&mut self, action: ShortcutAction) {
         match Some(action) {
             Some(ShortcutAction::ReadOrPause) => {
@@ -1710,11 +1817,7 @@ impl App {
                     self.read_clipboard();
                 }
             }
-            Some(ShortcutAction::Stop) => {
-                if let Some(player) = &self.player {
-                    player.stop();
-                }
-            }
+            Some(ShortcutAction::Stop) => self.stop_reading(),
             Some(ShortcutAction::Next) => {
                 if let Some(player) = &self.player {
                     player.next();
@@ -1748,7 +1851,11 @@ impl ApplicationHandler<AppEvent> for App {
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
         match event {
-            AppEvent::Player(event) => self.on_player_event(event_loop, event),
+            AppEvent::Player(generation, event) => {
+                if generation == self.player_generation {
+                    self.on_player_event(event_loop, event);
+                }
+            }
             AppEvent::Clipboard(event) => self.on_clipboard_event(event),
             AppEvent::Tray(event) => self.on_tray_event(event),
             AppEvent::Menu(event) => self.on_menu_event(event_loop, event),
@@ -1757,11 +1864,14 @@ impl ApplicationHandler<AppEvent> for App {
             AppEvent::PortalShortcut(action) => self.on_shortcut_action(action),
             #[cfg(target_os = "linux")]
             AppEvent::PortalError(message) => self.show_error(&message),
+            AppEvent::DownloadStarted(model) => self.on_download_started(model),
             AppEvent::DownloadProgress(model, done, total) => {
                 self.on_download_progress(model, done, total)
             }
             AppEvent::DownloadDone(result) => self.on_download_done(result),
         }
+        self.update_transport();
+        self.update_reader(event_loop);
     }
 
     fn window_event(
@@ -1820,6 +1930,14 @@ impl ApplicationHandler<AppEvent> for App {
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         let now = Instant::now();
+        if self.load_notice_at.is_some_and(|deadline| deadline <= now) {
+            self.load_notice_at = None;
+            self.busy_notified = true;
+            notification::show(
+                "Loading voice",
+                "Reading will start when the voice is ready.",
+            );
+        }
         if let Some(hide_at) = self.reader_hide_at
             && hide_at <= now
         {
@@ -1853,6 +1971,7 @@ impl ApplicationHandler<AppEvent> for App {
             self.reader_hide_at,
             redraw_at,
             self.icon_next_at,
+            self.load_notice_at,
         ]));
     }
 }
@@ -1952,7 +2071,9 @@ fn swap_voice_sets(
 /// Status-line label for a running model download.
 fn download_label(model: ModelId) -> &'static str {
     match model {
-        ModelId::English(_) => "Downloading voice",
+        ModelId::English(ModelVariant::Fast) => "Downloading English voice (Fast)",
+        ModelId::English(ModelVariant::Small) => "Downloading English voice (Small)",
+        ModelId::English(ModelVariant::Phonon) => "Downloading Phonon",
         ModelId::Persian(_) => "Downloading Persian voice",
         ModelId::PhononVoices => "Downloading Phonon voices",
     }
@@ -1982,22 +2103,24 @@ fn settings_menu_order() -> [Option<&'static str>; 14] {
     ]
 }
 
-/// Status-line text for a running model download (decimal MB).
-fn download_status(label: &str, done: u64, total: Option<u64>) -> String {
-    const MB: f64 = 1_000_000.0;
-    match total {
-        Some(total) => format!(
-            "{label}: {:.0}/{:.0} MB",
-            done as f64 / MB,
-            total as f64 / MB
-        ),
-        None => format!("{label}: {:.0} MB", done as f64 / MB),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn download_status_fits_tray_with_percent_and_bytes() {
+        for model in [
+            ModelId::English(ModelVariant::Fast),
+            ModelId::English(ModelVariant::Small),
+            ModelId::English(ModelVariant::Phonon),
+            ModelId::Persian(PersianVoice::PocketV2),
+            ModelId::PhononVoices,
+        ] {
+            let status = progress_text(download_label(model), 147_000_000, Some(350_000_000));
+            assert_eq!(truncate_status(&status), status);
+            assert!(status.contains("42% (147.0 of 350.0 MB)"));
+        }
+    }
 
     #[test]
     fn short_status_is_unchanged() {
@@ -2101,30 +2224,6 @@ mod tests {
                 Some("Edit Pronunciations…"),
                 Some("Open Settings File…"),
             ]
-        );
-    }
-
-    #[test]
-    fn download_status_shows_whole_mb() {
-        assert_eq!(
-            download_status("Downloading voice", 120_000_000, Some(350_000_000)),
-            "Downloading voice: 120/350 MB"
-        );
-        assert_eq!(
-            download_status("Downloading voice", 1_500_000, None),
-            "Downloading voice: 2 MB"
-        );
-        assert_eq!(
-            download_status(
-                download_label(ModelId::Persian(crate::engine::PersianVoice::Amir)),
-                30_000_000,
-                Some(67_000_000)
-            ),
-            "Downloading Persian voice: 30/67 MB"
-        );
-        assert_eq!(
-            download_label(ModelId::English(crate::engine::ModelVariant::Fast)),
-            "Downloading voice"
         );
     }
 }

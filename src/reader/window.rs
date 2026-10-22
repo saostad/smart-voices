@@ -51,6 +51,7 @@ struct FrameKey {
     current: Option<usize>,
     word: Option<usize>,
     label: String,
+    progress_bits: u32,
     can_previous: bool,
     can_next: bool,
     playing: bool,
@@ -65,10 +66,11 @@ impl FrameKey {
             current: model.current(),
             word: model.current_word(now),
             label: model.progress_label(),
+            progress_bits: model.progress().to_bits(),
             can_previous: model.can_previous(),
             can_next: model.can_next(),
             playing: model.state() == PlayerState::Playing,
-            play_enabled: model.is_active(),
+            play_enabled: model.can_play_pause(),
             scroll_bits: scroll.to_bits(),
         }
     }
@@ -424,7 +426,7 @@ impl ReaderWindow {
             can_previous: model.can_previous(),
             can_next: model.can_next(),
             playing: model.state() == PlayerState::Playing,
-            can_play_pause: model.is_active(),
+            can_play_pause: model.can_play_pause(),
             theme: &self.theme,
         };
         self.painter.paint(&frame, &mut buffer);

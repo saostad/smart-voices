@@ -12,7 +12,7 @@
 //!   current rows, and is a no-op when the `(current, word)` pair is unchanged;
 //! - [`Painter::paint`] never shapes a row: it fills the background, draws
 //!   only rows intersecting the visible list area, and clips every pixel. The
-//!   one-line footer label is the only text shaped from `paint`, and only when
+//!   footer label is the only text shaped from `paint`, and only when
 //!   its text changed (there is no earlier hook: it arrives with the frame).
 //! - row base colors (`secondary` before the current row, `text` otherwise)
 //!   are a paint-time [`Buffer::draw`] parameter, so moving the current row
@@ -26,7 +26,7 @@ use crate::word_timing::word_ranges;
 const PAD: f32 = 12.0;
 const INNER: f32 = 8.0;
 const GAP: f32 = 6.0;
-const FOOTER_H: f32 = 100.0;
+const FOOTER_H: f32 = 118.0;
 const ROW_RADIUS: f32 = 8.0;
 const FONT_SIZE: f32 = 15.0;
 const LINE_HEIGHT: f32 = 21.0;
@@ -338,7 +338,7 @@ pub struct Painter {
     /// Cached content-space (physical px) row box tops and heights.
     row_tops: Vec<i32>,
     row_heights: Vec<i32>,
-    /// Single-line footer label, shaped only when its text changes.
+    /// Two-line footer label, shaped only when its text changes.
     label: Buffer,
     label_text: String,
     highlight: (Option<usize>, Option<usize>),
@@ -442,7 +442,7 @@ impl Painter {
             let label_metrics = self.label_metrics();
             self.label.set_metrics(label_metrics);
             self.label
-                .set_size(Some(wrap), Some(label_metrics.line_height));
+                .set_size(Some(wrap), Some(label_metrics.line_height * 2.0));
             self.label.shape_until_scroll(&mut self.font_system, false);
             self.relayout();
         }
@@ -746,7 +746,7 @@ impl Painter {
                 }
             },
         );
-        let bar_top = label_top + self.px(LABEL_LINE) + self.px(6.0);
+        let bar_top = label_top + self.px(LABEL_LINE * 2.0) + self.px(6.0);
         let bar_h = self.px(4.0).max(1);
         let bar_w = w - 2 * pad;
         if bar_w > 0 {
@@ -1030,6 +1030,33 @@ mod tests {
             can_play_pause: true,
             theme,
         }
+    }
+
+    #[test]
+    fn download_label_fits_two_lines_at_minimum_panel_width() {
+        let Some(mut painter) = painter() else {
+            return;
+        };
+        painter.resize(320, 220, 1.0);
+        let theme = Theme::light();
+        let label = "Downloading English voice (Fast)… 42% (147.0 of 350.0 MB)";
+        let mut pixels = vec![0u32; 320 * 220];
+        painter.paint(
+            &Frame {
+                label,
+                ..test_frame(&theme)
+            },
+            &mut pixels,
+        );
+        let runs: Vec<_> = painter.label.layout_runs().collect();
+        assert_eq!(runs.len(), 2);
+        assert_eq!(
+            runs.iter()
+                .flat_map(|run| run.glyphs)
+                .map(|glyph| glyph.end)
+                .max(),
+            Some(label.len())
+        );
     }
 
     #[test]

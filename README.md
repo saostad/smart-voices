@@ -36,6 +36,13 @@ reading downloads the voice model (see sizes below), then plays.
 
 Models download automatically when first needed:
 
+The tray status and reading panel show which voice is downloading, with a
+percentage and downloaded/total MB when the server provides the size. Without
+a size, they show the MB received. A desktop notification announces each model
+download once; reading starts automatically when it finishes. New copies
+replace the text waiting to be read. Stop cancels the pending reading while
+letting the download finish for next time.
+
 | Model | Size | When |
 |---|---|---|
 | Fast (default English voice) | ~350 MB | First English reading |
@@ -48,12 +55,14 @@ Models download automatically when first needed:
 You can also pre-download from a terminal:
 `smart-voices download`, `smart-voices download --model small`,
 `smart-voices download --model phonon`, or `smart-voices download --persian`.
+These commands print download progress in the terminal too.
 
 ## The tray menu
 
 By default every new copy is read aloud automatically, and a new copy stops
 the current reading and reads the new text. Click the tray icon to open the
-menu: a status line (`Ready`, `Reading 3 of 12`, `Paused`, …),
+menu: a status line (`Ready`, `Downloading English voice (Fast)… 42%`,
+`Loading voice…`, `Preparing…`, `Reading 3 of 12`, `Paused`, …),
 `Read Copied Text Automatically` (the main on/off switch), `Read Clipboard`,
 `Pause`/`Resume`, `Stop`, `Previous`/`Next Sentence`, `Show Reading Panel`,
 the `Settings` submenu, and `Quit`.
@@ -61,6 +70,12 @@ the `Settings` submenu, and `Quit`.
 While reading, a small panel shows the text with the current word
 highlighted; click a paragraph to jump there, or use its Previous / Pause /
 Next buttons. Close it to hide it for that reading.
+The panel also opens during downloads and voice loading if automatic display
+is enabled, and shows download progress before audio starts. Voice loads that
+take more than three seconds trigger one desktop notification. Download,
+voice-loading, and playback failures appear in the tray status, the panel,
+and a desktop notification. Notifications follow your desktop's notification
+permissions and Do Not Disturb settings.
 
 The `Settings` submenu holds everything customizable:
 
