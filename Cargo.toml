@@ -42,7 +42,7 @@ windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Syst
 
 [target.'cfg(target_os = "linux")'.dependencies]
 x11rb = { version = "=0.14.0", features = ["xfixes"] }
-ashpd = { version = "=0.13.13", default-features = false, features = ["async-io", "global_shortcuts"] }
+ashpd = { version = "=0.13.13", default-features = false, features = ["async-io", "global_shortcuts", "settings"] }
 async-io = "=2.6.0"
 winit = { version = "0.30", default-features = false, features = ["x11", "wayland", "wayland-dlopen", "wayland-csd-adwaita-notitle"] }
 tray-icon = { version = "=0.26.1", default-features = false, features = ["ksni"] }

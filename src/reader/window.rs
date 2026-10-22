@@ -194,7 +194,7 @@ impl ReaderWindow {
         painter.set_playlist(model.chunks());
         painter.set_highlight(model.current(), model.current_word(now));
         painter.scroll_to_current();
-        let theme = match window.theme() {
+        let theme = match window.theme().or_else(system_theme) {
             Some(WinitTheme::Dark) => Theme::dark(),
             _ => Theme::light(),
         };
@@ -433,6 +433,24 @@ impl ReaderWindow {
             Err(err) => PanelAction::DrawFailed(format!("Couldn't draw the reading panel: {err}")),
         }
     }
+}
+
+/// The desktop's light/dark preference when winit can't tell (it reports no
+/// theme on Linux): read from the XDG Settings portal's `color-scheme`.
+#[cfg(target_os = "linux")]
+fn system_theme() -> Option<WinitTheme> {
+    use ashpd::desktop::settings::{ColorScheme, Settings};
+    let scheme = async_io::block_on(async { Settings::new().await?.color_scheme().await }).ok()?;
+    match scheme {
+        ColorScheme::PreferDark => Some(WinitTheme::Dark),
+        ColorScheme::PreferLight => Some(WinitTheme::Light),
+        ColorScheme::NoPreference => None,
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn system_theme() -> Option<WinitTheme> {
+    None
 }
 
 #[cfg(test)]
