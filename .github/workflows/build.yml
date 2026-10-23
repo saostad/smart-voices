@@ -32,6 +32,17 @@ jobs:
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
 
+      # Releases are numbered MAJOR.RUN.0 (e.g. 2.21.0): the major version from
+      # Cargo.toml plus this workflow's run number. Stamp it into Cargo.toml after
+      # the cache restore so the binary and every package carry the same version.
+      - name: Stamp version
+        shell: bash
+        run: |
+          MAJOR="$(sed -n 's/^version = "\([0-9]*\)\..*"/\1/p' Cargo.toml | head -1)"
+          VERSION="$MAJOR.${{ github.run_number }}.0" perl -i.bak -pe '$done ||= s/^version = ".*"/version = "$ENV{VERSION}"/' Cargo.toml
+          rm Cargo.toml.bak
+          grep -m1 '^version = ' Cargo.toml
+
       # sherpa-onnx links shared. Left alone, its build script downloads the runtime
       # libs into target/, where the dependency cache drops them but keeps the build
       # script's result, so a cached build cannot link. Keep them outside target/.
@@ -161,15 +172,16 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
-          TAG="v${VERSION}-build.${{ github.run_number }}"
+          MAJOR="$(sed -n 's/^version = "\([0-9]*\)\..*"/\1/p' Cargo.toml | head -1)"
+          VERSION="$MAJOR.${{ github.run_number }}.0"
+          TAG="v${VERSION}"
           gh release create "$TAG" \
             dist/smart-voices-windows-x86_64-setup.exe \
             dist/smart-voices-macos-arm64.dmg \
             dist/smart-voices-linux-amd64.deb \
             dist/smart-voices-linux-x86_64.tar.gz \
             --target "${{ github.sha }}" \
-            --title "Smart Voices ${VERSION} (build ${{ github.run_number }})" \
+            --title "Smart Voices ${VERSION}" \
             --notes "Automated build from main (${{ github.sha }}).
 
           - **Windows:** download \`smart-voices-windows-x86_64-setup.exe\` and run it. Windows SmartScreen may warn because the installer isn't code-signed: click More info → Run anyway.
