@@ -244,6 +244,10 @@ struct App {
     player: Option<Player>,
     player_generation: u64,
     awaiting_playlist: bool,
+    /// A background voice load (auto-read off) is running: its
+    /// `Loading`/`Idle` states are not a reading, so the panel and tray
+    /// status ignore them.
+    prewarming: bool,
     load_notice_at: Option<Instant>,
     busy_notified: bool,
     download_activity: Option<(String, Option<f32>)>,
@@ -360,6 +364,7 @@ impl App {
             player: None,
             player_generation: 0,
             awaiting_playlist: false,
+            prewarming: false,
             load_notice_at: None,
             busy_notified: false,
             download_activity: None,
@@ -876,6 +881,7 @@ impl App {
     }
 
     fn play_text(&mut self, text: String) {
+        self.prewarming = false;
         self.set_status("Preparing…");
         self.load_notice_at = None;
         self.busy_notified = self.downloading;
@@ -949,6 +955,7 @@ impl App {
         }
         self.player_generation = self.player_generation.wrapping_add(1);
         self.awaiting_playlist = false;
+        self.prewarming = false;
         self.active = false;
         self.last_chunk = None;
         self.paused = false;
@@ -1089,6 +1096,19 @@ impl App {
     }
 
     fn on_player_event(&mut self, event_loop: &ActiveEventLoop, event: PlayerEvent) {
+        if self.prewarming {
+            match event {
+                // The load finished (or the player was already warm and
+                // ignored the request; the next reading clears the flag).
+                PlayerEvent::State(PlayerState::Idle) => {
+                    self.prewarming = false;
+                    return;
+                }
+                PlayerEvent::State(_) => return,
+                // A failed load is reported like any other error.
+                _ => self.prewarming = false,
+            }
+        }
         if self.awaiting_playlist {
             if !matches!(event, PlayerEvent::Playlist(_) | PlayerEvent::Error(_)) {
                 return;
@@ -1314,9 +1334,12 @@ impl App {
                     // Warm the voice in the background so the manual read is
                     // fast. A failure here (e.g. no audio device) stays silent;
                     // the manual read reports it.
-                    if self.ensure_player().is_ok()
+                    if !self.reader_model.is_active()
+                        && self.pending_text.is_none()
+                        && self.ensure_player().is_ok()
                         && let Some(player) = &self.player
                     {
+                        self.prewarming = true;
                         player.prewarm();
                     }
                 }
@@ -1592,6 +1615,7 @@ impl App {
             self.player = None;
             self.player_generation = self.player_generation.wrapping_add(1);
             self.awaiting_playlist = false;
+            self.prewarming = false;
             self.load_notice_at = None;
             if self.pending_text.is_none() {
                 self.reader_model
@@ -1793,6 +1817,7 @@ impl App {
 
     fn stop_reading(&mut self) {
         self.pending_text = None;
+        self.prewarming = false;
         self.load_notice_at = None;
         self.awaiting_playlist = false;
         self.reader_model
