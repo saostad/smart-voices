@@ -339,10 +339,10 @@ pub(super) fn read_text() -> Result<Option<String>, ClipboardError> {
     // On Wayland, XWayland may refuse selection requests from X clients while
     // a native Wayland window has focus (Hyprland does), so ask `wl-paste`
     // first and only fall back to X11 when it isn't installed.
-    if std::env::var_os("WAYLAND_DISPLAY").is_some() {
-        if let Some(result) = read_text_wayland() {
-            return result;
-        }
+    if std::env::var_os("WAYLAND_DISPLAY").is_some()
+        && let Some(result) = read_text_wayland()
+    {
+        return result;
     }
     read_text_x11()
 }
