@@ -120,11 +120,15 @@ pub fn sanitize(text: &str, options: &SanitizerOptions) -> Vec<SpeechSegment> {
     segments
 }
 
-/// Parser options: tables, strikethrough, task lists. No footnotes or smart
+/// Parser options: tables, strikethrough, task lists and YAML front matter
+/// (parsed only so it is skipped, never spoken). No footnotes or smart
 /// punctuation: footnote definitions and bare URLs are handled by hand,
 /// like the Swift original.
 fn parser_options() -> Options {
-    Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS
+    Options::ENABLE_TABLES
+        | Options::ENABLE_STRIKETHROUGH
+        | Options::ENABLE_TASKLISTS
+        | Options::ENABLE_YAML_STYLE_METADATA_BLOCKS
 }
 
 // MARK: - Block tree
@@ -517,15 +521,16 @@ fn collect_inline_until(
                 *pos += 1;
             }
             Event::SoftBreak | Event::HardBreak => {
+                // Resolved by `join_lines` once the whole run is collected.
                 if let Some(top) = buffers.last_mut() {
-                    top.push(' ');
+                    top.push('\n');
                 }
                 *pos += 1;
             }
-            Event::InlineHtml(html) | Event::Html(html) => {
-                if is_break_tag(html)
-                    && let Some(top) = buffers.last_mut()
-                {
+            Event::InlineHtml(_) | Event::Html(_) => {
+                // Every tag becomes a space (collapsed later) so tags such as
+                // `</summary>Hidden` never glue two words together.
+                if let Some(top) = buffers.last_mut() {
                     top.push(' ');
                 }
                 *pos += 1;
@@ -558,7 +563,39 @@ fn collect_inline_until(
             }
         }
     }
-    buffers.concat()
+    join_lines(&buffers.concat())
+}
+
+/// Longest line (in chars) that still counts as a title in `join_lines`.
+const TITLE_LINE_MAX_CHARS: usize = 60;
+
+/// Join the lines of one paragraph with spaces, except that a short title
+/// line ("Breaking News") over a new sentence ends with a period, so the
+/// voice pauses instead of running the title into the next sentence.
+/// Longer hard-wrapped prose still joins (port of Readly's rule).
+fn join_lines(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    let mut previous: Option<&str> = None;
+    for line in text.split('\n') {
+        if let Some(prev) = previous {
+            if is_title_line_break(prev.trim(), line.trim()) {
+                result.push('.');
+            }
+            result.push(' ');
+        }
+        result.push_str(line);
+        previous = Some(line);
+    }
+    result
+}
+
+fn is_title_line_break(previous: &str, next: &str) -> bool {
+    let (Some(last), Some(first)) = (previous.chars().last(), next.chars().next()) else {
+        return false;
+    };
+    !matches!(last, '.' | '!' | '?' | ':' | ';' | ',' | '…')
+        && previous.chars().count() <= TITLE_LINE_MAX_CHARS
+        && (first.is_uppercase() || first.is_ascii_digit())
 }
 
 // MARK: - Blocks
@@ -946,6 +983,11 @@ fn clean_fragment(raw: &str, options: &SanitizerOptions) -> Option<String> {
     value = collapse_whitespace(&value);
     value = remove_leftover_markup(&value);
     value = collapse_whitespace(&value);
+    value = collapse_punctuation_runs(&value);
+    value = remove_symbol_tokens(&value);
+    value = remove_stranded_commas(&value);
+    value = remove_space_before_punctuation(&value);
+    value = collapse_whitespace(&value);
     let trimmed = value.trim().to_string();
     if trimmed.is_empty() {
         return None;
@@ -1001,7 +1043,10 @@ fn remove_citations(value: &str) -> String {
             let remaining = chars.len() - index;
             if distance < 60 || remaining < 60 {
                 let inside: String = chars[index + 1..index + distance].iter().collect();
-                if is_footnote_ref(&inside) || is_numeric_citation(&inside) {
+                if is_footnote_ref(&inside)
+                    || is_numeric_citation(&inside)
+                    || is_reference_marker(&inside)
+                {
                     index += distance + 1;
                     continue;
                 }
@@ -1044,6 +1089,22 @@ fn is_footnote_ref(inside: &str) -> bool {
     inside.starts_with('^') && inside.chars().count() > 1
 }
 
+/// Wikipedia-style markers: `[a]`, `[citation needed]`, `[note 1]`, `[nb 2]`.
+fn is_reference_marker(inside: &str) -> bool {
+    let lower = inside.trim().to_lowercase();
+    if lower.chars().count() == 1 {
+        return lower.chars().all(|c| c.is_ascii_lowercase());
+    }
+    if lower == "citation needed" {
+        return true;
+    }
+    ["note ", "nb "].iter().any(|prefix| {
+        lower
+            .strip_prefix(prefix)
+            .is_some_and(|number| !number.is_empty() && number.chars().all(|c| c.is_ascii_digit()))
+    })
+}
+
 fn is_numeric_citation(inside: &str) -> bool {
     let trimmed = inside.trim();
     if trimmed.is_empty() {
@@ -1079,24 +1140,28 @@ fn remove_emoji(value: &str) -> String {
         .collect()
 }
 
-/// True for scalars with Unicode `Emoji_Presentation=Yes` (UTS #51).
+/// True for scalars with Unicode `Emoji_Presentation=Yes` (UTS #51), plus
+/// the invisible emoji glue (ZWJ, variation selectors, keycap, tag
+/// characters) and pictographic blocks (box drawing, shapes) that are never
+/// spoken. ZWNJ (U+200C) is kept: Persian words need it.
 ///
 /// Hand-rolled table (no Unicode-data crate allowed). It approximates the
-/// Swift original, which works per grapheme cluster: lone text-default
-/// symbols in emoji blocks (e.g. ★, ♠) and keycap/ZWJ leftovers may differ,
-/// but plain emoji, digits, `#` and all scripts behave the same.
+/// Swift original, which works per grapheme cluster, but plain emoji,
+/// digits, `#` and all scripts behave the same.
 fn is_emoji_presentation(c: char) -> bool {
     matches!(c,
         '\u{A9}' | '\u{AE}' | '\u{203C}' | '\u{2049}' | '\u{2122}' | '\u{2139}'
+        | '\u{200D}' | '\u{20E3}' | '\u{FE0E}' | '\u{FE0F}'
         | '\u{2194}'..='\u{2199}' | '\u{21A9}'..='\u{21AA}'
         | '\u{231A}'..='\u{231B}' | '\u{2328}' | '\u{2388}'
         | '\u{23CF}' | '\u{23E9}'..='\u{23F3}' | '\u{23F8}'..='\u{23FA}'
         | '\u{24C2}'
-        | '\u{25AA}'..='\u{25AB}' | '\u{25B6}' | '\u{25C0}' | '\u{25FB}'..='\u{25FE}'
+        | '\u{2500}'..='\u{25FF}'
         | '\u{2600}'..='\u{27BF}'
-        | '\u{2B1B}'..='\u{2B1C}' | '\u{2B50}' | '\u{2B55}'
+        | '\u{2B00}'..='\u{2BFF}'
         | '\u{3030}' | '\u{303D}' | '\u{3297}' | '\u{3299}'
-        | '\u{1F000}'..='\u{1FAFF}')
+        | '\u{1F000}'..='\u{1FAFF}'
+        | '\u{E0020}'..='\u{E007F}')
 }
 
 // MARK: Bare URLs
@@ -1155,7 +1220,8 @@ fn replace_bare_urls(value: &str, options: &SanitizerOptions) -> String {
     let mut result = String::with_capacity(value.len());
     let mut index = 0;
     while index < chars.len() {
-        if (chars[index] == 'h' || chars[index] == 'H') && match_url_scheme(&chars, index) {
+        let start = match_url_start(&chars, index);
+        if start != UrlStart::None {
             let mut end = index;
             while end < chars.len() && !is_url_terminator(chars[end]) {
                 end += 1;
@@ -1187,7 +1253,10 @@ fn replace_bare_urls(value: &str, options: &SanitizerOptions) -> String {
                 }
             }
             let url_string: String = url.iter().collect();
-            result.push_str(&bare_url_spoken_string(&url_string, options));
+            // Photo links (`pic.x.com/…`) carry no meaning when spoken.
+            if start == UrlStart::Url {
+                result.push_str(&bare_url_spoken_string(&url_string, options));
+            }
             result.push_str(&trailing);
             index = end;
         } else {
@@ -1198,23 +1267,41 @@ fn replace_bare_urls(value: &str, options: &SanitizerOptions) -> String {
     result
 }
 
-fn match_url_scheme(chars: &[char], index: usize) -> bool {
-    let head: String = chars[index..]
-        .iter()
-        .take(8)
-        .collect::<String>()
-        .to_lowercase();
-    if !head.starts_with("https://") && !head.starts_with("http://") {
-        return false;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UrlStart {
+    None,
+    /// `http(s)://…` or `www.…`.
+    Url,
+    /// X photo link: bare `pic.x.com/…` or `pic.twitter.com/…` (no scheme).
+    PhotoLink,
+}
+
+fn match_url_start(chars: &[char], index: usize) -> UrlStart {
+    if !matches!(chars[index], 'h' | 'H' | 'w' | 'W' | 'p' | 'P') {
+        return UrlStart::None;
     }
-    // Require a word boundary before the scheme.
+    // Require a word boundary before the URL.
     if index > 0 {
         let previous = chars[index - 1];
-        if previous.is_alphabetic() || previous.is_numeric() {
-            return false;
+        if previous.is_alphabetic() || previous.is_numeric() || matches!(previous, '.' | '/') {
+            return UrlStart::None;
         }
     }
-    true
+    let head: String = chars[index..]
+        .iter()
+        .take(16)
+        .collect::<String>()
+        .to_lowercase();
+    if head.starts_with("https://") || head.starts_with("http://") {
+        return UrlStart::Url;
+    }
+    if head.starts_with("www.") && head.chars().nth(4).is_some_and(char::is_alphanumeric) {
+        return UrlStart::Url;
+    }
+    if head.starts_with("pic.x.com/") || head.starts_with("pic.twitter.com/") {
+        return UrlStart::PhotoLink;
+    }
+    UrlStart::None
 }
 
 fn is_url_terminator(c: char) -> bool {
@@ -1329,7 +1416,12 @@ fn remove_star_runs(value: &str) -> String {
             let after = chars.get(end).copied();
             let before_is_word = before.is_some_and(|b| b.is_alphabetic() || b.is_numeric());
             let after_is_word = after.is_some_and(|a| a.is_alphabetic() || a.is_numeric());
-            if before_is_word && after_is_word {
+            // A lone `*` between spaces is math ("3 * 4"), not emphasis.
+            let lone_star = c == '*'
+                && end - index == 1
+                && before.is_some_and(char::is_whitespace)
+                && after.is_some_and(char::is_whitespace);
+            if (before_is_word && after_is_word) || lone_star {
                 for &kept in &chars[index..end] {
                     result.push(kept);
                 }
@@ -1338,6 +1430,83 @@ fn remove_star_runs(value: &str) -> String {
         } else {
             result.push(c);
             index += 1;
+        }
+    }
+    result
+}
+
+/// Punctuation runs in spoken form: `..` → `…`, `!!` → `!`, `??` → `?`;
+/// any other symbol repeated three or more times (`----`, `====`, `>>>`)
+/// is decoration and is dropped. Letters, digits and spaces are kept.
+fn collapse_punctuation_runs(value: &str) -> String {
+    let chars: Vec<char> = value.chars().collect();
+    let mut result = String::with_capacity(value.len());
+    let mut index = 0;
+    while index < chars.len() {
+        let c = chars[index];
+        let mut end = index + 1;
+        while end < chars.len() && chars[end] == c {
+            end += 1;
+        }
+        let run = end - index;
+        match c {
+            '.' if run >= 2 => result.push('…'),
+            '!' | '?' if run >= 2 => result.push(c),
+            _ if run >= 3 && !c.is_alphanumeric() && !c.is_whitespace() => {}
+            _ => chars[index..end].iter().for_each(|&kept| result.push(kept)),
+        }
+        index = end;
+    }
+    result
+}
+
+/// Drop whitespace-separated tokens made only of Markdown symbols (`###`,
+/// `>>`, `^`, a stray `#`). A single `*`, `=`, `+`, `<` or `>` is kept as
+/// it is usually math ("3 * 4 = 12").
+fn remove_symbol_tokens(value: &str) -> String {
+    const SYMBOLS: &[char] = &['#', '*', '_', '`', '|', '~', '^', '=', '+', '<', '>'];
+    const KEPT_SINGLE: &[char] = &['*', '=', '+', '<', '>'];
+    value
+        .split(' ')
+        .filter(|token| {
+            let mut chars = token.chars();
+            let first = chars.next();
+            let is_symbol_token = !token.is_empty() && token.chars().all(|c| SYMBOLS.contains(&c));
+            let kept_single =
+                chars.next().is_none() && first.is_some_and(|c| KEPT_SINGLE.contains(&c));
+            !is_symbol_token || kept_single
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Removed citations, icons and empty table cells strand commas: collapse
+/// comma runs, drop a comma before sentence punctuation or at the end.
+fn remove_stranded_commas(value: &str) -> String {
+    let chars: Vec<char> = value.chars().collect();
+    let mut result = String::with_capacity(value.len());
+    let mut index = 0;
+    while index < chars.len() {
+        if chars[index] != ',' {
+            result.push(chars[index]);
+            index += 1;
+            continue;
+        }
+        let mut last_comma = index;
+        let mut next = index + 1;
+        while next < chars.len() && (chars[next] == ',' || chars[next].is_whitespace()) {
+            if chars[next] == ',' {
+                last_comma = next;
+            }
+            next += 1;
+        }
+        match chars.get(next) {
+            None => break,
+            Some('.' | '!' | '?' | '…') => index = next,
+            Some(_) => {
+                result.push(',');
+                index = last_comma + 1;
+            }
         }
     }
     result
@@ -1406,6 +1575,8 @@ fn strip_html(html: &str) -> String {
             if let Some(first) = inner.chars().next()
                 && (first.is_alphabetic() || matches!(first, '/' | '!' | '?'))
             {
+                // A space, not nothing, so adjacent tags never glue words.
+                stripped.push(' ');
                 index += distance + 1;
                 continue;
             }
@@ -1829,8 +2000,130 @@ mod tests {
 
     #[test]
     fn emoji_removed_but_digits_hash_kept() {
-        let result = sanitize_default("Hi 👋 there 123 # done.");
-        assert_eq!(result[0].text, "Hi there 123 # done.");
+        let result = sanitize_default("Hi 👋 there 123 #1 done.");
+        assert_eq!(result[0].text, "Hi there 123 #1 done.");
+        // A lone `#` is a Markdown leftover, never spoken.
+        assert_eq!(
+            sanitize_default("Hi there # done.")[0].text,
+            "Hi there done."
+        );
+    }
+
+    #[test]
+    fn yaml_front_matter_skipped() {
+        let result = sanitize_default("---\ntitle: Sample Doc\nauthor: Test\n---\n\n# Hello");
+        assert_eq!(result, [seg("Hello.", SpeechPause::Long)]);
+    }
+
+    #[test]
+    fn symbol_only_tokens_and_decoration_runs_removed() {
+        assert_eq!(sanitize_default("*** ### ___"), []);
+        assert_eq!(
+            sanitize_default("==== ---- ~~~~ >>> ^^^ +++ ||| foo")[0].text,
+            "foo."
+        );
+        assert_eq!(
+            sanitize_default("Some text --- more text")[0].text,
+            "Some text more text."
+        );
+        assert_eq!(sanitize_default("Box ┌──┐ ■ ● done")[0].text, "Box done.");
+    }
+
+    #[test]
+    fn math_symbols_and_code_names_kept() {
+        let input = "Use snake_case_name in C# and rank #1. It costs 3 * 4 = 12 dollars.";
+        let texts: Vec<String> = sanitize_default(input)
+            .into_iter()
+            .map(|s| s.text)
+            .collect();
+        assert_eq!(texts.join(" "), input);
+    }
+
+    #[test]
+    fn punctuation_runs_in_spoken_form() {
+        let texts: Vec<String> = sanitize_default("Wait... what?!! This is cool!!!")
+            .into_iter()
+            .map(|s| s.text)
+            .collect();
+        assert_eq!(texts.join(" "), "Wait… what?! This is cool!");
+        assert_eq!(sanitize_default("Yes..")[0].text, "Yes…");
+    }
+
+    #[test]
+    fn reference_markers_removed() {
+        let result = sanitize_default(
+            "The reverse[2] process[citation needed] reads aloud[note 1] every day[nb 2] or so[a].",
+        );
+        assert_eq!(
+            result[0].text,
+            "The reverse process reads aloud every day or so."
+        );
+    }
+
+    #[test]
+    fn stranded_commas_removed() {
+        assert_eq!(
+            sanitize_default("Apples, [1], oranges.")[0].text,
+            "Apples, oranges."
+        );
+        assert_eq!(sanitize_default("x64,,,,,.")[0].text, "x64.");
+        assert_eq!(sanitize_default("Apples, 🎉")[0].text, "Apples.");
+    }
+
+    #[test]
+    fn www_urls_and_photo_links() {
+        assert_eq!(
+            sanitize_default("See www.example.com/foo now.")[0].text,
+            "See link to example.com now."
+        );
+        assert_eq!(
+            sanitize_default("Look at this pic.x.com/AbC123!")[0].text,
+            "Look at this!"
+        );
+        assert_eq!(
+            sanitize_default("Look pic.twitter.com/xYz456.")[0].text,
+            "Look."
+        );
+        // Not a URL: no word boundary before `www.`.
+        assert_eq!(sanitize_default("awww.")[0].text, "awww.");
+    }
+
+    #[test]
+    fn invisible_emoji_glue_removed_but_zwnj_kept() {
+        assert_eq!(sanitize_default("Hi #️⃣ 👍🏽 👨‍👩‍👧 there")[0].text, "Hi there.");
+        assert_eq!(sanitize_default("a\u{200D}b")[0].text, "ab.");
+        let joined = "می\u{200C}خواهم";
+        assert_eq!(sanitize_default(joined)[0].text, format!("{joined}."));
+    }
+
+    #[test]
+    fn inline_tags_do_not_glue_words() {
+        assert_eq!(
+            sanitize_default("<details><summary>More</summary>Hidden text</details>")[0].text,
+            "More Hidden text."
+        );
+        assert_eq!(
+            sanitize_default("Read <kbd>this</kbd>now.")[0].text,
+            "Read this now."
+        );
+    }
+
+    #[test]
+    fn short_title_line_ends_its_sentence() {
+        assert_eq!(
+            sanitize_default("Breaking News\nThe market fell 3% today.")[0].text,
+            "Breaking News. The market fell 3% today."
+        );
+        let long = "The quick brown fox jumps over the lazy dog near the river bank today";
+        let next = "And this next line starts uppercase but the first line is too long";
+        assert_eq!(
+            sanitize_default(&format!("{long}\n{next}"))[0].text,
+            format!("{long} {next}.")
+        );
+        assert_eq!(
+            sanitize_default("wrapped prose\ncontinues here.")[0].text,
+            "wrapped prose continues here."
+        );
     }
 
     #[test]
