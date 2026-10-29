@@ -24,6 +24,9 @@ fn get_symbols() -> HashMap<&'static str, &'static str> {
     m.insert("&", "and");
     m.insert("+", "plus");
     m.insert("@", "at");
+    m.insert("/", "slash");
+    m.insert("_", "underscore");
+    m.insert("→", "to");
     m
 }
 

@@ -76,10 +76,18 @@ impl G2P {
         let mut ctx = TokenContext::default();
         for i in (0..tokens.len()).rev() {
             let word = tokens[i].0;
+            // Punctuation is model input, not a word for espeak to pronounce.
+            // Use codepoints: dashes, ellipsis and curly quotes are UTF-8.
             let ps = if word.chars().any(|c| c.is_ascii_digit()) {
                 pronounce(word)?
-            } else if word.len() == 1 && ";:,.!?".contains(word) {
+            } else if word.chars().count() == 1 && ";:,.!?—…\"()“”".contains(word) {
                 word.to_owned()
+            } else if matches!(word, "-" | "–") {
+                "—".to_owned()
+            } else if matches!(word, "[" | "{") {
+                "(".to_owned()
+            } else if matches!(word, "]" | "}") {
+                ")".to_owned()
             } else if let Some((p, _)) = self.lexicon.get_word(
                 word,
                 &tags[i],
@@ -127,7 +135,7 @@ mod tests {
             lang: Language::EnglishUS,
             cap_stresses: (0.5, 2.),
             golds: serde_json::from_str(
-                r#"{"hello":"hello","world":"world","Dr.":"doctor","U":"jˈu","S":"ˈɛs"}"#,
+                r#"{"hello":"hello","world":"world","Dr.":"doctor","U":"jˈu","S":"ˈɛs","slash":"slæʃ","underscore":"ʌndəɹskɔɹ","to":"tu"}"#,
             )
             .unwrap(),
             silvers: serde_json::from_str("{}").unwrap(),
@@ -157,6 +165,45 @@ mod tests {
             .unwrap();
         assert_eq!(seen, vec!["404", "2.0", "75%", "28th", "3:45", "$12.50"]);
         assert_eq!(result, "n n n n n n.");
+    }
+    #[test]
+    fn model_punctuation_does_not_require_word_pronunciation() {
+        // espeak returns no phonemes for punctuation. Passing any of these
+        // symbols to it used to abort the rest of a reading.
+        for punctuation in ";:,.!?—…\"()“”".chars() {
+            let text = format!("hello {punctuation} world");
+            let result = tiny()
+                .g2p_using(&text, |_| Err("punctuation has no spoken phonemes".into()))
+                .unwrap();
+            assert_eq!(result, text);
+        }
+        for dash in ['-', '–'] {
+            assert_eq!(
+                tiny()
+                    .g2p_using(&format!("hello{dash}world"), |_| Err(
+                        "punctuation has no spoken phonemes".into()
+                    ))
+                    .unwrap(),
+                "hello—world"
+            );
+        }
+    }
+
+    #[test]
+    fn word_pronunciation_failure_still_stops_conversion() {
+        assert_eq!(
+            tiny().g2p_using("unknown", |_| Err("pronunciation unavailable".into())),
+            Err("pronunciation unavailable".into())
+        );
+    }
+    #[test]
+    fn technical_text_punctuation_and_symbols_are_converted() {
+        let result = tiny()
+            .g2p_using("hello [world] {hello} / _ → world", |_| {
+                Err("symbol has no spoken phonemes".into())
+            })
+            .unwrap();
+        assert_eq!(result, "hello (world) (hello) slæʃ ʌndəɹskɔɹ tu world");
     }
     #[test]
     #[ignore = "requires local pronunciation data; run with MISAKI_TEST_ROOT and ESPEAK_TEST_ROOT"]
