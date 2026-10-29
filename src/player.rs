@@ -15,7 +15,9 @@ use std::time::{Duration, Instant};
 
 use crate::audio::{AudioSink, SinkEvent};
 use crate::chunk::SpeechChunk;
-use crate::engine::{EngineError, KokoroEngine, ModelVariant, PersianVoice, PiperEngine};
+use crate::engine::{
+    EngineError, KokoroEngine, ModelVariant, ParadeeEngine, PersianVoice, PiperEngine,
+};
 use crate::lang::{Lang, chunk_language};
 use crate::phonon::PhononEngine;
 use crate::pipeline::prepare;
@@ -92,6 +94,22 @@ impl Synth for PocketEngine {
     }
 }
 
+impl Synth for ParadeeEngine {
+    fn synthesize(
+        &mut self,
+        text: &str,
+        voice: &str,
+        speed: f32,
+    ) -> Result<SynthesizedAudio, String> {
+        let samples =
+            ParadeeEngine::synthesize(self, text, voice, speed).map_err(|err| err.to_string())?;
+        Ok(SynthesizedAudio {
+            samples,
+            sample_rate: checked_rate(ParadeeEngine::sample_rate(self))?,
+        })
+    }
+}
+
 impl Synth for PhononEngine {
     fn synthesize(
         &mut self,
@@ -129,22 +147,26 @@ pub fn load_persian_engine(
     }
 }
 
-/// Load the English engine for `variant`: Phonon for Phonon, Kokoro for the
-/// Kokoro variants. Errors come back via `to_string()`.
+/// Load the English engine for `variant`: Phonon for Phonon, Paradee for
+/// Paradee, Kokoro for the Kokoro variants. Errors come back via
+/// `to_string()`.
 pub fn load_english_engine(
     models_root: &std::path::Path,
     variant: ModelVariant,
 ) -> Result<Box<dyn Synth>, String> {
-    if variant == ModelVariant::Phonon {
-        match PhononEngine::load(models_root) {
+    match variant {
+        ModelVariant::Phonon => match PhononEngine::load(models_root) {
             Ok(engine) => Ok(Box::new(engine) as Box<dyn Synth>),
             Err(err) => Err(err.to_string()),
-        }
-    } else {
-        match KokoroEngine::load(models_root, variant) {
+        },
+        ModelVariant::Paradee => match ParadeeEngine::load(models_root) {
             Ok(engine) => Ok(Box::new(engine) as Box<dyn Synth>),
             Err(err) => Err(err.to_string()),
-        }
+        },
+        _ => match KokoroEngine::load(models_root, variant) {
+            Ok(engine) => Ok(Box::new(engine) as Box<dyn Synth>),
+            Err(err) => Err(err.to_string()),
+        },
     }
 }
 

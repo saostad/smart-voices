@@ -169,17 +169,78 @@ fn kokoro_pieces(
         })
         .collect())
 }
-pub(crate) struct Kokoro {
-    session: Session,
+/// Shared English text-to-phonemes for the Kokoro-family engines: the
+/// compact misaki converter over `misaki-en`, lazily loading only the
+/// regional dictionary in use. `data` is the directory espeak-ng loads
+/// from (the one containing `espeak-ng-data`).
+struct EnglishG2p {
     root: PathBuf,
     data: PathBuf,
+    lexicon: Option<(bool, crate::misaki::G2P)>,
+}
+impl EnglishG2p {
+    fn new(models_root: &Path, data: PathBuf) -> Self {
+        Self {
+            root: models_root.join("misaki-en"),
+            data,
+            lexicon: None,
+        }
+    }
+    fn phonemize(&mut self, text: &str, british: bool) -> Result<String, String> {
+        if self.lexicon.as_ref().map(|p| p.0) != Some(british) {
+            self.lexicon = Some((
+                british,
+                crate::misaki::G2P::load(&self.root, &self.data, british)?,
+            ));
+        }
+        let (ps, used_espeak) = self
+            .lexicon
+            .as_ref()
+            .ok_or("pronunciation data unavailable")?
+            .1
+            .g2p_with_notice(text)?;
+        if used_espeak {
+            eprintln!(
+                "warn: fallback: true, attempted=misaki_dictionary, reason=unknown_or_numeric_word, taken=espeak_ng, british={british}"
+            );
+            static NOTICE_SHOWN: std::sync::atomic::AtomicBool =
+                std::sync::atomic::AtomicBool::new(false);
+            if take_fallback_notice(&NOTICE_SHOWN) {
+                crate::notification::show(
+                    "English pronunciation",
+                    "espeak-ng pronunciation was used for numbers or words outside the English dictionary.",
+                );
+            }
+        }
+        Ok(ps)
+    }
+}
+/// Paradee has no per-sentence style row, so keep consecutive sentences in
+/// one model call while the combined phoneme sequence fits. This preserves
+/// the model's cross-sentence prosody and matches the reference samples.
+fn paradee_pieces(
+    ps: &str,
+    vocab: &HashMap<char, i64>,
+    max: usize,
+) -> Result<Vec<Vec<i64>>, String> {
+    let mut combined: Vec<Vec<i64>> = Vec::new();
+    for piece in kokoro_pieces(ps, vocab, max)? {
+        match combined.last_mut() {
+            Some(current) if current.len() + piece.len() <= max => current.extend(piece),
+            _ => combined.push(piece),
+        }
+    }
+    Ok(combined)
+}
+pub(crate) struct Kokoro {
+    session: Session,
+    g2p: EnglishG2p,
     vocab: HashMap<char, i64>,
     styles: Vec<f32>,
     rows: usize,
     width: usize,
     speakers: usize,
     pub sample_rate: i32,
-    lexicon: Option<(bool, crate::misaki::G2P)>,
 }
 impl Kokoro {
     pub fn load(root: &Path, variant: ModelVariant) -> Result<Self, String> {
@@ -214,15 +275,13 @@ impl Kokoro {
         }
         Ok(Self {
             session,
-            root: root.join("misaki-en"),
-            data: dir.clone(),
+            g2p: EnglishG2p::new(root, dir.clone()),
             vocab: load_tokens(&dir)?,
             styles,
             rows: dims[0],
             width: dims[2],
             speakers,
             sample_rate,
-            lexicon: None,
         })
     }
     pub fn synthesize(
@@ -235,31 +294,7 @@ impl Kokoro {
         if sid >= self.speakers {
             return Err("invalid speaker id".into());
         }
-        if self.lexicon.as_ref().map(|p| p.0) != Some(british) {
-            self.lexicon = Some((
-                british,
-                crate::misaki::G2P::load(&self.root, &self.data, british)?,
-            ));
-        }
-        let (ps, used_espeak) = self
-            .lexicon
-            .as_ref()
-            .ok_or("pronunciation data unavailable")?
-            .1
-            .g2p_with_notice(text)?;
-        if used_espeak {
-            eprintln!(
-                "warn: fallback: true, attempted=misaki_dictionary, reason=unknown_or_numeric_word, taken=espeak_ng, british={british}"
-            );
-            static NOTICE_SHOWN: std::sync::atomic::AtomicBool =
-                std::sync::atomic::AtomicBool::new(false);
-            if take_fallback_notice(&NOTICE_SHOWN) {
-                crate::notification::show(
-                    "English pronunciation",
-                    "espeak-ng pronunciation was used for numbers or words outside the English dictionary.",
-                );
-            }
-        }
+        let ps = self.g2p.phonemize(text, british)?;
         let (scale, min, amplitude) = pause_values();
         let mut audio = Vec::new();
         for ids in kokoro_pieces(&ps, &self.vocab, self.rows - 2)? {
@@ -273,6 +308,130 @@ impl Kokoro {
             padded.extend_from_slice(&ids);
             padded.push(0);
             let result=self.session.run(ort::inputs!["tokens"=>tensor(vec![1,padded.len()],padded)?,"style"=>tensor(vec![1,self.width],style)?,"speed"=>tensor(vec![1],vec![speed])?]).map_err(err)?;
+            let value = result
+                .iter()
+                .next()
+                .ok_or("voice model returned no outputs")?
+                .1;
+            let (_, data) = value.try_extract_tensor::<f32>().map_err(err)?;
+            audio.extend(scale_silence(data, self.sample_rate, scale, min, amplitude));
+        }
+        if audio.is_empty() {
+            return Err("voice produced no audio".into());
+        }
+        Ok(audio)
+    }
+}
+/// Most phoneme tokens per Paradee call: the model accepts at most 512
+/// `input_ids` including the two zero pads.
+const PARADEE_MAX_TOKENS: usize = 510;
+struct ParadeeConfig {
+    sample_rate: i32,
+    voices: Vec<String>,
+    vocab: HashMap<char, i64>,
+}
+fn paradee_config(text: &str) -> Result<ParadeeConfig, String> {
+    #[derive(serde::Deserialize)]
+    struct Raw {
+        sample_rate: i64,
+        n_token: i64,
+        voices: Vec<String>,
+        vocab: HashMap<String, i64>,
+    }
+    let raw: Raw = serde_json::from_str(text).map_err(err)?;
+    if raw.sample_rate <= 0 || raw.sample_rate > i64::from(i32::MAX) {
+        return Err("invalid Paradee sample rate".into());
+    }
+    if raw.n_token <= 0 {
+        return Err("invalid Paradee token count".into());
+    }
+    if raw.voices.is_empty() || raw.voices.iter().any(|v| v.is_empty()) {
+        return Err("invalid Paradee voice list".into());
+    }
+    let mut seen = std::collections::HashSet::new();
+    if raw.voices.iter().any(|v| !seen.insert(v)) {
+        return Err("duplicate Paradee voice".into());
+    }
+    if raw.vocab.is_empty() {
+        return Err("empty Paradee vocabulary".into());
+    }
+    let mut vocab = HashMap::with_capacity(raw.vocab.len());
+    let mut ids = std::collections::HashSet::new();
+    for (key, id) in raw.vocab {
+        let mut chars = key.chars();
+        let c = chars.next().ok_or("empty Paradee vocabulary key")?;
+        if chars.next().is_some() {
+            return Err("Paradee vocabulary key is not a codepoint".into());
+        }
+        if id < 0 || id >= raw.n_token {
+            return Err("Paradee vocabulary id out of range".into());
+        }
+        if !ids.insert(id) {
+            return Err("duplicate Paradee vocabulary id".into());
+        }
+        vocab.insert(c, id);
+    }
+    if !vocab.contains_key(&' ') {
+        return Err("Paradee vocabulary is missing the space token".into());
+    }
+    Ok(ParadeeConfig {
+        sample_rate: raw.sample_rate as i32,
+        voices: raw.voices,
+        vocab,
+    })
+}
+pub(crate) struct Paradee {
+    session: Session,
+    g2p: EnglishG2p,
+    vocab: HashMap<char, i64>,
+    voices: usize,
+    pub sample_rate: i32,
+}
+impl Paradee {
+    pub fn load(root: &Path) -> Result<Self, String> {
+        let dir = root.join(ModelVariant::Paradee.dir_name());
+        let session = session(&dir.join(ModelVariant::Paradee.model_file()))?;
+        for name in ["input_ids", "speed", "voice"] {
+            if !session.inputs().iter().any(|i| i.name() == name) {
+                return Err(format!("Paradee model is missing input: {name}"));
+            }
+        }
+        if !session.outputs().iter().any(|o| o.name() == "waveform") {
+            return Err("Paradee model is missing output: waveform".into());
+        }
+        let config =
+            paradee_config(&std::fs::read_to_string(dir.join("config.json")).map_err(err)?)?;
+        Ok(Self {
+            session,
+            g2p: EnglishG2p::new(root, root.join(crate::engine::ESPEAK_DATA_DIR)),
+            vocab: config.vocab,
+            voices: config.voices.len(),
+            sample_rate: config.sample_rate,
+        })
+    }
+    pub fn synthesize(
+        &mut self,
+        text: &str,
+        voice: i64,
+        british: bool,
+        speed: f32,
+    ) -> Result<Vec<f32>, String> {
+        if voice < 0 || voice as usize >= self.voices {
+            return Err("invalid Paradee voice index".into());
+        }
+        let ps = self.g2p.phonemize(text, british)?;
+        let (scale, min, amplitude) = pause_values();
+        let mut audio = Vec::new();
+        for ids in paradee_pieces(&ps, &self.vocab, PARADEE_MAX_TOKENS)? {
+            let mut padded = vec![0];
+            padded.extend_from_slice(&ids);
+            padded.push(0);
+            let result = self
+                .session
+                .run(
+                    ort::inputs!["input_ids"=>tensor(vec![1,padded.len()],padded)?,"speed"=>tensor(vec![1],vec![speed])?,"voice"=>tensor(vec![1],vec![voice])?],
+                )
+                .map_err(err)?;
             let value = result
                 .iter()
                 .next()
@@ -393,6 +552,48 @@ fn piper_ids(ps: &str, vocab: &HashMap<char, i64>) -> Result<Vec<i64>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn paradee_config_parses_vocab_and_voices() {
+        let cfg = paradee_config(
+            r#"{"sample_rate":24000,"n_token":178,"voices":["af_heart","bf_isabella","am_puck","bm_fable"],"vocab":{" ":16,"a":43,"ˈ":156}}"#,
+        )
+        .unwrap();
+        assert_eq!(cfg.sample_rate, 24000);
+        assert_eq!(cfg.voices.len(), 4);
+        assert_eq!(cfg.vocab[&' '], 16);
+        assert_eq!(cfg.vocab[&'ˈ'], 156);
+        // Multi-codepoint keys and out-of-range ids are rejected, not dropped.
+        assert!(
+            paradee_config(
+                r#"{"sample_rate":24000,"n_token":178,"voices":["af_heart"],"vocab":{"ab":1}}"#
+            )
+            .is_err()
+        );
+        assert!(
+            paradee_config(
+                r#"{"sample_rate":24000,"n_token":178,"voices":["af_heart"],"vocab":{"a":178}}"#
+            )
+            .is_err()
+        );
+        assert!(
+            paradee_config(
+                r#"{"sample_rate":0,"n_token":178,"voices":["af_heart"],"vocab":{"a":1}}"#
+            )
+            .is_err()
+        );
+    }
+    #[test]
+    fn paradee_pieces_combine_sentences_within_limit() {
+        let v = tokens("a 1\nb 2\n. 3\n! 4\n; 5").unwrap();
+        assert_eq!(
+            paradee_pieces("ab. ab! aaaa;", &v, 6).unwrap(),
+            vec![vec![1, 2, 3, 1, 2, 4], vec![1, 1, 1, 1, 5]]
+        );
+        assert_eq!(
+            paradee_pieces("ab. ab! aaaa;", &v, 5).unwrap(),
+            vec![vec![1, 2, 3], vec![1, 2, 4], vec![1, 1, 1, 1, 5]]
+        );
+    }
     #[test]
     fn kokoro_unpadded_length_selects_style_and_pieces_respect_limits() {
         assert_eq!(

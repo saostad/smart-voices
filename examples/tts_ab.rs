@@ -1,5 +1,7 @@
 //! Local, offline A/B harness. Writes float WAVs under /tmp/ab-wavs/new.
-use smart_voices::engine::{KokoroEngine, ModelVariant, PersianVoice, PiperEngine};
+use smart_voices::engine::{
+    KokoroEngine, ModelVariant, PARADEE_VOICES, ParadeeEngine, PersianVoice, PiperEngine,
+};
 use std::{path::PathBuf, time::Instant};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let root = PathBuf::from(std::env::args().nth(1).ok_or("usage: tts_ab MODELS_ROOT")?);
@@ -29,6 +31,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let x = engine.synthesize(text, voice, 1.)?;
                 measure(
                     "new",
+                    voice,
+                    i,
+                    &x,
+                    engine.sample_rate(),
+                    start.elapsed().as_secs_f64(),
+                    load,
+                )?;
+            }
+        }
+    }
+    // Optional Paradee set, present only after `download --model paradee`.
+    if root.join(ModelVariant::Paradee.dir_name()).is_dir() {
+        let start = Instant::now();
+        let engine = ParadeeEngine::load(&root)?;
+        let load = start.elapsed().as_secs_f64();
+        for voice in PARADEE_VOICES {
+            for (i, text) in texts(false).iter().enumerate() {
+                let start = Instant::now();
+                let x = engine.synthesize(text, voice, 1.)?;
+                measure(
+                    "paradee",
                     voice,
                     i,
                     &x,

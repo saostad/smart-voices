@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 /// Downloadable English model variant: full-precision Kokoro (fast), int8
-/// Kokoro (small), or Phonon (best quality).
+/// Kokoro (small), Phonon (best quality), or Paradee (tiny, fastest).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ModelVariant {
@@ -17,15 +17,19 @@ pub enum ModelVariant {
     Small,
     /// Phonon-31m English: best quality, smaller download.
     Phonon,
+    /// Paradee-8M English (distilled from Kokoro): tiny download, fastest
+    /// synthesis, four voices.
+    Paradee,
 }
 
 impl ModelVariant {
-    /// Parse a CLI value (`"fast"`, `"small"` or `"phonon"`).
+    /// Parse a CLI value (`"fast"`, `"small"`, `"phonon"` or `"paradee"`).
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "fast" => Some(Self::Fast),
             "small" => Some(Self::Small),
             "phonon" => Some(Self::Phonon),
+            "paradee" => Some(Self::Paradee),
             _ => None,
         }
     }
@@ -36,6 +40,7 @@ impl ModelVariant {
             Self::Fast => "kokoro-multi-lang-v1_0",
             Self::Small => "kokoro-int8-multi-lang-v1_0",
             Self::Phonon => "phonon-31m-en",
+            Self::Paradee => "paradee-8m-en",
         }
     }
 
@@ -45,6 +50,7 @@ impl ModelVariant {
             Self::Fast => "model.onnx",
             Self::Small => "model.int8.onnx",
             Self::Phonon => "model.safetensors",
+            Self::Paradee => "paradee_int8.onnx",
         }
     }
 
@@ -60,6 +66,7 @@ impl ModelVariant {
                 "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-int8-multi-lang-v1_0.tar.bz2"
             }
             Self::Phonon => "https://huggingface.co/gradium/phonon-31m-en",
+            Self::Paradee => "https://huggingface.co/sahilmahendrakar/Paradee-8M-v1.2",
         }
     }
 
@@ -69,6 +76,7 @@ impl ModelVariant {
             Self::Fast => "Fast (larger download, ~350 MB)",
             Self::Small => "Small (slower, ~130 MB)",
             Self::Phonon => "Phonon (best quality, ~103 MB)",
+            Self::Paradee => "Paradee (tiny, fastest, ~9 MB)",
         }
     }
 
@@ -88,6 +96,7 @@ impl ModelVariant {
                 "tokenizer.json",
                 crate::phonon::DEFAULT_VOICE_FILE,
             ],
+            Self::Paradee => &["paradee_int8.onnx", "config.json"],
         }
     }
 
@@ -96,6 +105,24 @@ impl ModelVariant {
     pub fn download_files(self) -> &'static [DownloadFile] {
         match self {
             Self::Fast | Self::Small => &[],
+            Self::Paradee => &[
+                DownloadFile {
+                    name: "paradee_int8.onnx",
+                    spec: DownloadSpec {
+                        url: "https://huggingface.co/sahilmahendrakar/Paradee-8M-v1.2/resolve/ed2934d4df8a4fd891e29584c5e1104649409765/onnx/paradee_int8.onnx",
+                        size: 8_462_119,
+                        sha256: "a6989796692ac173597e15d405c971989202d5c73cfad65f22e90bd7b6c97da1",
+                    },
+                },
+                DownloadFile {
+                    name: "config.json",
+                    spec: DownloadSpec {
+                        url: "https://huggingface.co/sahilmahendrakar/Paradee-8M-v1.2/resolve/ed2934d4df8a4fd891e29584c5e1104649409765/config.json",
+                        size: 1827,
+                        sha256: "002535cf8dd08a434cdddb13372da8a7b4844152bdf9b5b4e7342e12ec30bcfb",
+                    },
+                },
+            ],
             Self::Phonon => &[
                 DownloadFile {
                     name: "model.safetensors",
@@ -387,6 +414,31 @@ pub const VOICES: [&str; 28] = [
 /// Default voice.
 pub const DEFAULT_VOICE: &str = "af_heart";
 
+/// Paradee voices in model order (voice index = position). The names are
+/// Kokoro ids Paradee was distilled with; see its `config.json`.
+pub const PARADEE_VOICES: [&str; 4] = ["af_heart", "bf_isabella", "am_puck", "bm_fable"];
+
+/// Default Paradee voice.
+pub const DEFAULT_PARADEE_VOICE: &str = "af_heart";
+
+/// Look up a Paradee voice name, returning its model voice index.
+pub fn paradee_voice_id(name: &str) -> Option<i64> {
+    PARADEE_VOICES
+        .iter()
+        .position(|v| *v == name)
+        .map(|i| i as i64)
+}
+
+/// Whether `name` is one of the [`PARADEE_VOICES`].
+pub fn is_paradee_voice(name: &str) -> bool {
+    PARADEE_VOICES.contains(&name)
+}
+
+/// Directory (under the models root) holding the standalone espeak-ng data
+/// bundle for variants whose own download has no `espeak-ng-data`
+/// (Paradee). The bundle itself contains the `espeak-ng-data` folder.
+pub const ESPEAK_DATA_DIR: &str = "espeak-ng-data-bundle";
+
 /// Look up a voice name, returning its speaker id (index into [`VOICES`]).
 pub fn voice_id(name: &str) -> Option<i32> {
     VOICES.iter().position(|v| *v == name).map(|i| i as i32)
@@ -531,6 +583,8 @@ pub enum EngineError {
     PhononFailed(String),
     /// The requested voice name is not in [`VOICES`].
     UnknownVoice(String),
+    /// The requested voice name is not in [`PARADEE_VOICES`].
+    UnknownParadeeVoice(String),
     /// Synthesis returned no audio samples.
     NoAudio(String),
 }
@@ -587,6 +641,13 @@ impl fmt::Display for EngineError {
                     f,
                     "Unknown voice '{name}'. Available voices: {}.",
                     VOICES.join(", ")
+                )
+            }
+            EngineError::UnknownParadeeVoice(name) => {
+                write!(
+                    f,
+                    "Unknown Paradee voice '{name}'. Available voices: {}.",
+                    PARADEE_VOICES.join(", ")
                 )
             }
             EngineError::NoAudio(text) => {
@@ -680,6 +741,39 @@ impl PiperEngine {
             .map_err(tts_error)
     }
 }
+/// Loaded Paradee TTS engine. Sessions and lazy regional lexicons are serialized.
+pub struct ParadeeEngine {
+    sample_rate: i32,
+    inner: std::sync::Mutex<crate::onnx_tts::Paradee>,
+}
+impl ParadeeEngine {
+    pub fn load(root: &Path) -> Result<Self, EngineError> {
+        for name in ModelVariant::Paradee.required_files() {
+            let path = root.join(ModelVariant::Paradee.dir_name()).join(name);
+            if !path.exists() {
+                return Err(EngineError::MissingModel(path));
+            }
+        }
+        crate::onnx_tts::Paradee::load(root)
+            .map(|inner| Self {
+                sample_rate: inner.sample_rate,
+                inner: std::sync::Mutex::new(inner),
+            })
+            .map_err(tts_error)
+    }
+    pub fn sample_rate(&self) -> i32 {
+        self.sample_rate
+    }
+    pub fn synthesize(&self, text: &str, voice: &str, speed: f32) -> Result<Vec<f32>, EngineError> {
+        let sid = paradee_voice_id(voice)
+            .ok_or_else(|| EngineError::UnknownParadeeVoice(voice.into()))?;
+        self.inner
+            .lock()
+            .map_err(|_| tts_error("voice session lock failed".into()))?
+            .synthesize(text, sid, voice.starts_with('b'), clamp_speed(speed))
+            .map_err(tts_error)
+    }
+}
 fn tts_error(message: String) -> EngineError {
     eprintln!("error: ONNX voice engine: {message}");
     EngineError::OnnxTts(message)
@@ -702,6 +796,64 @@ mod tests {
         assert_eq!(voice_id("af_heart"), Some(3));
         assert_eq!(voice_id("bm_lewis"), Some(27));
         assert_eq!(voice_id("af_alloy"), Some(0));
+    }
+
+    #[test]
+    fn paradee_variant_and_voice_catalog() {
+        let variant = ModelVariant::Paradee;
+        assert_eq!(ModelVariant::parse("paradee"), Some(variant));
+        assert_eq!(variant.dir_name(), "paradee-8m-en");
+        assert_eq!(variant.model_file(), "paradee_int8.onnx");
+        assert_eq!(variant.label(), "Paradee (tiny, fastest, ~9 MB)");
+        assert_eq!(
+            variant.required_files(),
+            ["paradee_int8.onnx", "config.json"]
+        );
+
+        let files = variant.download_files();
+        assert_eq!(files.len(), 2);
+        assert_eq!(files[0].name, "paradee_int8.onnx");
+        assert_eq!(files[0].spec.size, 8_462_119);
+        assert!(files[0].spec.url.contains("/onnx/paradee_int8.onnx"));
+        assert_eq!(files[1].name, "config.json");
+        assert_eq!(files[1].spec.size, 1827);
+
+        assert_eq!(
+            PARADEE_VOICES,
+            ["af_heart", "bf_isabella", "am_puck", "bm_fable"]
+        );
+        for (index, voice) in PARADEE_VOICES.iter().enumerate() {
+            assert_eq!(paradee_voice_id(voice), Some(index as i64), "{voice}");
+            assert!(is_paradee_voice(voice), "{voice}");
+            assert!(
+                VOICES.contains(voice),
+                "Paradee voice is a Kokoro id: {voice}"
+            );
+            assert!(voice_display_name(voice).is_some(), "{voice}");
+        }
+        assert_eq!(paradee_voice_id("af_alloy"), None);
+        assert!(!is_paradee_voice("af_alloy"));
+        assert_eq!(
+            EngineError::UnknownParadeeVoice("af_alloy".to_string()).to_string(),
+            "Unknown Paradee voice 'af_alloy'. Available voices: af_heart, bf_isabella, am_puck, bm_fable."
+        );
+    }
+
+    #[test]
+    fn paradee_load_on_empty_dir_reports_its_model_file() {
+        let dir = unique_temp_dir();
+        std::fs::create_dir_all(&dir).unwrap();
+        let result = ParadeeEngine::load(&dir);
+        std::fs::remove_dir_all(&dir).unwrap();
+        match result {
+            Err(EngineError::MissingModel(path)) => assert_eq!(
+                path,
+                dir.join(ModelVariant::Paradee.dir_name())
+                    .join("paradee_int8.onnx")
+            ),
+            Ok(_) => panic!("expected MissingModel, got Ok"),
+            Err(other) => panic!("expected MissingModel, got {other}"),
+        }
     }
 
     #[test]

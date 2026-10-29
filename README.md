@@ -47,7 +47,9 @@ letting the download finish for next time.
 |---|---|---|
 | Fast (default English voice) | ~350 MB | First English reading |
 | Small (slower, low-memory English) | ~130 MB | Only if you pick it in Settings |
-| English pronunciation data (Kokoro) | ~18 MB | First Kokoro English reading (including upgrades) |
+| English pronunciation data (Kokoro/Paradee) | ~18 MB | First Kokoro or Paradee English reading (including upgrades) |
+| Paradee (tiny, fastest English) | ~9 MB | Only if you pick it in Settings |
+| English espeak-ng data (Paradee) | ~7 MB | First Paradee English reading |
 | Phonon (best-quality English) | ~103 MB | Only if you pick it in Settings |
 | Phonon voices (37 English voices) | ~9.5 MB | First reading with a Phonon voice other than Default |
 | Persian voice (Pocket, best quality) | ~230 MB | First Persian reading (English-only use never downloads it) |
@@ -55,7 +57,8 @@ letting the download finish for next time.
 
 You can also pre-download from a terminal:
 `smart-voices download`, `smart-voices download --model small`,
-`smart-voices download --model phonon`, or `smart-voices download --persian`.
+`smart-voices download --model paradee`, `smart-voices download --model phonon`,
+or `smart-voices download --persian`.
 These commands print download progress in the terminal too.
 
 ## The tray menu
@@ -80,11 +83,12 @@ permissions and Do Not Disturb settings.
 
 The `Settings` submenu holds everything customizable:
 
-- `Voice Model` — Fast, Small or Phonon; switching reloads the voice and
-  changes which voices `English Voice` lists.
+- `Voice Model` — Fast, Small, Paradee or Phonon; switching reloads the voice
+  and changes which voices `English Voice` lists.
 - `English Voice` — the selected model's voices: 28 Kokoro voices grouped by
-  accent and gender for Fast/Small, or Default plus 37 catalog voices in
-  American, British and Characters groups for Phonon.
+  accent and gender for Fast/Small, 4 distilled Kokoro voices for Paradee, or
+  Default plus 37 catalog voices in American, British and Characters groups
+  for Phonon.
 - `Persian Voice` — `Pocket v2 (best quality — recommended)` is the default
   and sounds the most natural; `Pocket v1` below it. The Piper voices (Amir,
   Gyro, Reza Ibrahim, Ganji, Ganji Adabi) are smaller downloads and start
@@ -165,8 +169,9 @@ Running `smart-voices` with no arguments starts the tray app. It also has
 headless commands (handy for scripts and testing):
 
 - `smart-voices speak "<text>"` — read text aloud (`--voice`, `--speed`,
-  `--model fast|small|phonon`, `--persian-voice pocket|amir|gyro|reza_ibrahim|ganji|ganji_adabi`, `--verbose`).
-  With `--model phonon`, `--voice` takes a catalog voice name (e.g. `Zoey`) or `default`.
+  `--model fast|small|phonon|paradee`, `--persian-voice pocket|amir|gyro|reza_ibrahim|ganji|ganji_adabi`, `--verbose`).
+  With `--model phonon`, `--voice` takes a catalog voice name (e.g. `Zoey`) or `default`;
+  with `--model paradee`, it takes one of its four voice names.
 - `smart-voices clean [<file>]` — print how text would be cleaned for speech,
   one chunk per line (reads stdin without a file).
 - `smart-voices download` — fetch voice models up front (`--model`,
@@ -182,10 +187,13 @@ real-time (5× faster than playback). From copy to first sound takes about
 0.3–0.5 seconds while the voice is loaded, and about 1.5 seconds right after
 it was unloaded.
 
-Kokoro also downloads English pronunciation data (~18 MB, once): the original
-misaki US/British dictionaries (Apache-2.0) and misaki-rs POS tagger (MIT).
-Only the voice's regional dictionaries are loaded. Unknown words and numeric
-words use the same statically linked espeak-ng as Persian Piper.
+Kokoro and Paradee also download English pronunciation data (~18 MB, once):
+the original misaki US/British dictionaries (Apache-2.0) and misaki-rs POS
+tagger (MIT). Only the voice's regional dictionaries are loaded. Unknown words
+and numeric words use the same statically linked espeak-ng as Persian Piper.
+Paradee (Apache-2.0, distilled from Kokoro) additionally downloads the
+standalone espeak-ng data bundle (~7 MB) because its own files contain no
+`espeak-ng-data` directory.
 
 `settings.toml` accepts `silence_scale = 0.2` (0.01–10, also available as
 Pause Length in the tray), `pause_min_seconds = 0.2` (positive finite seconds),

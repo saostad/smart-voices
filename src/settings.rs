@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::engine::{DEFAULT_VOICE, ModelVariant, PersianVoice};
+use crate::engine::{DEFAULT_PARADEE_VOICE, DEFAULT_VOICE, ModelVariant, PersianVoice};
 use crate::phonon::DEFAULT_PHONON_VOICE;
 
 /// Errors from loading or saving the settings file.
@@ -73,6 +73,8 @@ pub struct Settings {
     /// Phonon voice id: `"default"` (the checkpoint's own voice) or a
     /// catalog id (see `phonon::PHONON_VOICES`).
     pub phonon_voice: String,
+    /// Paradee voice name (see `engine::PARADEE_VOICES`).
+    pub paradee_voice: String,
     /// Speech speed multiplier.
     pub speed: f32,
     /// Pause duration multiplier, in 0.01..=10.
@@ -108,6 +110,7 @@ impl Default for Settings {
         Self {
             voice: DEFAULT_VOICE.to_string(),
             phonon_voice: DEFAULT_PHONON_VOICE.to_string(),
+            paradee_voice: DEFAULT_PARADEE_VOICE.to_string(),
             speed: 1.0,
             silence_scale: 0.2,
             pause_min_seconds: 0.2,
@@ -237,6 +240,7 @@ mod tests {
         let settings = Settings {
             voice: "bm_lewis".to_string(),
             phonon_voice: "NbpkqMVS3CJeq2j8".to_string(),
+            paradee_voice: "bm_fable".to_string(),
             speed: 1.25,
             silence_scale: 0.2,
             pause_min_seconds: 0.2,
@@ -279,6 +283,29 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
         assert!(err.is_none(), "unexpected error: {err:?}");
         assert_eq!(reloaded.model, ModelVariant::Phonon);
+    }
+
+    #[test]
+    fn paradee_model_and_voice_round_trip() {
+        let dir = unique_temp_dir();
+        let path = dir.join("settings.toml");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&path, "model = \"paradee\"\nparadee_voice = \"bm_fable\"\n").unwrap();
+        let (settings, err) = Settings::load(&path);
+        assert!(err.is_none(), "unexpected error: {err:?}");
+        assert_eq!(settings.model, ModelVariant::Paradee);
+        assert_eq!(settings.paradee_voice, "bm_fable");
+        settings.save(&path).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("model = \"paradee\""), "saved form: {text}");
+        assert!(
+            text.contains("paradee_voice = \"bm_fable\""),
+            "saved form: {text}"
+        );
+        let (reloaded, err) = Settings::load(&path);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(err.is_none(), "unexpected error: {err:?}");
+        assert_eq!(reloaded, settings);
     }
 
     #[test]

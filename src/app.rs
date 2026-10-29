@@ -30,7 +30,8 @@ use crate::autostart;
 use crate::clipboard::{self, ClipboardEvent, MIN_TEXT_LEN};
 use crate::download::{ProgressThrottle, progress_text};
 use crate::engine::{
-    ModelVariant, PERSIAN_VOICES, PersianVoice, VOICES, grouped_english_voices, voice_short_name,
+    ModelVariant, PARADEE_VOICES, PERSIAN_VOICES, PersianVoice, VOICES, grouped_english_voices,
+    voice_display_name, voice_short_name,
 };
 use crate::icon;
 use crate::models::{self, ModelId};
@@ -282,8 +283,10 @@ struct App {
     phonon_voice_items: Vec<(&'static str, CheckMenuItem)>,
     /// Disabled Phonon group headers in `PhononVoiceGroup::ALL` order.
     phonon_voice_headers: Vec<MenuItem>,
-    /// Whether the Phonon voice set is currently shown in the submenu.
-    phonon_voices_shown: bool,
+    /// Which model's voice set the "English Voice" submenu currently shows.
+    voice_set_shown: ShownVoiceSet,
+    /// Paradee voice checks (the four model voices, no group headers).
+    paradee_voice_items: Vec<(&'static str, CheckMenuItem)>,
     persian_voice_items: Vec<(PersianVoice, CheckMenuItem)>,
     speed_items: Vec<(f32, CheckMenuItem)>,
     pause_items: Vec<(f32, CheckMenuItem)>,
@@ -332,6 +335,24 @@ struct App {
     pending_copy_to_read_ms: Option<u64>,
 }
 
+/// The "English Voice" submenu's voice set for the selected model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ShownVoiceSet {
+    Kokoro,
+    Phonon,
+    Paradee,
+}
+
+impl ShownVoiceSet {
+    fn for_model(model: ModelVariant) -> Self {
+        match model {
+            ModelVariant::Phonon => Self::Phonon,
+            ModelVariant::Paradee => Self::Paradee,
+            ModelVariant::Fast | ModelVariant::Small => Self::Kokoro,
+        }
+    }
+}
+
 impl App {
     fn new(
         proxy: EventLoopProxy<AppEvent>,
@@ -353,6 +374,17 @@ impl App {
             eprintln!("Warning: {message}");
             startup_error = Some(message);
             settings.phonon_voice = crate::phonon::DEFAULT_PHONON_VOICE.to_string();
+        }
+        if !crate::engine::is_paradee_voice(&settings.paradee_voice) {
+            let message = format!(
+                "Unknown Paradee voice '{}' in settings; using the default Paradee voice.",
+                settings.paradee_voice
+            );
+            eprintln!("Warning: {message}");
+            if startup_error.is_none() {
+                startup_error = Some(message);
+            }
+            settings.paradee_voice = crate::engine::DEFAULT_PARADEE_VOICE.to_string();
         }
         let model = settings.model;
         Self {
@@ -390,7 +422,8 @@ impl App {
             english_voice_menu: None,
             phonon_voice_items: Vec::new(),
             phonon_voice_headers: Vec::new(),
-            phonon_voices_shown: false,
+            voice_set_shown: ShownVoiceSet::Kokoro,
+            paradee_voice_items: Vec::new(),
             persian_voice_items: Vec::new(),
             speed_items: Vec::new(),
             pause_items: Vec::new(),
@@ -506,10 +539,11 @@ impl App {
         let quit_item = MenuItem::new("Quit Smart Voices", true, None);
 
         let model_menu = Submenu::new("Voice Model", true);
-        let mut model_items = Vec::with_capacity(3);
+        let mut model_items = Vec::with_capacity(4);
         for variant in [
             ModelVariant::Fast,
             ModelVariant::Small,
+            ModelVariant::Paradee,
             ModelVariant::Phonon,
         ] {
             let item = CheckMenuItem::new(variant.label(), true, variant == self.model, None);
@@ -555,11 +589,20 @@ impl App {
                 phonon_voice_items.push((voice.id, item));
             }
         }
-        let phonon_voices_shown = self.model == ModelVariant::Phonon;
-        let active_entries = if phonon_voices_shown {
-            phonon_voice_entries(&phonon_voice_headers, &phonon_voice_items)
-        } else {
-            kokoro_voice_entries(&voice_headers, &voice_items)
+        let mut paradee_voice_items: Vec<(&'static str, CheckMenuItem)> =
+            Vec::with_capacity(PARADEE_VOICES.len());
+        for id in PARADEE_VOICES {
+            let name = voice_display_name(id).unwrap_or_else(|| id.to_string());
+            let item = CheckMenuItem::new(name, true, id == self.settings.paradee_voice, None);
+            paradee_voice_items.push((id, item));
+        }
+        let voice_set_shown = ShownVoiceSet::for_model(self.model);
+        let active_entries = match voice_set_shown {
+            ShownVoiceSet::Phonon => {
+                phonon_voice_entries(&phonon_voice_headers, &phonon_voice_items)
+            }
+            ShownVoiceSet::Paradee => paradee_voice_entries(&paradee_voice_items),
+            ShownVoiceSet::Kokoro => kokoro_voice_entries(&voice_headers, &voice_items),
         };
         for entry in active_entries {
             english_voice_menu.append(entry).map_err(menu_build_error)?;
@@ -761,7 +804,8 @@ impl App {
         self.english_voice_menu = Some(english_voice_menu);
         self.phonon_voice_items = phonon_voice_items;
         self.phonon_voice_headers = phonon_voice_headers;
-        self.phonon_voices_shown = phonon_voices_shown;
+        self.voice_set_shown = voice_set_shown;
+        self.paradee_voice_items = paradee_voice_items;
         self.persian_voice_items = persian_voice_items;
         self.speed_items = speed_items;
         self.pause_items = pause_items;
@@ -1071,10 +1115,10 @@ impl App {
         let sink = AudioSink::new().map_err(|err| err.to_string())?;
         let unload_after = unload_duration(self.settings.unload_after_minutes);
         let persian_voice = self.settings.persian_voice;
-        let voice = if self.model == ModelVariant::Phonon {
-            self.settings.phonon_voice.clone()
-        } else {
-            self.settings.voice.clone()
+        let voice = match self.model {
+            ModelVariant::Phonon => self.settings.phonon_voice.clone(),
+            ModelVariant::Paradee => self.settings.paradee_voice.clone(),
+            ModelVariant::Fast | ModelVariant::Small => self.settings.voice.clone(),
         };
         let config = PlayerConfig {
             voice,
@@ -1443,6 +1487,13 @@ impl App {
         {
             self.on_voice_selected(&voice);
         } else if let Some(id) = self
+            .paradee_voice_items
+            .iter()
+            .find(|(_, item)| id == item.id())
+            .map(|(id, _)| *id)
+        {
+            self.on_paradee_voice_selected(id);
+        } else if let Some(id) = self
             .phonon_voice_items
             .iter()
             .find(|(_, item)| id == item.id())
@@ -1599,6 +1650,23 @@ impl App {
         }
     }
 
+    /// A Paradee voice item was clicked (muda already flipped its check;
+    /// re-sync all of them so exactly one stays checked).
+    fn on_paradee_voice_selected(&mut self, id: &'static str) {
+        self.settings.paradee_voice = id.to_string();
+        if let Some(player) = &self.player {
+            player.set_voice(id);
+        }
+        self.update_paradee_voice_checks();
+        self.save_settings();
+    }
+
+    fn update_paradee_voice_checks(&self) {
+        for (id, item) in &self.paradee_voice_items {
+            item.set_checked(*id == self.settings.paradee_voice);
+        }
+    }
+
     /// A Persian voice item was clicked (muda already flipped its check;
     /// re-sync all of them so exactly one stays checked). Applies from the
     /// next chunk; if its model isn't installed it downloads on the next
@@ -1673,34 +1741,36 @@ impl App {
         }
     }
 
+    /// Ordered submenu entries of one English voice set.
+    fn voice_set_entries(&self, set: ShownVoiceSet) -> Vec<&dyn IsMenuItem> {
+        match set {
+            ShownVoiceSet::Kokoro => kokoro_voice_entries(&self.voice_headers, &self.voice_items),
+            ShownVoiceSet::Phonon => {
+                phonon_voice_entries(&self.phonon_voice_headers, &self.phonon_voice_items)
+            }
+            ShownVoiceSet::Paradee => paradee_voice_entries(&self.paradee_voice_items),
+        }
+    }
+
     /// Sync the "English Voice" submenu with the selected model: it lists
     /// only that model's voices (Kokoro for Fast/Small, the catalog for
-    /// Phonon). A change between the Kokoro family and Phonon swaps the whole
-    /// set; Fast↔Small shows the same set and is a no-op.
+    /// Phonon, the four voices for Paradee). A change of family swaps the
+    /// whole set; Fast↔Small shows the same set and is a no-op.
     fn update_english_voice_state(&mut self) {
-        let phonon = self.model == ModelVariant::Phonon;
-        if phonon == self.phonon_voices_shown {
+        let want = ShownVoiceSet::for_model(self.model);
+        if want == self.voice_set_shown {
             return;
         }
         let result = match &self.english_voice_menu {
             Some(menu) => {
-                let (old, new) = if phonon {
-                    (
-                        kokoro_voice_entries(&self.voice_headers, &self.voice_items),
-                        phonon_voice_entries(&self.phonon_voice_headers, &self.phonon_voice_items),
-                    )
-                } else {
-                    (
-                        phonon_voice_entries(&self.phonon_voice_headers, &self.phonon_voice_items),
-                        kokoro_voice_entries(&self.voice_headers, &self.voice_items),
-                    )
-                };
+                let old = self.voice_set_entries(self.voice_set_shown);
+                let new = self.voice_set_entries(want);
                 swap_voice_sets(menu, &old, &new)
             }
             None => return,
         };
         match result {
-            Ok(()) => self.phonon_voices_shown = phonon,
+            Ok(()) => self.voice_set_shown = want,
             Err(err) => {
                 let message = format!("Couldn't update the English Voice menu: {err}");
                 eprintln!("Warning: {message}");
@@ -2105,6 +2175,17 @@ fn phonon_voice_entries<'a>(
     entries
 }
 
+/// Ordered "English Voice" submenu entries of the Paradee set: its four
+/// voice checks in model order (no group headers).
+fn paradee_voice_entries<'a>(
+    items: &'a [(&'static str, CheckMenuItem)],
+) -> Vec<&'a dyn IsMenuItem> {
+    items
+        .iter()
+        .map(|(_, item)| item as &dyn IsMenuItem)
+        .collect()
+}
+
 /// Swap the "English Voice" submenu's voice set: remove every entry of the
 /// old set, then insert the new set's entries at positions 0..n (the voices
 /// are the whole submenu).
@@ -2128,9 +2209,11 @@ fn download_label(model: ModelId) -> &'static str {
         ModelId::English(ModelVariant::Fast) => "Downloading English voice (Fast)",
         ModelId::English(ModelVariant::Small) => "Downloading English voice (Small)",
         ModelId::English(ModelVariant::Phonon) => "Downloading Phonon",
+        ModelId::English(ModelVariant::Paradee) => "Downloading Paradee",
         ModelId::Persian(_) => "Downloading Persian voice",
         ModelId::PhononVoices => "Downloading Phonon voices",
         ModelId::Misaki => "Downloading English pronunciation data",
+        ModelId::EspeakData => "Downloading English espeak-ng data",
     }
 }
 

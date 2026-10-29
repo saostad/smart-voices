@@ -25,6 +25,9 @@ pub enum ModelId {
     /// together (only needed for a non-default Phonon voice).
     PhononVoices,
     Misaki,
+    /// Standalone espeak-ng data bundle for Paradee (its own download has
+    /// no `espeak-ng-data`, unlike the Kokoro and Piper tarballs).
+    EspeakData,
 }
 
 impl ModelId {
@@ -35,6 +38,7 @@ impl ModelId {
             Self::Persian(voice) => voice.dir_name(),
             Self::PhononVoices => VOICES_DIR,
             Self::Misaki => "misaki-en",
+            Self::EspeakData => crate::engine::ESPEAK_DATA_DIR,
         }
     }
 
@@ -47,6 +51,9 @@ impl ModelId {
             Self::Persian(voice) => voice.url(),
             Self::PhononVoices => "https://huggingface.co/gradium/phonon-voices",
             Self::Misaki => "https://github.com/hexgrad/misaki",
+            Self::EspeakData => {
+                "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/espeak-ng-data.tar.bz2"
+            }
         }
     }
 
@@ -63,6 +70,7 @@ impl ModelId {
             Self::Persian(PersianVoice::GanjiAdabi) => "Persian voice (Ganji Adabi)",
             Self::PhononVoices => "Phonon voices (~9.5 MB)",
             Self::Misaki => "English pronunciation data (~18 MB)",
+            Self::EspeakData => "English espeak-ng data (~7 MB)",
         }
     }
 
@@ -75,6 +83,14 @@ impl ModelId {
                 .iter()
                 .map(|f| f.name)
                 .collect(),
+            Self::EspeakData => vec![
+                "espeak-ng-data/phondata",
+                "espeak-ng-data/phonindex",
+                "espeak-ng-data/phontab",
+                "espeak-ng-data/en_dict",
+                "espeak-ng-data/lang/gmw/en",
+                "espeak-ng-data/lang/gmw/en-US",
+            ],
             Self::PhononVoices => PHONON_VOICES.iter().map(|voice| voice.file.name).collect(),
         }
     }
@@ -140,6 +156,9 @@ pub fn models_for_chunks(
         models.push(ModelId::English(variant));
         if variant != ModelVariant::Phonon {
             models.push(ModelId::Misaki);
+        }
+        if variant == ModelVariant::Paradee {
+            models.push(ModelId::EspeakData);
         }
         if variant == ModelVariant::Phonon && phonon_voice != DEFAULT_PHONON_VOICE {
             models.push(ModelId::PhononVoices);
@@ -458,8 +477,10 @@ mod tests {
             ModelId::English(ModelVariant::Fast),
             ModelId::English(ModelVariant::Small),
             ModelId::English(ModelVariant::Phonon),
+            ModelId::English(ModelVariant::Paradee),
             ModelId::PhononVoices,
             ModelId::Misaki,
+            ModelId::EspeakData,
         ];
         models.extend(
             crate::engine::PERSIAN_VOICES
@@ -567,6 +588,39 @@ mod tests {
                 ModelVariant::Phonon,
                 voice,
                 "NbpkqMVS3CJeq2j8"
+            ),
+            [ModelId::Persian(voice)]
+        );
+    }
+
+    #[test]
+    fn models_for_chunks_adds_paradee_pronunciation_and_espeak_data() {
+        use crate::sanitize::SpeechPause;
+
+        let chunk = |text: &str| SpeechChunk {
+            text: text.to_string(),
+            pause_after: SpeechPause::None,
+        };
+        let voice = PersianVoice::Gyro;
+        assert_eq!(
+            models_for_chunks(
+                &[chunk("Hello.")],
+                ModelVariant::Paradee,
+                voice,
+                DEFAULT_PHONON_VOICE
+            ),
+            [
+                ModelId::English(ModelVariant::Paradee),
+                ModelId::Misaki,
+                ModelId::EspeakData
+            ]
+        );
+        assert_eq!(
+            models_for_chunks(
+                &[chunk("سلام.")],
+                ModelVariant::Paradee,
+                voice,
+                DEFAULT_PHONON_VOICE
             ),
             [ModelId::Persian(voice)]
         );

@@ -17,7 +17,7 @@ use smart_voices::reader::render::{Frame, Painter, Theme};
 use smart_voices::sanitize::SanitizerOptions;
 use smart_voices::settings::{Settings, settings_path};
 
-const USAGE: &str = "Usage: smart-voices (starts the tray app)\n       smart-voices speak \"<text>\" [--voice <name>] [--speed <f>] [--model fast|small|phonon] [--persian-voice <id>] [--verbose]\n       smart-voices download [--model fast|small|phonon] [--persian] [--persian-voice <id>]\n       smart-voices clean [<file>]\n       smart-voices watch [--auto-read]\n       smart-voices reader-preview <out.bmp> [--dark] [--width 440] [--height 300] [--scale 2]";
+const USAGE: &str = "Usage: smart-voices (starts the tray app)\n       smart-voices speak \"<text>\" [--voice <name>] [--speed <f>] [--model fast|small|phonon|paradee] [--persian-voice <id>] [--verbose]\n       smart-voices download [--model fast|small|phonon|paradee] [--persian] [--persian-voice <id>]\n       smart-voices clean [<file>]\n       smart-voices watch [--auto-read]\n       smart-voices reader-preview <out.bmp> [--dark] [--width 440] [--height 300] [--scale 2]";
 
 fn main() {
     std::process::exit(run());
@@ -168,6 +168,15 @@ fn resolve_phonon_voice(query: &str) -> Option<&'static str> {
     smart_voices::phonon::find_voice(query).map(|voice| voice.id)
 }
 
+/// Resolve a `speak --voice` value for Paradee: one of its four voice
+/// names (any case), returning the canonical name.
+fn resolve_paradee_voice(query: &str) -> Option<&'static str> {
+    smart_voices::engine::PARADEE_VOICES
+        .iter()
+        .copied()
+        .find(|name| name.eq_ignore_ascii_case(query))
+}
+
 /// All catalog voice display names, comma-separated, for the unknown-voice
 /// error.
 fn phonon_voice_names() -> String {
@@ -223,8 +232,15 @@ fn speak(args: &[String]) -> i32 {
         );
         phonon_voice = smart_voices::phonon::DEFAULT_PHONON_VOICE.to_string();
     }
-    // With Phonon, `--voice` names a catalog voice (or `default`); otherwise
-    // it names a Kokoro voice.
+    let mut paradee_voice = settings.paradee_voice;
+    if !smart_voices::engine::is_paradee_voice(&paradee_voice) {
+        eprintln!(
+            "Warning: Unknown Paradee voice '{paradee_voice}' in settings; using the default Paradee voice."
+        );
+        paradee_voice = smart_voices::engine::DEFAULT_PARADEE_VOICE.to_string();
+    }
+    // With Phonon, `--voice` names a catalog voice (or `default`); with
+    // Paradee, one of its four voices; otherwise it names a Kokoro voice.
     let voice = match (model, options.voice.as_deref()) {
         (ModelVariant::Phonon, Some(query)) => match resolve_phonon_voice(query) {
             Some(id) => id.to_string(),
@@ -237,6 +253,17 @@ fn speak(args: &[String]) -> i32 {
             }
         },
         (ModelVariant::Phonon, None) => phonon_voice.clone(),
+        (ModelVariant::Paradee, Some(query)) => match resolve_paradee_voice(query) {
+            Some(name) => name.to_string(),
+            None => {
+                eprintln!(
+                    "Error: Unknown Paradee voice '{query}'. Available voices: {}.",
+                    smart_voices::engine::PARADEE_VOICES.join(", ")
+                );
+                return 2;
+            }
+        },
+        (ModelVariant::Paradee, None) => paradee_voice.clone(),
         (_, voice) => voice.map(str::to_string).unwrap_or(settings.voice),
     };
     // The Phonon voice id this reading needs (only used for Phonon).
@@ -368,6 +395,9 @@ fn download_cmd(args: &[String]) -> i32 {
         models.push(ModelId::English(variant));
         if variant != ModelVariant::Phonon {
             models.push(ModelId::Misaki);
+        }
+        if variant == ModelVariant::Paradee {
+            models.push(ModelId::EspeakData);
         }
         if variant == ModelVariant::Phonon {
             // The catalog voices, so offline use works afterwards.
@@ -627,6 +657,7 @@ struct LazyPlayer {
     player: Option<Player>,
     voice: String,
     phonon_voice: String,
+    paradee_voice: String,
     speed: f32,
     model: ModelVariant,
     persian_voice: PersianVoice,
@@ -645,10 +676,18 @@ impl LazyPlayer {
             );
             phonon_voice = smart_voices::phonon::DEFAULT_PHONON_VOICE.to_string();
         }
+        let mut paradee_voice = settings.paradee_voice.clone();
+        if !smart_voices::engine::is_paradee_voice(&paradee_voice) {
+            eprintln!(
+                "Warning: Unknown Paradee voice '{paradee_voice}' in settings; using the default Paradee voice."
+            );
+            paradee_voice = smart_voices::engine::DEFAULT_PARADEE_VOICE.to_string();
+        }
         Self {
             player: None,
             voice: settings.voice.clone(),
             phonon_voice,
+            paradee_voice,
             speed: settings.speed,
             model: settings.model,
             persian_voice: settings.persian_voice,
@@ -705,10 +744,10 @@ impl LazyPlayer {
         })?;
         let sink = AudioSink::new().map_err(|err| err.to_string())?;
         let persian_voice = self.persian_voice;
-        let voice = if self.model == ModelVariant::Phonon {
-            self.phonon_voice.clone()
-        } else {
-            self.voice.clone()
+        let voice = match self.model {
+            ModelVariant::Phonon => self.phonon_voice.clone(),
+            ModelVariant::Paradee => self.paradee_voice.clone(),
+            ModelVariant::Fast | ModelVariant::Small => self.voice.clone(),
         };
         let config = PlayerConfig {
             voice,
