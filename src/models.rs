@@ -24,6 +24,7 @@ pub enum ModelId {
     /// All 37 `gradium/phonon-voices` English voice files, downloaded
     /// together (only needed for a non-default Phonon voice).
     PhononVoices,
+    Misaki,
 }
 
 impl ModelId {
@@ -33,6 +34,7 @@ impl ModelId {
             Self::English(variant) => variant.dir_name(),
             Self::Persian(voice) => voice.dir_name(),
             Self::PhononVoices => VOICES_DIR,
+            Self::Misaki => "misaki-en",
         }
     }
 
@@ -44,6 +46,7 @@ impl ModelId {
             Self::English(variant) => variant.url(),
             Self::Persian(voice) => voice.url(),
             Self::PhononVoices => "https://huggingface.co/gradium/phonon-voices",
+            Self::Misaki => "https://github.com/hexgrad/misaki",
         }
     }
 
@@ -59,6 +62,7 @@ impl ModelId {
             Self::Persian(PersianVoice::Ganji) => "Persian voice (Ganji)",
             Self::Persian(PersianVoice::GanjiAdabi) => "Persian voice (Ganji Adabi)",
             Self::PhononVoices => "Phonon voices (~9.5 MB)",
+            Self::Misaki => "English pronunciation data (~18 MB)",
         }
     }
 
@@ -67,6 +71,10 @@ impl ModelId {
         match self {
             Self::English(variant) => variant.required_files().to_vec(),
             Self::Persian(voice) => voice.required_files(),
+            Self::Misaki => crate::misaki::downloads::FILES
+                .iter()
+                .map(|f| f.name)
+                .collect(),
             Self::PhononVoices => PHONON_VOICES.iter().map(|voice| voice.file.name).collect(),
         }
     }
@@ -130,6 +138,9 @@ pub fn models_for_chunks(
         .any(|chunk| chunk_language(&chunk.text) == Lang::English)
     {
         models.push(ModelId::English(variant));
+        if variant != ModelVariant::Phonon {
+            models.push(ModelId::Misaki);
+        }
         if variant == ModelVariant::Phonon && phonon_voice != DEFAULT_PHONON_VOICE {
             models.push(ModelId::PhononVoices);
         }
@@ -202,6 +213,13 @@ pub fn download(
                 files.iter().map(|file| (file.name, file.spec)).collect();
             return download_files(root, model, &files, progress);
         }
+    }
+    if model == ModelId::Misaki {
+        let files: Vec<_> = crate::misaki::downloads::FILES
+            .iter()
+            .map(|f| (f.name, f.spec))
+            .collect();
+        return download_files(root, model, &files, progress);
     }
     if model == ModelId::PhononVoices {
         let files: Vec<(&'static str, DownloadSpec)> = PHONON_VOICES
@@ -316,6 +334,19 @@ fn download_files(
     let mut finished: u64 = 0;
     for (name, spec) in files {
         let staging_file = partial.join(name);
+        if let Some(parent) = staging_file.parent()
+            && let Err(error) = std::fs::create_dir_all(parent)
+        {
+            eprintln!(
+                "error: create model download subdirectory {}: {error}",
+                parent.display()
+            );
+            cleanup(&partial);
+            return Err(ModelError::Unpack {
+                dir: partial.clone(),
+                message: error.to_string(),
+            });
+        }
         if let Err(err) = download_file(
             spec.url,
             spec.size,
@@ -428,6 +459,7 @@ mod tests {
             ModelId::English(ModelVariant::Small),
             ModelId::English(ModelVariant::Phonon),
             ModelId::PhononVoices,
+            ModelId::Misaki,
         ];
         models.extend(
             crate::engine::PERSIAN_VOICES
@@ -478,7 +510,7 @@ mod tests {
                 voice,
                 DEFAULT_PHONON_VOICE
             ),
-            [ModelId::English(variant)]
+            [ModelId::English(variant), ModelId::Misaki]
         );
         assert_eq!(
             models_for_chunks(&[chunk("سلام.")], variant, voice, DEFAULT_PHONON_VOICE),
@@ -491,7 +523,11 @@ mod tests {
                 voice,
                 DEFAULT_PHONON_VOICE
             ),
-            [ModelId::English(variant), ModelId::Persian(voice)]
+            [
+                ModelId::English(variant),
+                ModelId::Misaki,
+                ModelId::Persian(voice)
+            ]
         );
         assert!(models_for_chunks(&[], variant, voice, DEFAULT_PHONON_VOICE).is_empty());
     }
@@ -522,7 +558,7 @@ mod tests {
         // The Kokoro variants never pull the bundle, whatever the voice id.
         assert_eq!(
             models_for_chunks(&english, ModelVariant::Fast, voice, "NbpkqMVS3CJeq2j8"),
-            [ModelId::English(ModelVariant::Fast)]
+            [ModelId::English(ModelVariant::Fast), ModelId::Misaki]
         );
         // Persian-only text with Phonon selected stays Persian-only.
         assert_eq!(

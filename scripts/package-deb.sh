@@ -16,7 +16,7 @@ mkdir -p "$PKG/DEBIAN" "$PKG/usr/bin" "$PKG/usr/lib/smart-voices" \
 # The voice runtime ships as shared libraries next to the binary (the app
 # finds them via $ORIGIN); keep them together under /usr/lib/smart-voices.
 install -m 755 "$BIN" "$PKG/usr/lib/smart-voices/smart-voices"
-install -m 644 "$ROOT_DIR"/target/release/*.so "$PKG/usr/lib/smart-voices/"
+install -m 644 "$ROOT_DIR"/target/release/libonnxruntime.so* "$PKG/usr/lib/smart-voices/"
 ln -sf ../lib/smart-voices/smart-voices "$PKG/usr/bin/smart-voices"
 sed 's/^Icon=.*/Icon=smart-voices/' "$ROOT_DIR/packaging/linux/smart-voices.desktop" \
   > "$PKG/usr/share/applications/smart-voices.desktop"

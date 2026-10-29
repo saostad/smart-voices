@@ -3,7 +3,7 @@ Smart Voices for Linux
 
 Install
 -------
-1. Copy `smart-voices` and the `*.so` files next to it into the same folder,
+1. Copy `smart-voices` and the `libonnxruntime.so*` files next to it into the same folder,
    e.g. `~/.local/bin` (make sure it is on your PATH). Keep them together:
    the app loads its voice runtime from those libraries.
 2. Copy `smart-voices.desktop` to `~/.local/share/applications`.

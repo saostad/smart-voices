@@ -37,7 +37,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [Files]
 Source: "..\..\target\release\smart-voices.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\..\target\release\*.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\target\release\onnxruntime.dll"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\Smart Voices"; Filename: "{app}\smart-voices.exe"

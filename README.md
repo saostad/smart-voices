@@ -47,6 +47,7 @@ letting the download finish for next time.
 |---|---|---|
 | Fast (default English voice) | ~350 MB | First English reading |
 | Small (slower, low-memory English) | ~130 MB | Only if you pick it in Settings |
+| English pronunciation data (Kokoro) | ~18 MB | First Kokoro English reading (including upgrades) |
 | Phonon (best-quality English) | ~103 MB | Only if you pick it in Settings |
 | Phonon voices (37 English voices) | ~9.5 MB | First reading with a Phonon voice other than Default |
 | Persian voice (Pocket, best quality) | ~230 MB | First Persian reading (English-only use never downloads it) |
@@ -141,17 +142,21 @@ variable (full file path) and the models folder with `SMART_VOICES_MODELS`.
 
 ## Building from source
 
-You need a Rust toolchain (stable). From the repository root:
+You need a Rust toolchain (stable), CMake, a C/C++ compiler, and libclang (for espeak-ng bindings). From the repository root:
 
 ```sh
+scripts/fetch-onnxruntime.sh
 cargo build --release
 ```
 
-The binary lands at `target/release/smart-voices`. Keep the shared
-libraries next to it (`libsherpa-onnx-c-api.*` and `libonnxruntime.*` — the
-build copies them there): the app loads its voice runtime from them. On
+The binary lands at `target/release/smart-voices`. Keep `libonnxruntime.so*`
+(Linux), `libonnxruntime*.dylib` (macOS), or `onnxruntime.dll` (Windows)
+beside it. The fetch script verifies pinned archives from sherpa-onnx
+v1.13.8 and copies only ONNX Runtime 1.28.2; no sherpa libraries are used.
+espeak-ng 1.52 is compiled from source and linked statically through
+`espeak-rs-sys`; on Windows it uses the static CRT. On
 Linux, install the audio headers first:
-`sudo apt-get install libasound2-dev pkg-config`. On macOS,
+`sudo apt-get install libasound2-dev pkg-config cmake libclang-dev`. On macOS,
 `scripts/bundle-macos.sh` wraps the binary in `Smart Voices.app`.
 
 ## Command line
@@ -176,3 +181,19 @@ voice unloads after 15 idle minutes); synthesis runs at about 0.2×
 real-time (5× faster than playback). From copy to first sound takes about
 0.3–0.5 seconds while the voice is loaded, and about 1.5 seconds right after
 it was unloaded.
+
+Kokoro also downloads English pronunciation data (~18 MB, once): the original
+misaki US/British dictionaries (Apache-2.0) and misaki-rs POS tagger (MIT).
+Only the voice's regional dictionaries are loaded. Unknown words and numeric
+words use the same statically linked espeak-ng as Persian Piper.
+
+`settings.toml` accepts `silence_scale = 0.2` (0.01–10, also available as
+Pause Length in the tray), `pause_min_seconds = 0.2` (positive finite seconds),
+and `pause_amplitude = 0.01` (0–1). The latter two control pause detection.
+
+Piper inference scales are read from the tarball’s `<voice>.onnx.json` file
+(the Persian ONNX files do not contain those metadata fields).
+
+Playback resampling also accepts `resample_cutoff_ratio = 0.99` (0–1,
+exclusive of 0) and `resample_filter_zeros = 6` (1–64) in settings.toml.
+These retain the old resampler’s cutoff and window defaults.

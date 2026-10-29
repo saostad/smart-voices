@@ -8,7 +8,6 @@ use std::sync::{Arc, Mutex, mpsc};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{BufferSize, StreamConfig};
-use sherpa_onnx::LinearResampler;
 
 /// Errors from opening the audio device or playing samples.
 #[derive(Debug)]
@@ -48,14 +47,73 @@ fn resample_to_rate(samples: &[f32], from: u32, to: u32) -> Result<Vec<f32>, Aud
     if from == to {
         return Ok(samples.to_vec());
     }
-    let resampler = i32::try_from(from)
-        .ok()
-        .zip(i32::try_from(to).ok())
-        .and_then(|(from, to)| LinearResampler::create(from, to));
-    match resampler {
-        Some(resampler) => Ok(resampler.resample(samples, true)),
-        None => Err(AudioError::Resample { from, to }),
+    if from == 0 || to == 0 {
+        eprintln!("error: invalid playback sample rate {from} -> {to}");
+        return Err(AudioError::Resample { from, to });
     }
+    // A missing or invalid settings file falls back to the defaults
+    // `Settings::load` already returns (the app warned at startup); it
+    // must not stop playback.
+    let (settings, error) = match crate::settings::settings_path() {
+        Some(path) => crate::settings::Settings::load(&path),
+        None => {
+            eprintln!(
+                "warn: fallback: true, attempted=settings_file, reason=settings_directory_unavailable, taken=default_resampler_settings"
+            );
+            (crate::settings::Settings::default(), None)
+        }
+    };
+    if let Some(error) = error {
+        eprintln!(
+            "warn: fallback: true, attempted=settings_file, reason={error}, taken=default_resampler_settings"
+        );
+    }
+    Ok(resample_with(
+        samples,
+        from,
+        to,
+        settings.resample_cutoff_ratio,
+        settings.resample_filter_zeros,
+    ))
+}
+
+/// Windowed-sinc resample with explicit settings (see [`resample_to_rate`]
+/// for where the values come from). The defaults (six zero crossings, 0.99
+/// cutoff) match the old Kaldi linear resampler. The cutoff follows the
+/// lower Nyquist rate.
+fn resample_with(
+    samples: &[f32],
+    from: u32,
+    to: u32,
+    cutoff_ratio: f32,
+    filter_zeros: u32,
+) -> Vec<f32> {
+    if from == to {
+        return samples.to_vec();
+    }
+    let cutoff = f64::from(cutoff_ratio) * f64::from(from.min(to)) / 2.;
+    let radius = f64::from(filter_zeros) * f64::from(from) / (2. * cutoff);
+    let len = (samples.len() as u64 * u64::from(to)).div_ceil(u64::from(from)) as usize;
+    let mut out = Vec::with_capacity(len);
+    for i in 0..len {
+        let t = i as f64 * f64::from(from) / f64::from(to);
+        let start = (t - radius).ceil().max(0.) as usize;
+        let end = ((t + radius).floor() as usize + 1).min(samples.len());
+        let mut sum = 0.;
+        for (j, sample) in samples.iter().enumerate().take(end).skip(start) {
+            let delta = (t - j as f64) / f64::from(from);
+            let x = 2. * std::f64::consts::PI * cutoff * delta;
+            let sinc = if x.abs() < f64::EPSILON {
+                1.
+            } else {
+                x.sin() / x
+            };
+            let window = 0.5 * (1. + (std::f64::consts::PI * (t - j as f64) / radius).cos());
+            sum += f64::from(*sample) * 2. * cutoff / f64::from(from) * sinc * window;
+        }
+        out.push(sum as f32);
+    }
+    out
 }
 
 /// Events from the audio sink to the playback controller.
@@ -358,6 +416,18 @@ mod tests {
             samples: vec![0.0; 16],
             pos: 16,
         }
+    }
+
+    #[test]
+    fn resample_with_doubles_dc_signal() {
+        // The pure resampler must not depend on the settings file: bad
+        // or missing settings fall back to defaults in the wrapper.
+        let dc = vec![1.0f32; 240];
+        let out = resample_with(&dc, 24_000, 48_000, 0.99, 6);
+        assert_eq!(out.len(), 480);
+        let mid = out[out.len() / 2];
+        assert!((mid - 1.0).abs() < 0.02, "mid DC sample {mid}");
+        assert_eq!(resample_with(&dc, 24_000, 24_000, 0.99, 6), dc);
     }
 
     #[test]

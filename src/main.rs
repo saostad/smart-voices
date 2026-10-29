@@ -366,6 +366,9 @@ fn download_cmd(args: &[String]) -> i32 {
     let mut models = Vec::with_capacity(3);
     if let Some(variant) = options.kokoro {
         models.push(ModelId::English(variant));
+        if variant != ModelVariant::Phonon {
+            models.push(ModelId::Misaki);
+        }
         if variant == ModelVariant::Phonon {
             // The catalog voices, so offline use works afterwards.
             models.push(ModelId::PhononVoices);

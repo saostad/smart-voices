@@ -13,8 +13,10 @@ path = "src/main.rs"
 
 [dependencies]
 ptts = { version = "=0.4.0", default-features = false, features = ["hf"] }
-sherpa-onnx = { version = "=1.13.8", default-features = false, features = ["shared"] }
 ort = { version = "=2.0.0-rc.14", default-features = false, features = ["std", "load-dynamic", "api-28"] }
+espeak-rs-sys = "=0.2.0"
+regex = "=1.13.1"
+unicode-normalization = "=0.1.25"
 serde_json = "=1.0.145"
 base64 = "=0.22.1"
 cpal = "=0.18.2"

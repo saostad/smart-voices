@@ -1,15 +1,10 @@
-//! Kokoro voice engine (sherpa-onnx) wrapper.
+//! Voice model definitions and ONNX synthesis engines.
 
 use std::error::Error;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use sherpa_onnx::{
-    GenerationConfig, OfflineTts, OfflineTtsConfig, OfflineTtsKokoroModelConfig,
-    OfflineTtsModelConfig, OfflineTtsVitsModelConfig,
-};
-
 /// Downloadable English model variant: full-precision Kokoro (fast), int8
 /// Kokoro (small), or Phonon (best quality).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -80,21 +75,12 @@ impl ModelVariant {
     /// Files and dirs that must exist inside the model dir (model file first).
     pub fn required_files(self) -> &'static [&'static str] {
         match self {
-            Self::Fast => &[
-                "model.onnx",
-                "voices.bin",
-                "tokens.txt",
-                "espeak-ng-data",
-                "dict",
-                "lexicon-us-en.txt",
-            ],
+            Self::Fast => &["model.onnx", "voices.bin", "tokens.txt", "espeak-ng-data"],
             Self::Small => &[
                 "model.int8.onnx",
                 "voices.bin",
                 "tokens.txt",
                 "espeak-ng-data",
-                "dict",
-                "lexicon-us-en.txt",
             ],
             Self::Phonon => &[
                 "model.safetensors",
@@ -303,7 +289,24 @@ impl PersianVoice {
     pub fn required_files(self) -> Vec<&'static str> {
         match self {
             Self::Pocket | Self::PocketV2 => vec![self.model_file()],
-            _ => vec![self.model_file(), "tokens.txt", "espeak-ng-data"],
+            _ => vec![
+                self.model_file(),
+                self.config_file(),
+                "tokens.txt",
+                "espeak-ng-data",
+            ],
+        }
+    }
+
+    /// Inference scales shipped alongside each Piper ONNX model.
+    pub fn config_file(self) -> &'static str {
+        match self {
+            Self::Amir => "fa_IR-amir-medium.onnx.json",
+            Self::Gyro => "fa_IR-gyro-medium.onnx.json",
+            Self::RezaIbrahim => "fa_IR-reza_ibrahim-medium.onnx.json",
+            Self::Ganji => "fa_IR-ganji-medium.onnx.json",
+            Self::GanjiAdabi => "fa_IR-ganji_adabi-medium.onnx.json",
+            Self::Pocket | Self::PocketV2 => "",
         }
     }
 
@@ -499,11 +502,12 @@ pub fn grouped_english_voices() -> [(VoiceGroup, Vec<&'static str>); 4] {
 /// Errors from loading the model or synthesizing speech.
 #[derive(Debug)]
 pub enum EngineError {
+    OnnxTts(String),
     /// A required model file or directory is missing.
     MissingModel(PathBuf),
-    /// The Kokoro model files exist but sherpa-onnx refused to load them.
+    /// The Kokoro model files exist but ONNX Runtime refused to load them.
     LoadFailed(PathBuf),
-    /// The Persian model files exist but sherpa-onnx refused to load them.
+    /// The Persian model files exist but ONNX Runtime refused to load them.
     PersianLoadFailed(PathBuf),
     /// The Pocket model file exists but ONNX Runtime refused it (the real
     /// runtime error is kept).
@@ -516,7 +520,10 @@ pub enum EngineError {
     /// to load (the real runtime error is kept).
     G2pLoadFailed(String),
     /// Pronouncing one sentence failed (sentence and real error kept).
-    G2pFailed { sentence: String, message: String },
+    G2pFailed {
+        sentence: String,
+        message: String,
+    },
     /// The Phonon model files exist but ptts refused to load them (the real
     /// error is kept).
     PhononLoadFailed(PathBuf, String),
@@ -531,6 +538,7 @@ pub enum EngineError {
 impl fmt::Display for EngineError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            EngineError::OnnxTts(message) => write!(f, "Voice synthesis failed: {message}"),
             EngineError::MissingModel(path) => write!(
                 f,
                 "Voice model file not found: {}. Run `smart-voices download` to get it.",
@@ -595,15 +603,6 @@ impl fmt::Display for EngineError {
 
 impl Error for EngineError {}
 
-/// Synthesis thread count shared by both engines: available parallelism
-/// clamped to 1..=8.
-fn thread_count() -> i32 {
-    std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(1)
-        .clamp(1, 8) as i32
-}
-
 /// Clamp `speed` to 0.5..=2.0 (non-finite values become 1.0).
 pub(crate) fn clamp_speed(speed: f32) -> f32 {
     if speed.is_finite() {
@@ -613,160 +612,77 @@ pub(crate) fn clamp_speed(speed: f32) -> f32 {
     }
 }
 
-/// Loaded Kokoro TTS engine.
+/// Loaded Kokoro TTS engine. Sessions and lazy regional lexicons are serialized.
 pub struct KokoroEngine {
-    tts: OfflineTts,
+    sample_rate: i32,
+    inner: std::sync::Mutex<crate::onnx_tts::Kokoro>,
 }
-
 impl KokoroEngine {
-    /// Load the voice model variant from `models_root/<variant dir>`.
-    pub fn load(models_root: &Path, variant: ModelVariant) -> Result<Self, EngineError> {
-        let dir = models_root.join(variant.dir_name());
-        // The model file is checked first so a bare directory reports the
-        // most actionable missing path.
+    pub fn load(root: &Path, variant: ModelVariant) -> Result<Self, EngineError> {
         for name in variant.required_files() {
-            let path = dir.join(name);
+            let path = root.join(variant.dir_name()).join(name);
             if !path.exists() {
                 return Err(EngineError::MissingModel(path));
             }
         }
-
-        let path_string = |name: &str| dir.join(name).to_string_lossy().into_owned();
-        let num_threads = thread_count();
-        let config = OfflineTtsConfig {
-            model: OfflineTtsModelConfig {
-                kokoro: OfflineTtsKokoroModelConfig {
-                    model: Some(path_string(variant.model_file())),
-                    voices: Some(path_string("voices.bin")),
-                    tokens: Some(path_string("tokens.txt")),
-                    data_dir: Some(path_string("espeak-ng-data")),
-                    dict_dir: Some(path_string("dict")),
-                    lexicon: Some(path_string("lexicon-us-en.txt")),
-                    lang: Some("en-us".to_string()),
-                    ..Default::default()
-                },
-                num_threads,
-                provider: Some("cpu".to_string()),
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-
-        match OfflineTts::create(&config) {
-            Some(tts) => Ok(Self { tts }),
-            None => Err(EngineError::LoadFailed(dir)),
-        }
+        crate::onnx_tts::Kokoro::load(root, variant)
+            .map(|inner| Self {
+                sample_rate: inner.sample_rate,
+                inner: std::sync::Mutex::new(inner),
+            })
+            .map_err(tts_error)
     }
-
-    /// Output sample rate in Hz.
     pub fn sample_rate(&self) -> i32 {
-        self.tts.sample_rate()
+        self.sample_rate
     }
-
-    /// Synthesize `text` with `voice` at `speed`, returning mono samples.
-    ///
-    /// `speed` is clamped to 0.5..=2.0 (non-finite values become 1.0).
     pub fn synthesize(&self, text: &str, voice: &str, speed: f32) -> Result<Vec<f32>, EngineError> {
-        let sid = voice_id(voice).ok_or_else(|| EngineError::UnknownVoice(voice.to_string()))?;
-        // The crate passes text through CString::new().unwrap(), which would
-        // abort the process (panic = "abort") on an interior NUL.
-        let text = text.replace('\0', "");
-        let speed = clamp_speed(speed);
-        let gen_config = GenerationConfig {
-            sid,
-            speed,
-            ..Default::default()
-        };
-        let audio =
-            self.tts
-                .generate_with_config(&text, &gen_config, None::<fn(&[f32], f32) -> bool>);
-        match audio {
-            Some(audio) => {
-                let samples = audio.samples().to_vec();
-                if samples.is_empty() {
-                    Err(EngineError::NoAudio(text))
-                } else {
-                    Ok(samples)
-                }
-            }
-            None => Err(EngineError::NoAudio(text)),
-        }
+        let sid = voice_id(voice).ok_or_else(|| EngineError::UnknownVoice(voice.into()))?;
+        self.inner
+            .lock()
+            .map_err(|_| tts_error("voice session lock failed".into()))?
+            .synthesize(
+                text,
+                sid as usize,
+                voice.starts_with('b'),
+                clamp_speed(speed),
+            )
+            .map_err(tts_error)
     }
 }
-
-/// Loaded Persian Piper (VITS) TTS engine. Each voice is its own single-speaker
-/// model, so synthesis always uses sid 0.
+/// Loaded Persian Piper VITS voice.
 pub struct PiperEngine {
-    tts: OfflineTts,
+    sample_rate: i32,
+    inner: std::sync::Mutex<crate::onnx_tts::Piper>,
 }
-
 impl PiperEngine {
-    /// Load the Persian voice model from `models_root/<voice dir>`.
-    pub fn load(models_root: &Path, voice: PersianVoice) -> Result<Self, EngineError> {
-        let dir = models_root.join(voice.dir_name());
-        // The model file is checked first so a bare directory reports the
-        // most actionable missing path.
+    pub fn load(root: &Path, voice: PersianVoice) -> Result<Self, EngineError> {
         for name in voice.required_files() {
-            let path = dir.join(name);
+            let path = root.join(voice.dir_name()).join(name);
             if !path.exists() {
                 return Err(EngineError::MissingModel(path));
             }
         }
-
-        let path_string = |name: &str| dir.join(name).to_string_lossy().into_owned();
-        let config = OfflineTtsConfig {
-            model: OfflineTtsModelConfig {
-                vits: OfflineTtsVitsModelConfig {
-                    model: Some(path_string(voice.model_file())),
-                    tokens: Some(path_string("tokens.txt")),
-                    data_dir: Some(path_string("espeak-ng-data")),
-                    ..Default::default()
-                },
-                num_threads: thread_count(),
-                provider: Some("cpu".to_string()),
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-
-        match OfflineTts::create(&config) {
-            Some(tts) => Ok(Self { tts }),
-            None => Err(EngineError::PersianLoadFailed(dir)),
-        }
+        crate::onnx_tts::Piper::load(root, voice)
+            .map(|inner| Self {
+                sample_rate: inner.sample_rate,
+                inner: std::sync::Mutex::new(inner),
+            })
+            .map_err(tts_error)
     }
-
-    /// Output sample rate in Hz.
     pub fn sample_rate(&self) -> i32 {
-        self.tts.sample_rate()
+        self.sample_rate
     }
-
-    /// Synthesize `text` at `speed`, returning mono samples.
-    ///
-    /// `speed` is clamped to 0.5..=2.0 (non-finite values become 1.0).
     pub fn synthesize(&self, text: &str, speed: f32) -> Result<Vec<f32>, EngineError> {
-        // The crate passes text through CString::new().unwrap(), which would
-        // abort the process (panic = "abort") on an interior NUL.
-        let text = text.replace('\0', "");
-        let gen_config = GenerationConfig {
-            sid: 0,
-            speed: clamp_speed(speed),
-            ..Default::default()
-        };
-        let audio =
-            self.tts
-                .generate_with_config(&text, &gen_config, None::<fn(&[f32], f32) -> bool>);
-        match audio {
-            Some(audio) => {
-                let samples = audio.samples().to_vec();
-                if samples.is_empty() {
-                    Err(EngineError::NoAudio(text))
-                } else {
-                    Ok(samples)
-                }
-            }
-            None => Err(EngineError::NoAudio(text)),
-        }
+        self.inner
+            .lock()
+            .map_err(|_| tts_error("voice session lock failed".into()))?
+            .synthesize(text, clamp_speed(speed))
+            .map_err(tts_error)
     }
+}
+fn tts_error(message: String) -> EngineError {
+    eprintln!("error: ONNX voice engine: {message}");
+    EngineError::OnnxTts(message)
 }
 
 #[cfg(test)]
@@ -1023,7 +939,7 @@ mod tests {
             if voice.is_piper() {
                 assert_eq!(
                     voice.required_files(),
-                    [file, "tokens.txt", "espeak-ng-data"]
+                    [file, voice.config_file(), "tokens.txt", "espeak-ng-data"]
                 );
                 assert_eq!(
                     voice.url(),

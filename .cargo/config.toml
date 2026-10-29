@@ -2,3 +2,7 @@
 rustflags = ["-C", "target-feature=+crt-static"]
 [target.aarch64-pc-windows-msvc]
 rustflags = ["-C", "target-feature=+crt-static"]
+
+[env]
+# espeak-rs-sys only uses this on MSVC, matching +crt-static above.
+ESPEAK_STATIC_CRT = "1"

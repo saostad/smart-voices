@@ -49,7 +49,7 @@ pub(crate) fn decode_f16_base64(text: &str) -> Result<Vec<f32>, EngineError> {
 }
 
 /// The one ONNX Runtime environment for the process, loaded from the
-/// `libonnxruntime` sherpa-onnx ships next to the executable.
+/// pinned `libonnxruntime` fetched next to the executable.
 pub(crate) fn ort_environment() -> Result<&'static ort::environment::Environment, EngineError> {
     static ENV: OnceLock<Result<ort::environment::Environment, String>> = OnceLock::new();
     ENV.get_or_init(|| {
@@ -65,7 +65,7 @@ pub(crate) fn ort_environment() -> Result<&'static ort::environment::Environment
             }
         }
         Err(format!(
-            "no usable ONNX Runtime library (tried {}): {last_error}",
+            "Run scripts/fetch-onnxruntime.sh (or set ORT_DYLIB_PATH) to install ONNX Runtime. No usable library (tried {}): {last_error}",
             candidates
                 .iter()
                 .map(|p| p.display().to_string())

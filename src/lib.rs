@@ -21,3 +21,9 @@ pub mod sanitize;
 pub mod settings;
 pub mod shortcuts;
 pub mod word_timing;
+
+mod misaki;
+
+mod espeak;
+
+mod onnx_tts;

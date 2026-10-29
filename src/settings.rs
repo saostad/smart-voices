@@ -75,6 +75,16 @@ pub struct Settings {
     pub phonon_voice: String,
     /// Speech speed multiplier.
     pub speed: f32,
+    /// Pause duration multiplier, in 0.01..=10.
+    pub silence_scale: f32,
+    /// Minimum pause duration in seconds.
+    pub pause_min_seconds: f32,
+    /// Maximum absolute amplitude considered silence.
+    pub pause_amplitude: f32,
+    /// Playback resampler cutoff relative to the lower Nyquist frequency.
+    pub resample_cutoff_ratio: f32,
+    /// Windowed-sinc zero crossings (quality/work tradeoff).
+    pub resample_filter_zeros: u32,
     /// Model variant.
     pub model: ModelVariant,
     /// Persian voice (serialized as its id, e.g. `"amir"`).
@@ -99,6 +109,11 @@ impl Default for Settings {
             voice: DEFAULT_VOICE.to_string(),
             phonon_voice: DEFAULT_PHONON_VOICE.to_string(),
             speed: 1.0,
+            silence_scale: 0.2,
+            pause_min_seconds: 0.2,
+            pause_amplitude: 0.01,
+            resample_cutoff_ratio: 0.99,
+            resample_filter_zeros: 6,
             model: ModelVariant::Fast,
             persian_voice: PersianVoice::PocketV2,
             watch_clipboard: true,
@@ -112,6 +127,28 @@ impl Default for Settings {
 }
 
 impl Settings {
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.silence_scale.is_finite() || !(0.01..=10.).contains(&self.silence_scale) {
+            return Err("silence_scale must be between 0.01 and 10".into());
+        }
+        if !self.pause_min_seconds.is_finite() || self.pause_min_seconds <= 0. {
+            return Err("pause_min_seconds must be positive and finite".into());
+        }
+        if !self.pause_amplitude.is_finite() || !(0.0..=1.).contains(&self.pause_amplitude) {
+            return Err("pause_amplitude must be between 0 and 1".into());
+        }
+        if !self.resample_cutoff_ratio.is_finite()
+            || !(0.0..=1.0).contains(&self.resample_cutoff_ratio)
+            || self.resample_cutoff_ratio == 0.
+        {
+            return Err("resample_cutoff_ratio must be positive and at most 1".into());
+        }
+        if !(1..=64).contains(&self.resample_filter_zeros) {
+            return Err("resample_filter_zeros must be between 1 and 64".into());
+        }
+        Ok(())
+    }
+
     /// Load settings from `path`. A missing file yields defaults with no
     /// error; an unreadable or invalid file yields defaults plus an error.
     /// The file is never overwritten here.
@@ -131,7 +168,10 @@ impl Settings {
                 );
             }
         };
-        match toml::from_str(&text) {
+        match toml::from_str::<Settings>(&text).and_then(|s| {
+            s.validate().map_err(serde::de::Error::custom)?;
+            Ok(s)
+        }) {
             Ok(settings) => (settings, None),
             Err(err) => (
                 Settings::default(),
@@ -150,6 +190,7 @@ impl Settings {
             path: path.to_path_buf(),
             message: err,
         };
+        self.validate().map_err(save_err)?;
         if let Some(parent) = path.parent()
             && !parent.as_os_str().is_empty()
         {
@@ -197,6 +238,11 @@ mod tests {
             voice: "bm_lewis".to_string(),
             phonon_voice: "NbpkqMVS3CJeq2j8".to_string(),
             speed: 1.25,
+            silence_scale: 0.2,
+            pause_min_seconds: 0.2,
+            pause_amplitude: 0.01,
+            resample_cutoff_ratio: 0.99,
+            resample_filter_zeros: 6,
             model: ModelVariant::Small,
             persian_voice: PersianVoice::Gyro,
             watch_clipboard: false,
@@ -506,5 +552,28 @@ mod tests {
             }
         }
         assert_eq!(resolved, Some(path));
+    }
+}
+
+#[cfg(test)]
+mod pause_tests {
+    use super::*;
+    #[test]
+    fn pause_validation() {
+        let mut s = Settings::default();
+        assert!(s.validate().is_ok());
+        for v in [f32::NAN, f32::INFINITY, 0., 10.1] {
+            s.silence_scale = v;
+            assert!(s.validate().is_err());
+        }
+        s.silence_scale = 0.01;
+        assert!(s.validate().is_ok());
+        s.silence_scale = 10.;
+        assert!(s.validate().is_ok());
+        s.pause_min_seconds = 0.;
+        assert!(s.validate().is_err());
+        s.pause_min_seconds = 0.2;
+        s.pause_amplitude = -0.1;
+        assert!(s.validate().is_err());
     }
 }

@@ -43,65 +43,19 @@ jobs:
           rm Cargo.toml.bak
           grep -m1 '^version = ' Cargo.toml
 
-      # sherpa-onnx links shared. Left alone, its build script downloads the runtime
-      # libs into target/, where the dependency cache drops them but keeps the build
-      # script's result, so a cached build cannot link. Keep them outside target/.
-      - name: Choose sherpa-onnx runtime
-        id: sherpa
-        shell: bash
-        run: |
-          set -eu
-          VERSION="$(grep -A1 '^name = "sherpa-onnx-sys"$' Cargo.lock | sed -n 's/^version = "\(.*\)"$/\1/p')"
-          case "$RUNNER_OS" in
-            Linux) PLATFORM=linux-x64-shared-lib ;;
-            macOS) PLATFORM=osx-arm64-shared-lib ;;
-            Windows) PLATFORM=win-x64-shared-MT-Release-lib ;;
-          esac
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "stem=sherpa-onnx-v$VERSION-$PLATFORM" >> "$GITHUB_OUTPUT"
-
-      - name: Cache sherpa-onnx runtime
+      - name: Cache ONNX Runtime archive
         uses: actions/cache@v4
         with:
-          path: ~/sherpa-onnx
-          key: ${{ steps.sherpa.outputs.stem }}
+          path: ~/.cache/smart-voices/onnxruntime
+          key: onnxruntime-1.28.2-sherpa-1.13.8-${{ runner.os }}
 
-      - name: Download sherpa-onnx runtime
+      - name: Fetch pinned ONNX Runtime next to binaries
         shell: bash
-        env:
-          VERSION: ${{ steps.sherpa.outputs.version }}
-          STEM: ${{ steps.sherpa.outputs.stem }}
-        run: |
-          set -eu
-          ROOT="$HOME/sherpa-onnx"
-          if [ ! -d "$ROOT/$STEM/lib" ]; then
-            mkdir -p "$ROOT"
-            curl -fsSL -o "$ROOT/$STEM.tar.bz2" "https://github.com/k2-fsa/sherpa-onnx/releases/download/v$VERSION/$STEM.tar.bz2"
-            tar -xjf "$ROOT/$STEM.tar.bz2" -C "$ROOT"
-            rm "$ROOT/$STEM.tar.bz2"
-          fi
-          LIB="$ROOT/$STEM/lib"
-          if [ "$RUNNER_OS" = Windows ]; then LIB="$(cygpath -w "$LIB")"; fi
-          echo "SHERPA_ONNX_LIB_DIR=$LIB" >> "$GITHUB_ENV"
-
-      # The build script copies the runtime libs next to the binaries only when it
-      # runs, which a cached build skips; tests and packaging look for them there.
-      - name: Put runtime libs next to the binaries
-        shell: bash
-        run: |
-          set -eu
-          shopt -s nullglob
-          LIB="$SHERPA_ONNX_LIB_DIR"
-          if [ "$RUNNER_OS" = Windows ]; then LIB="$(cygpath -u "$LIB")"; fi
-          mkdir -p target/debug target/release
-          for f in "$LIB"/*.so* "$LIB"/*.dylib "$LIB"/*.dll; do
-            cp -L "$f" target/debug/
-            cp -L "$f" target/release/
-          done
+        run: scripts/fetch-onnxruntime.sh
 
       - name: Install Linux audio dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config dpkg-dev
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config dpkg-dev cmake libclang-dev
 
       - name: Check formatting
         if: runner.os == 'Linux'
@@ -122,7 +76,7 @@ jobs:
           scripts/package-deb.sh
           mkdir -p dist tarball
           cp target/smart-voices-linux-amd64.deb dist/
-          cp target/release/smart-voices target/release/*.so packaging/linux/smart-voices.desktop packaging/linux/README-linux.txt tarball/
+          cp target/release/smart-voices target/release/libonnxruntime.so* packaging/linux/smart-voices.desktop packaging/linux/README-linux.txt tarball/
           tar -czf dist/smart-voices-linux-x86_64.tar.gz -C tarball .
 
       - name: Package (Windows)

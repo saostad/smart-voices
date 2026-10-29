@@ -286,6 +286,7 @@ struct App {
     phonon_voices_shown: bool,
     persian_voice_items: Vec<(PersianVoice, CheckMenuItem)>,
     speed_items: Vec<(f32, CheckMenuItem)>,
+    pause_items: Vec<(f32, CheckMenuItem)>,
     model_items: Vec<(ModelVariant, CheckMenuItem)>,
     unload_items: Vec<(u32, CheckMenuItem)>,
     edit_pron_item: Option<MenuItem>,
@@ -392,6 +393,7 @@ impl App {
             phonon_voices_shown: false,
             persian_voice_items: Vec::new(),
             speed_items: Vec::new(),
+            pause_items: Vec::new(),
             model_items: Vec::new(),
             unload_items: Vec::new(),
             edit_pron_item: None,
@@ -598,6 +600,18 @@ impl App {
             persian_voice_items.push((voice, item));
         }
 
+        let pause_menu = Submenu::new("Pause Length", true);
+        let mut pause_items = Vec::new();
+        for (value, label) in [
+            (0.1, "Short"),
+            (0.2, "Normal (default)"),
+            (0.5, "Long"),
+            (1.0, "Full model pauses"),
+        ] {
+            let item = CheckMenuItem::new(label, true, value == self.settings.silence_scale, None);
+            pause_menu.append(&item).map_err(menu_build_error)?;
+            pause_items.push((value, item));
+        }
         let speed_menu = Submenu::new("Reading Speed", true);
         let mut speed_items = Vec::with_capacity(SPEEDS.len());
         for speed in SPEEDS {
@@ -657,6 +671,9 @@ impl App {
             .map_err(menu_build_error)?;
         settings_menu
             .append(&persian_voice_menu)
+            .map_err(menu_build_error)?;
+        settings_menu
+            .append(&pause_menu)
             .map_err(menu_build_error)?;
         settings_menu
             .append(&speed_menu)
@@ -747,6 +764,7 @@ impl App {
         self.phonon_voices_shown = phonon_voices_shown;
         self.persian_voice_items = persian_voice_items;
         self.speed_items = speed_items;
+        self.pause_items = pause_items;
         self.model_items = model_items;
         self.unload_items = unload_items;
         self.edit_pron_item = Some(edit_pron_item);
@@ -1438,6 +1456,17 @@ impl App {
             .map(|(voice, _)| *voice)
         {
             self.on_persian_voice_selected(voice);
+        } else if let Some(value) = self
+            .pause_items
+            .iter()
+            .find(|(_, item)| id == item.id())
+            .map(|(v, _)| *v)
+        {
+            self.settings.silence_scale = value;
+            for (v, item) in &self.pause_items {
+                item.set_checked(*v == value);
+            }
+            self.save_settings();
         } else if let Some(speed) = self
             .speed_items
             .iter()
@@ -2101,6 +2130,7 @@ fn download_label(model: ModelId) -> &'static str {
         ModelId::English(ModelVariant::Phonon) => "Downloading Phonon",
         ModelId::Persian(_) => "Downloading Persian voice",
         ModelId::PhononVoices => "Downloading Phonon voices",
+        ModelId::Misaki => "Downloading English pronunciation data",
     }
 }
 
@@ -2109,11 +2139,12 @@ fn download_label(model: ModelId) -> &'static str {
 /// can't be inspected in tests, so the test below pins this list against the
 /// owner-approved layout instead.
 #[cfg(test)]
-fn settings_menu_order() -> [Option<&'static str>; 14] {
+fn settings_menu_order() -> [Option<&'static str>; 15] {
     [
         Some("Voice Model"),
         Some("English Voice"),
         Some("Persian Voice"),
+        Some("Pause Length"),
         Some("Reading Speed"),
         None,
         Some("Launch at Login"),
@@ -2237,6 +2268,7 @@ mod tests {
                 Some("Voice Model"),
                 Some("English Voice"),
                 Some("Persian Voice"),
+                Some("Pause Length"),
                 Some("Reading Speed"),
                 None,
                 Some("Launch at Login"),

@@ -15,8 +15,8 @@
 //! Persian script (capitalized, terminal period); v2 speaks G2P phonemes (no
 //! capitalisation, terminal punctuation or padding).
 //!
-//! Runtime sharing: sherpa-onnx is linked shared, so its `libonnxruntime`
-//! sits next to the executable; `ort` (load-dynamic, API 28) loads that same
+//! Runtime sharing: the pinned `libonnxruntime` sits next to the
+//! executable; `ort` (load-dynamic, API 28) loads that same
 //! library — one ONNX Runtime in the process. If the library or the model
 //! fails to load, the error says so; nothing falls back to Piper.
 
@@ -24,7 +24,7 @@ pub(crate) mod audio;
 pub mod g2p;
 mod mastering;
 pub mod normalize_fa;
-mod runtime;
+pub(crate) mod runtime;
 pub mod sentencepiece;
 mod text;
 pub mod text_v2;
