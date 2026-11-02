@@ -70,6 +70,23 @@ impl Format {
     }
 }
 
+/// Shared installed-model preflight for device-free clients. Never downloads.
+pub fn missing_models(
+    root: &Path,
+    chunks: &[crate::chunk::SpeechChunk],
+    settings: &Settings,
+) -> Vec<crate::models::ModelId> {
+    crate::models::models_for_chunks(
+        chunks,
+        settings.model,
+        settings.persian_voice,
+        &settings.phonon_voice,
+    )
+    .into_iter()
+    .filter(|model| !crate::models::is_installed(root, *model))
+    .collect()
+}
+
 /// Render prepared chunks, selecting the engine by the same language detector
 /// as playback. Mixed sample rates are resampled to the first chunk's rate
 /// unless the caller explicitly requests an output rate.
@@ -80,42 +97,69 @@ pub fn render(
     rate: Option<u32>,
     mut factory: impl FnMut(crate::lang::Lang) -> Result<Box<dyn Synth>, String>,
 ) -> Result<SynthesizedAudio, String> {
+    let chunks = crate::pipeline::prepare(
+        text,
+        &crate::sanitize::SanitizerOptions::default(),
+        pronunciations,
+    );
+    let mut english = None;
+    let mut persian = None;
+    render_chunks(
+        &chunks,
+        settings,
+        pronunciations,
+        rate,
+        |language, text, voice, speed| {
+            let slot = match language {
+                crate::lang::Lang::English => &mut english,
+                crate::lang::Lang::Persian => &mut persian,
+            };
+            if slot.is_none() {
+                *slot = Some(factory(language)?);
+            }
+            slot.as_mut()
+                .ok_or("engine not initialized")?
+                .synthesize(text, voice, speed)
+        },
+    )
+}
+
+pub fn voice_for_language(settings: &Settings, language: crate::lang::Lang) -> &str {
+    match language {
+        crate::lang::Lang::Persian => settings.persian_voice.id(),
+        crate::lang::Lang::English => match settings.model {
+            crate::engine::ModelVariant::Phonon => &settings.phonon_voice,
+            crate::engine::ModelVariant::Paradee => &settings.paradee_voice,
+            _ => &settings.voice,
+        },
+    }
+}
+
+/// Render already prepared chunks; callers may retain engines across invocations.
+pub fn render_chunks(
+    chunks: &[crate::chunk::SpeechChunk],
+    settings: &Settings,
+    pronunciations: &crate::pronounce::Pronunciations,
+    rate: Option<u32>,
+    mut synthesize: impl FnMut(crate::lang::Lang, &str, &str, f32) -> Result<SynthesizedAudio, String>,
+) -> Result<SynthesizedAudio, String> {
     settings.validate_strict()?;
     if rate == Some(0) {
         return Err("sample rate must be positive".into());
     }
+    if chunks.is_empty() {
+        return Err("input contains no speakable text".into());
+    }
     crate::settings::with_invocation(settings, || {
-        let chunks = crate::pipeline::prepare(
-            text,
-            &crate::sanitize::SanitizerOptions::default(),
-            pronunciations,
-        );
-        if chunks.is_empty() {
-            return Err("input contains no speakable text".into());
-        }
-        let mut english = None;
-        let mut persian = None;
         let mut result = SynthesizedAudio {
             samples: Vec::new(),
             sample_rate: rate.unwrap_or(0),
         };
         for chunk in chunks {
             let language = crate::lang::chunk_language(&chunk.text);
-            let (slot, voice) = match language {
-                crate::lang::Lang::English => (
-                    &mut english,
-                    match settings.model {
-                        crate::engine::ModelVariant::Phonon => settings.phonon_voice.as_str(),
-                        crate::engine::ModelVariant::Paradee => settings.paradee_voice.as_str(),
-                        _ => settings.voice.as_str(),
-                    },
-                ),
-                crate::lang::Lang::Persian => (&mut persian, settings.persian_voice.id()),
-            };
-            if slot.is_none() {
-                *slot = Some(factory(language)?);
-            }
-            let mut audio = slot.as_mut().ok_or("engine not initialized")?.synthesize(
+            let voice = voice_for_language(settings, language);
+            let mut audio = synthesize(
+                language,
                 &pronunciations.apply(&chunk.text),
                 voice,
                 settings.speed,

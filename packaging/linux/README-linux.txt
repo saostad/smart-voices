@@ -17,3 +17,10 @@ Notes
 - Clipboard watching needs X11 or XWayland.
 - The first reading downloads the voice model (~350 MB for English,
   ~230 MB more the first time you read Persian).
+
+Headless HTTP API:
+Copy smart-voices-serve.service to ~/.config/systemd/user/ and adjust ExecStart.
+Run systemctl --user daemon-reload, then
+systemctl --user enable --now smart-voices-serve.service.
+Configure server.* defaults with smart-voices config set before starting.
+See the README HTTP API section for authentication and network exposure notes.

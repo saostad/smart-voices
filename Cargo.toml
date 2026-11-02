@@ -12,6 +12,8 @@ name = "smart-voices"
 path = "src/main.rs"
 
 [dependencies]
+tiny_http = "=0.12.0"
+ctrlc = { version = "=3.5.0", features = ["termination"] }
 ptts = { version = "=0.4.0", default-features = false, features = ["hf"] }
 ort = { version = "=2.0.0-rc.14", default-features = false, features = ["std", "load-dynamic", "api-28"] }
 espeak-rs-sys = "=0.2.0"

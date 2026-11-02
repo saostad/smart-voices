@@ -7,9 +7,14 @@ use std::path::Path;
 
 pub const HELP: &str = r#"Usage:
   smart-voices                         Start tray app
+  smart-voices --version               Print package version
   smart-voices synth [TEXT|-] --out PATH|- [--format FORMAT] [--file PATH]
                      [--float] [--sample-rate HZ] [--SETTING VALUE]...
                      [--set dotted.key VALUE]...
+  smart-voices serve [--listen ADDR:PORT] [--token-file PATH]
+                     [--max-concurrency N] [--max-queue N] [--max-chars N]
+                     [--max-body-bytes N] [--idle-unload-secs N] [--max-handlers N]
+                     [--read-timeout-secs N] [--max-header-bytes N] [--accept-poll-ms N]
   smart-voices speak TEXT              Play through speakers (existing flags)
   smart-voices speak TEXT --out PATH   Same as synth
   smart-voices config list [--json]
@@ -29,6 +34,14 @@ mono PCM16, or --float), flac, mp3, ogg/opus (Ogg Opus).
 FLAC/MP3/Opus require ffmpeg on PATH with flac/libmp3lame/libopus encoders.
 Format is inferred from extension; stdout requires --format. No mismatches.
 Output defaults to the first chunk's sample rate; --sample-rate overrides it.
+
+serve defaults (also server.* settings): listen=127.0.0.1:7341, token_file=""
+(auth off), max_concurrency=1, max_queue=4, max_chars=20000,
+max_body_bytes=1048576, idle_unload_secs=1200 (0=never), max_handlers=16,
+read_timeout_secs=10, max_header_bytes=16384, accept_poll_ms=10.
+Without a token, anyone who can reach the port can use the API.
+GET /v1/health, GET /v1/capabilities, POST /v1/speak (JSON).
+Prefer localhost/Tailscale. Requests never download models.
 
 Every Settings key is accepted as --key-name VALUE or --set dotted.key VALUE
 for this invocation only. Run config list for keys/current values and allowed
@@ -125,7 +138,7 @@ fn catalog(model: Option<&str>) -> Result<(), String> {
     );
     Ok(())
 }
-fn pronunciations(path: &Path) -> Result<crate::pronounce::Pronunciations, String> {
+pub(crate) fn pronunciations(path: &Path) -> Result<crate::pronounce::Pronunciations, String> {
     if !path
         .try_exists()
         .map_err(|e| format!("couldn't inspect pronunciation file: {e}"))?
@@ -138,7 +151,7 @@ fn pronunciations(path: &Path) -> Result<crate::pronounce::Pronunciations, Strin
     }
     Ok(dict)
 }
-fn pronunciation_path(path: &Path) -> Result<std::path::PathBuf, String> {
+pub(crate) fn pronunciation_path(path: &Path) -> Result<std::path::PathBuf, String> {
     Ok(path
         .parent()
         .ok_or("settings path has no parent")?
@@ -384,18 +397,11 @@ fn synth(args: &[String], path: &Path) -> Result<(), String> {
         &crate::sanitize::SanitizerOptions::default(),
         &pronunciations,
     );
-    for model in crate::models::models_for_chunks(
-        &chunks,
-        settings.model,
-        settings.persian_voice,
-        &settings.phonon_voice,
-    ) {
-        if !crate::models::is_installed(&root, model) {
-            return Err(format!(
-                "{} is not installed; use smart-voices download with the selected --model / --persian-voice",
-                model.label()
-            ));
-        }
+    if let Some(model) = crate::export::missing_models(&root, &chunks, &settings).first() {
+        return Err(format!(
+            "{} is not installed; use smart-voices download with the selected --model / --persian-voice",
+            model.label()
+        ));
     }
     let audio = crate::export::render(
         &text,
@@ -424,6 +430,10 @@ fn synth(args: &[String], path: &Path) -> Result<(), String> {
     Ok(())
 }
 pub fn run(args: &[String]) -> Result<(), String> {
+    if args == ["--version"] {
+        println!("{}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
     if args.iter().any(|a| a == "--help" || a == "-h") {
         print!("{HELP}");
         return Ok(());
@@ -437,6 +447,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
     }
     let path = crate::settings::settings_path().ok_or("couldn't resolve settings path")?;
     match args.first().map(String::as_str) {
+        Some("serve") => crate::server::run(&args[1..], &path),
         Some("config") => config(&args[1..], &path),
         Some("synth" | "tts") => synth(&args[1..], &path),
         _ => Err(HELP.into()),

@@ -1,0 +1,13 @@
+[Unit]
+Description=Smart Voices headless HTTP API
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/smart-voices serve
+# Optional model location (otherwise the normal per-user directory is used):
+# Environment=SMART_VOICES_MODELS=/path/to/models
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

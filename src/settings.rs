@@ -63,11 +63,76 @@ impl Default for Shortcuts {
     }
 }
 
+/// Headless HTTP service settings. CLI flags override these for one run.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ServerSettings {
+    pub listen: String,
+    /// Empty means authentication is disabled.
+    pub token_file: String,
+    pub max_concurrency: usize,
+    pub max_queue: usize,
+    pub max_handlers: usize,
+    pub read_timeout_secs: u64,
+    pub max_header_bytes: usize,
+    pub accept_poll_ms: u64,
+    pub max_chars: usize,
+    pub max_body_bytes: usize,
+    /// Zero keeps engines loaded indefinitely.
+    pub idle_unload_secs: u64,
+}
+impl Default for ServerSettings {
+    fn default() -> Self {
+        Self {
+            listen: "127.0.0.1:7341".into(),
+            token_file: String::new(),
+            max_concurrency: 1,
+            max_queue: 4,
+            max_handlers: 16,
+            read_timeout_secs: 10,
+            max_header_bytes: 16384,
+            accept_poll_ms: 10,
+            max_chars: 20000,
+            max_body_bytes: 1048576,
+            idle_unload_secs: 1200,
+        }
+    }
+}
+impl ServerSettings {
+    pub fn validate(&self) -> Result<(), String> {
+        self.listen
+            .parse::<std::net::SocketAddr>()
+            .map_err(|_| "server.listen must be an IP address and port")?;
+        if self.read_timeout_secs == 0
+            || self.read_timeout_secs > u32::MAX.into()
+            || self.max_header_bytes == 0
+            || self.accept_poll_ms == 0
+            || self.accept_poll_ms > u32::MAX.into()
+        {
+            return Err("server read timeout and accept poll must be positive and at most u32::MAX; header limit must be positive".into());
+        }
+        if self.max_handlers == 0
+            || self.max_concurrency == 0
+            || self.max_chars == 0
+            || self.max_body_bytes == 0
+        {
+            return Err("server concurrency, character and body limits must be positive".into());
+        }
+        if self.max_concurrency.checked_add(self.max_queue).is_none()
+            || self.max_body_bytes == usize::MAX
+        {
+            return Err("server limits are too large".into());
+        }
+        Ok(())
+    }
+}
+
 /// User settings. Missing file entries fall back to [`Settings::default`];
 /// unknown entries are ignored.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
+    pub server: ServerSettings,
     /// Voice name (see `engine::VOICES`).
     pub voice: String,
     /// Phonon voice id: `"default"` (the checkpoint's own voice) or a
@@ -108,6 +173,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            server: ServerSettings::default(),
             voice: DEFAULT_VOICE.to_string(),
             phonon_voice: DEFAULT_PHONON_VOICE.to_string(),
             paradee_voice: DEFAULT_PARADEE_VOICE.to_string(),
@@ -161,6 +227,7 @@ impl Settings {
     }
 
     pub fn validate(&self) -> Result<(), String> {
+        self.server.validate()?;
         if !self.silence_scale.is_finite() || !(0.01..=10.).contains(&self.silence_scale) {
             return Err("silence_scale must be between 0.01 and 10".into());
         }
@@ -313,6 +380,7 @@ mod tests {
         let dir = unique_temp_dir();
         let path = dir.join("sub").join("settings.toml");
         let settings = Settings {
+            server: ServerSettings::default(),
             voice: "bm_lewis".to_string(),
             phonon_voice: "NbpkqMVS3CJeq2j8".to_string(),
             paradee_voice: "bm_fable".to_string(),

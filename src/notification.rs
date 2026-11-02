@@ -1,6 +1,9 @@
 //! Best-effort native notifications; never block the UI on the desktop service.
 
 pub fn show(summary: &str, body: &str) {
+    if crate::settings::invocation_settings().is_some() {
+        return;
+    }
     let summary = summary.to_string();
     let body = body.to_string();
     std::thread::spawn(move || {

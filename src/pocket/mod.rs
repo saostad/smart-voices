@@ -735,7 +735,7 @@ impl PocketEngine {
         }
         let words: Vec<&str> = text.split_whitespace().collect();
         if depth >= MAX_SPLIT_DEPTH || words.len() < 4 {
-            eprintln!("Pocket TTS: chunk still hit the length cap after splitting: {text}");
+            eprintln!("Pocket TTS: chunk still hit the length cap after splitting");
             return Ok(shortest.unwrap_or_default());
         }
         eprintln!(
@@ -817,8 +817,7 @@ impl PocketEngine {
                 .expect("v2 engine without a pronunciation model");
             let phonemes = g2p.phonemise(&clean)?;
             if phonemes.trim().is_empty() {
-                let preview: String = sentence.chars().take(40).collect();
-                eprintln!("Pocket TTS: no phonemes for {preview}");
+                eprintln!("Pocket TTS: no phonemes for a sentence");
                 continue;
             }
             let translated = translate_phonemes(&phonemes);

@@ -45,7 +45,7 @@ fn run() -> i32 {
             // Best effort: a missing lock must not stop the app.
             InstanceLock::Unavailable => app::run(),
         },
-        Some("synth" | "tts" | "config" | "voices" | "--help" | "-h") => {
+        Some("serve" | "synth" | "tts" | "config" | "voices" | "--version" | "--help" | "-h") => {
             match smart_voices::cli::run(&args) {
                 Ok(()) => 0,
                 Err(error) => {

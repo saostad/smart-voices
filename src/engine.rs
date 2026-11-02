@@ -775,7 +775,11 @@ impl ParadeeEngine {
     }
 }
 fn tts_error(message: String) -> EngineError {
-    eprintln!("error: ONNX voice engine: {message}");
+    if crate::settings::invocation_settings().is_some() {
+        eprintln!("error: ONNX voice engine failed (input-bearing detail redacted)");
+    } else {
+        eprintln!("error: ONNX voice engine: {message}");
+    }
     EngineError::OnnxTts(message)
 }
 

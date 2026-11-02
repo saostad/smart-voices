@@ -270,3 +270,127 @@ Pronunciations reload at the next reading; autostart updates the OS immediately.
 `SMART_VOICES_CONFIG` selects an alternate settings file (the pronunciation file
 is adjacent); `SMART_VOICES_MODELS` selects the models directory.
 Run `smart-voices --help` for the complete CLI usage.
+
+## HTTP API
+
+Run a device-free service with warm, lazy-loaded engines (models are **never**
+downloaded by requests):
+
+```sh
+smart-voices download --model fast
+smart-voices download --persian-voice pocket-v2
+smart-voices serve
+curl http://127.0.0.1:7341/v1/health
+curl http://127.0.0.1:7341/v1/capabilities
+curl http://127.0.0.1:7341/v1/speak -H 'Content-Type: application/json' \
+  -d '{"text":"Hello world.","format":"ogg"}' -o hello.ogg
+curl http://127.0.0.1:7341/v1/speak -H 'Content-Type: application/json' \
+  -d '{"text":"سلام دنیا.","language":"fa","format":"wav"}' -o persian.wav
+curl http://127.0.0.1:7341/v1/speak -H 'Content-Type: application/json' \
+  -d '{"text":"Hello.","timings":true}'
+```
+
+Authentication is optional on **every** listen address. Prefer localhost or a
+Tailscale address. When no token is configured, anything that can reach the
+port can use the service. For a Docker BFF, configure host access explicitly
+(e.g. host.docker.internal with a host-gateway mapping on Linux), bind a
+reachable interface and protect it with a firewall and/or token. Bearer tokens
+over plain HTTP are not encrypted; use Tailscale or a trusted TLS proxy.
+
+```sh
+umask 077
+openssl rand -hex 32 > "$HOME/.config/smart-voices/http-token"
+smart-voices serve --listen 127.0.0.1:7341 \
+  --token-file "$HOME/.config/smart-voices/http-token"
+# Health is always public, even with a token:
+curl http://127.0.0.1:7341/v1/health
+curl http://127.0.0.1:7341/v1/capabilities \
+  -H "Authorization: Bearer $(cat "$HOME/.config/smart-voices/http-token")"
+curl http://127.0.0.1:7341/v1/speak \
+  -H "Authorization: Bearer $(cat "$HOME/.config/smart-voices/http-token")" \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"Hello.","format":"wav"}' -o hello.wav
+```
+
+The token file is trimmed and read once at startup; an empty file is an error.
+Restart after changing it. Tokens, request text and audio are never logged.
+Startup logs address/auth/limits; each request logs method/path/status/time and
+character count. SIGINT/SIGTERM stop admission and drain accepted jobs.
+
+All flags override the matching persisted `server.*` key for this run only.
+For example, `smart-voices config set server.max_chars 20000`.
+The settings table and defaults are:
+
+| Flag | Settings key | Default | Validation |
+|---|---|---|---|
+| --listen | server.listen | 127.0.0.1:7341 | IP address:port (IPv6 in brackets) |
+| --token-file | server.token_file | "" (auth off) | readable nonempty file when set |
+| --max-concurrency | server.max_concurrency | 1 | positive integer |
+| --read-timeout-secs | server.read_timeout_secs | 10 | positive seconds, at most u32::MAX; total headers/body deadline |
+| --max-header-bytes | server.max_header_bytes | 16384 | positive integer |
+| --accept-poll-ms | server.accept_poll_ms | 10 | positive milliseconds, at most u32::MAX; accept/shutdown polling interval |
+| --max-handlers | server.max_handlers | 16 | positive integer; simultaneous request handlers |
+| --max-queue | server.max_queue | 4 | nonnegative integer |
+| --max-chars | server.max_chars | 20000 | positive Unicode character count |
+| --max-body-bytes | server.max_body_bytes | 1048576 (1 MiB) | positive integer |
+| --idle-unload-secs | server.idle_unload_secs | 1200 | nonnegative integer; 0 keeps engines warm |
+
+`GET /v1/health` returns contract/version/ready/missing/auth/modelsLoaded.
+It is always unauthenticated. `ready` is true only when the configured English
+model (including support data) and Persian voice are installed; `missing` lists
+the missing model labels (empty when ready). This uses filesystem checks only.
+Request body reads run in separate handlers bounded by `max_handlers`; overflow
+returns 429 without reading its body. Headers and body share a total read deadline
+(`read_timeout_secs`); header size is bounded by `max_header_bytes`.
+Connections close after one response; send `Content-Length` for request bodies.
+Chunked transfer encoding is rejected with 400. Shutdown drains admitted synthesis
+jobs, not uploads.
+`GET /v1/capabilities` lists English and Persian models, installation state,
+voices, available encoders, languages and limits. WAV is built in; Ogg Opus
+and MP3 require ffmpeg with libopus/libmp3lame.
+
+`POST /v1/speak` accepts JSON only; unknown fields are rejected:
+
+| Field | Meaning |
+|---|---|
+| text | Required, nonempty after cleanup |
+| language | auto (default), en, fa; auto switches per chunk as the CLI does |
+| voice | Persian voice id overrides persian_voice for this request; otherwise an English voice id for the configured model. See /v1/capabilities for valid ids; never persisted |
+| speed | Optional 0.5–2 multiplier |
+| format | ogg (default, Opus), wav, mp3 |
+| input | markdown (default sanitizer), plain (whitespace cleanup only) |
+| maxChars | Optional positive limit no greater than the service limit |
+| timings | false (default) returns audio; true returns JSON with base64 audio |
+
+Explicit en/fa reject chunks detected in the other language with code 7;
+use auto for mixed text. Per-request settings never modify settings.toml.
+Audio responses include Content-Type, X-Contract, X-Duration-Sec, X-Voice,
+X-Model, X-Language (en/fa/mixed), X-Sample-Rate. Mixed metadata joins voice
+and model IDs with commas. Timings JSON includes contract, version, mimeType,
+durationSec, language, voice, model, sampleRate, audioBase64, words and
+wordsAvailable. The engines have no real timestamps: words is [] and
+wordsAvailable is false, rather than estimated timestamps.
+
+Every error uses
+`{"contract":1,"error":{"code":2,"kind":"invalid_request","message":"..."}}`.
+Clients should branch on code, which is null for transport/auth errors.
+
+| HTTP | code | Meaning |
+|---|---|---|
+| 400 | 2 | Bad JSON, unknown field, invalid enum/range |
+| 401 | null | Missing/wrong bearer token; WWW-Authenticate: Bearer |
+| 404 / 405 | null | Unknown route / wrong method |
+| 413 | 5 | Body or effective character limit exceeded |
+| 415 | 4 | Non-JSON content type or requested encoder unavailable |
+| 422 | 4 | Empty text after cleanup |
+| 422 | 7 | Requested language cannot serve detected text |
+| 429 | null | Queue full; Retry-After: 1 (seconds) |
+| 500 | 6 | Synthesis or encoding failed |
+| 503 | 3 | Required model missing; message gives the exact download command |
+
+For a systemd user service, copy
+`packaging/linux/smart-voices-serve.service` to
+`~/.config/systemd/user/`, adjust ExecStart to your binary path, then run
+`systemctl --user daemon-reload` and
+`systemctl --user enable --now smart-voices-serve.service`.
+Set server defaults with `config set` before starting it.
