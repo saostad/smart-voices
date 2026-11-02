@@ -443,6 +443,14 @@ impl<R: Read, F: FnMut(u64, Option<u64>)> Read for ProgressReader<R, F> {
     }
 }
 
+/// Shared model storage resolution for tray and CLI clients.
+pub fn models_root() -> Option<std::path::PathBuf> {
+    match std::env::var("SMART_VOICES_MODELS") {
+        Ok(dir) if !dir.is_empty() => Some(std::path::PathBuf::from(dir)),
+        _ => dirs::data_dir().map(|dir| dir.join("smart-voices").join("models")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

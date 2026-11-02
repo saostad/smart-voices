@@ -1,0 +1,509 @@
+//! CLI services. Settings serialization provides one source of truth for keys.
+use crate::settings::Settings;
+use serde_json::Value;
+use std::collections::BTreeMap;
+use std::io::{IsTerminal, Write};
+use std::path::Path;
+
+pub const HELP: &str = r#"Usage:
+  smart-voices                         Start tray app
+  smart-voices synth [TEXT|-] --out PATH|- [--format FORMAT] [--file PATH]
+                     [--float] [--sample-rate HZ] [--SETTING VALUE]...
+                     [--set dotted.key VALUE]...
+  smart-voices speak TEXT              Play through speakers (existing flags)
+  smart-voices speak TEXT --out PATH   Same as synth
+  smart-voices config list [--json]
+  smart-voices config get KEY
+  smart-voices config set KEY VALUE
+  smart-voices config reset [KEY]
+  smart-voices config path
+  smart-voices voices [--model fast|small|phonon|paradee]
+  smart-voices download [--model MODEL] [--persian] [--persian-voice ID]
+  smart-voices clean [FILE]
+  smart-voices watch [--auto-read]
+  smart-voices reader-preview OUT.bmp [--dark] [--width N] [--height N] [--scale N]
+
+TEXT may be omitted when stdin is piped. Use -- before text starting with --.
+Formats: wav (signed PCM16, or --float for float32), pcm/raw (little-endian
+mono PCM16, or --float), flac, mp3, ogg/opus (Ogg Opus).
+FLAC/MP3/Opus require ffmpeg on PATH with flac/libmp3lame/libopus encoders.
+Format is inferred from extension; stdout requires --format. No mismatches.
+Output defaults to the first chunk's sample rate; --sample-rate overrides it.
+
+Every Settings key is accepted as --key-name VALUE or --set dotted.key VALUE
+for this invocation only. Run config list for keys/current values and allowed
+voice/model values. Speed range: 0.5..2; booleans: true/false.
+Additional config keys: autostart (OS login item), pronunciations (JSON array
+of {written, spoken, case_sensitive, whole_word}); pronunciations.path is read-only.
+config reset without a key resets settings.toml only. Defaults apply when a
+settings file is absent. SMART_VOICES_CONFIG selects an alternate settings file.
+SMART_VOICES_MODELS selects model storage. synth requires installed models;
+use download explicitly. Saved settings require a tray restart; pronunciations
+reload at each reading, autostart changes the OS login item immediately.
+"#;
+
+fn flatten(value: &Value, prefix: &str, out: &mut BTreeMap<String, Value>) {
+    if let Value::Object(map) = value {
+        for (key, value) in map {
+            let key = if prefix.is_empty() {
+                key.clone()
+            } else {
+                format!("{prefix}.{key}")
+            };
+            flatten(value, &key, out);
+        }
+    } else {
+        out.insert(prefix.into(), value.clone());
+    }
+}
+pub fn values(settings: &Settings) -> Result<BTreeMap<String, Value>, String> {
+    let mut out = BTreeMap::new();
+    flatten(
+        &serde_json::to_value(settings).map_err(|e| e.to_string())?,
+        "",
+        &mut out,
+    );
+    Ok(out)
+}
+pub fn set(settings: &mut Settings, key: &str, text: &str) -> Result<(), String> {
+    let mut value = serde_json::to_value(&*settings).map_err(|e| e.to_string())?;
+    let mut slot = &mut value;
+    for part in key.split('.') {
+        slot = slot
+            .get_mut(part)
+            .ok_or_else(|| format!("unknown settings key '{key}'"))?;
+    }
+    if slot.is_object() {
+        return Err("select an individual dotted key".into());
+    }
+    *slot = if slot.is_string() {
+        Value::String(text.into())
+    } else {
+        serde_json::from_str(text).map_err(|e| format!("invalid value for {key}: {e}"))?
+    };
+    let candidate: Settings =
+        serde_json::from_value(value).map_err(|e| format!("invalid value for {key}: {e}"))?;
+    candidate.validate_strict()?;
+    *settings = candidate;
+    Ok(())
+}
+pub fn load(path: &Path) -> Result<Settings, String> {
+    let (settings, error) = Settings::load(path);
+    if let Some(error) = error {
+        return Err(format!(
+            "{error}. Fix the file, or run `smart-voices config reset` to restore defaults"
+        ));
+    }
+    Ok(settings)
+}
+
+fn catalog(model: Option<&str>) -> Result<(), String> {
+    if model.is_none() || matches!(model, Some("fast" | "small")) {
+        println!("fast / small: {}", crate::engine::VOICES.join(", "));
+    }
+    if model.is_none() || model == Some("paradee") {
+        println!("paradee: {}", crate::engine::PARADEE_VOICES.join(", "));
+    }
+    if model.is_none() || model == Some("phonon") {
+        println!("phonon: default");
+        for voice in crate::phonon::PHONON_VOICES {
+            println!("  {} ({})", voice.id, voice.name);
+        }
+    }
+    if let Some(model) = model
+        && crate::engine::ModelVariant::parse(model).is_none()
+    {
+        return Err(format!("unknown model '{model}'"));
+    }
+    println!(
+        "persian_voice: {}",
+        crate::engine::PERSIAN_VOICES
+            .iter()
+            .map(|v| v.id())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    Ok(())
+}
+fn pronunciations(path: &Path) -> Result<crate::pronounce::Pronunciations, String> {
+    if !path
+        .try_exists()
+        .map_err(|e| format!("couldn't inspect pronunciation file: {e}"))?
+    {
+        return Ok(crate::pronounce::Pronunciations::with_defaults());
+    }
+    let (dict, error) = crate::pronounce::Pronunciations::load(path);
+    if let Some(error) = error {
+        return Err(error.to_string());
+    }
+    Ok(dict)
+}
+fn pronunciation_path(path: &Path) -> Result<std::path::PathBuf, String> {
+    Ok(path
+        .parent()
+        .ok_or("settings path has no parent")?
+        .join("pronunciations.toml"))
+}
+fn config(args: &[String], path: &Path) -> Result<(), String> {
+    if args == ["path"] {
+        println!("{}", path.display());
+        return Ok(());
+    }
+    let mut settings = if args == ["reset"] {
+        Settings::default()
+    } else {
+        load(path)?
+    };
+    let words: Vec<&str> = args.iter().map(String::as_str).collect();
+    match words.as_slice() {
+        ["path"] => println!("{}", path.display()),
+        ["get", "pronunciations.path"] => println!("{}", pronunciation_path(path)?.display()),
+        ["get", "autostart"] => println!("{}", crate::autostart::is_enabled()),
+        ["get", "pronunciations"] => println!(
+            "{}",
+            serde_json::to_string_pretty(&pronunciations(&pronunciation_path(path)?)?.entries())
+                .map_err(|e| e.to_string())?
+        ),
+        ["set", "autostart", value] => {
+            crate::autostart::set_enabled(
+                value
+                    .parse::<bool>()
+                    .map_err(|_| "autostart must be true or false")?,
+            )
+            .map_err(|e| e.to_string())?;
+            eprintln!("Launch at Login updated.");
+        }
+        ["reset", "autostart"] => {
+            crate::autostart::set_enabled(false).map_err(|e| e.to_string())?;
+            eprintln!("Launch at Login disabled.");
+        }
+        ["set", "pronunciations", value] => {
+            let entries: Vec<crate::pronounce::PronunciationEntry> = serde_json::from_str(value)
+                .map_err(|e| format!("invalid pronunciation JSON: {e}"))?;
+            if entries
+                .iter()
+                .any(|e| e.written.trim().is_empty() || e.spoken.trim().is_empty())
+            {
+                return Err("pronunciation written and spoken text must be nonempty".into());
+            }
+            crate::pronounce::Pronunciations::new(entries)
+                .save(&pronunciation_path(path)?)
+                .map_err(|e| e.to_string())?;
+            eprintln!("Pronunciations saved; tray reloads them at the next reading.");
+        }
+        ["reset", "pronunciations"] => {
+            crate::pronounce::Pronunciations::with_defaults()
+                .save(&pronunciation_path(path)?)
+                .map_err(|e| e.to_string())?;
+            eprintln!("Pronunciations reset; tray reloads them at the next reading.");
+        }
+        ["list"] | ["list", "--json"] => {
+            let mut all = values(&settings)?;
+            all.insert(
+                "autostart".into(),
+                Value::Bool(crate::autostart::is_enabled()),
+            );
+            all.insert(
+                "pronunciations.path".into(),
+                Value::String(pronunciation_path(path)?.display().to_string()),
+            );
+            all.insert(
+                "pronunciations".into(),
+                serde_json::to_value(pronunciations(&pronunciation_path(path)?)?.entries())
+                    .map_err(|e| e.to_string())?,
+            );
+            if words.len() == 2 {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&all).map_err(|e| e.to_string())?
+                );
+            } else {
+                for (key, value) in all {
+                    println!("{key} = {value}");
+                }
+                catalog(None)?;
+                println!("model: fast, small, phonon, paradee");
+            }
+        }
+        ["get", key] => println!(
+            "{}",
+            values(&settings)?
+                .get(*key)
+                .ok_or_else(|| format!("unknown settings key '{key}'"))?
+        ),
+        ["set", key, value] => {
+            set(&mut settings, key, value)?;
+            settings.save(path).map_err(|e| e.to_string())?;
+            eprintln!(
+                "Settings saved. Restart the tray app to apply; a running tray may overwrite external changes."
+            );
+        }
+        ["reset"] | ["reset", _] => {
+            if let Some(key) = words.get(1) {
+                let defaults = values(&Settings::default())?;
+                let value = defaults
+                    .get(*key)
+                    .ok_or_else(|| format!("unknown settings key '{key}'"))?;
+                let text = value
+                    .as_str()
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| value.to_string());
+                set(&mut settings, key, &text)?;
+            } else {
+                settings = Settings::default();
+            }
+            settings.save(path).map_err(|e| e.to_string())?;
+            eprintln!(
+                "Settings reset. Restart the tray app to apply; a running tray may overwrite external changes."
+            );
+        }
+        _ => {
+            return Err(
+                "usage: config list [--json] | get KEY | set KEY VALUE | reset [KEY] | path".into(),
+            );
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug, Default)]
+pub struct SynthArgs {
+    pub text: Option<String>,
+    pub file: Option<String>,
+    pub output: String,
+    pub format: Option<String>,
+    pub float: bool,
+    pub rate: Option<u32>,
+    pub overrides: Vec<(String, String)>,
+}
+pub fn parse_synth(args: &[String]) -> Result<SynthArgs, String> {
+    let mut parsed = SynthArgs::default();
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        let mut next = || {
+            args.next()
+                .cloned()
+                .ok_or_else(|| format!("{arg} requires a value"))
+        };
+        match arg.as_str() {
+            "--out" | "-o" => parsed.output = next()?,
+            "--format" => parsed.format = Some(next()?),
+            "--file" => parsed.file = Some(next()?),
+            "--float" => parsed.float = true,
+            // Accepted for `speak --out` compatibility; export always reports what it wrote.
+            "--verbose" => {}
+            "--voice" => parsed.overrides.push(("__voice".into(), next()?)),
+            "--sample-rate" => {
+                let rate = next()?
+                    .parse::<u32>()
+                    .map_err(|_| "sample rate must be a positive integer")?;
+                if rate == 0 {
+                    return Err("sample rate must be positive".into());
+                }
+                parsed.rate = Some(rate);
+            }
+            "--set" => {
+                let key = next()?;
+                let value = next()?;
+                parsed.overrides.push((key, value));
+            }
+            "--" => {
+                if parsed.text.is_some() {
+                    return Err("only one text argument is allowed".into());
+                }
+                parsed.text = Some(next()?);
+                if args.next().is_some() {
+                    return Err("only one text argument is allowed".into());
+                }
+                break;
+            }
+            flag if flag.starts_with("--") => {
+                parsed
+                    .overrides
+                    .push((flag[2..].replace('-', "_"), next()?));
+            }
+            text => {
+                if parsed.text.replace(text.into()).is_some() {
+                    return Err("only one text argument is allowed".into());
+                }
+            }
+        }
+    }
+    if parsed.output.is_empty() {
+        return Err("synth requires --out PATH (or --out -)".into());
+    }
+    if parsed.file.is_some() && parsed.text.is_some() {
+        return Err("--file and positional text are mutually exclusive".into());
+    }
+    Ok(parsed)
+}
+fn synth(args: &[String], path: &Path) -> Result<(), String> {
+    let options = parse_synth(args)?;
+    let format = crate::export::Format::resolve(&options.output, options.format.as_deref())?;
+    if options.float
+        && !matches!(
+            format,
+            crate::export::Format::Wav | crate::export::Format::Pcm
+        )
+    {
+        return Err("--float is supported only for WAV and raw PCM".into());
+    }
+    format.check_encoder()?;
+    let mut settings = load(path)?;
+    for (key, value) in &options.overrides {
+        if key != "__voice" {
+            set(&mut settings, key, value)?;
+        }
+    }
+    for (key, value) in &options.overrides {
+        if key == "__voice" {
+            let key = match settings.model {
+                crate::engine::ModelVariant::Phonon => "phonon_voice",
+                crate::engine::ModelVariant::Paradee => "paradee_voice",
+                _ => "voice",
+            };
+            set(&mut settings, key, value)?;
+        }
+    }
+    let text = match (options.text.as_deref(), options.file.as_deref()) {
+        (_, Some(file)) => std::fs::read_to_string(file)
+            .map_err(|e| format!("couldn't read text file {file}: {e}"))?,
+        (Some("-"), _) | (None, _) => {
+            if std::io::stdin().is_terminal() {
+                return Err("provide TEXT, --file PATH, or pipe stdin".into());
+            }
+            std::io::read_to_string(std::io::stdin())
+                .map_err(|e| format!("couldn't read stdin: {e}"))?
+        }
+        (Some(text), _) => text.into(),
+    };
+    let pronunciations = pronunciations(&pronunciation_path(path)?)?;
+    let root = crate::models::models_root().ok_or("couldn't resolve models directory")?;
+    let chunks = crate::pipeline::prepare(
+        &text,
+        &crate::sanitize::SanitizerOptions::default(),
+        &pronunciations,
+    );
+    for model in crate::models::models_for_chunks(
+        &chunks,
+        settings.model,
+        settings.persian_voice,
+        &settings.phonon_voice,
+    ) {
+        if !crate::models::is_installed(&root, model) {
+            return Err(format!(
+                "{} is not installed; use smart-voices download with the selected --model / --persian-voice",
+                model.label()
+            ));
+        }
+    }
+    let audio = crate::export::render(
+        &text,
+        &settings,
+        &pronunciations,
+        options.rate,
+        |language| match language {
+            crate::lang::Lang::English => crate::player::load_english_engine(&root, settings.model),
+            crate::lang::Lang::Persian => {
+                crate::player::load_persian_engine(&root, settings.persian_voice)
+            }
+        },
+    )?;
+    let bytes = crate::export::encode(&audio, format, options.float)?;
+    if options.output == "-" {
+        std::io::stdout()
+            .lock()
+            .write_all(&bytes)
+            .map_err(|e| format!("couldn't write audio to stdout: {e}"))?;
+    } else {
+        // Encode completely before touching the destination, preserving existing files on encoder failure.
+        std::fs::write(&options.output, bytes)
+            .map_err(|e| format!("couldn't write audio to {}: {e}", options.output))?;
+        eprintln!("Wrote {} (mono, {} Hz)", options.output, audio.sample_rate);
+    }
+    Ok(())
+}
+pub fn run(args: &[String]) -> Result<(), String> {
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        print!("{HELP}");
+        return Ok(());
+    }
+    if args.first().is_some_and(|a| a == "voices") {
+        return match &args[1..] {
+            [] => catalog(None),
+            [flag, model] if flag == "--model" => catalog(Some(model)),
+            _ => Err("usage: voices [--model fast|small|phonon|paradee]".into()),
+        };
+    }
+    let path = crate::settings::settings_path().ok_or("couldn't resolve settings path")?;
+    match args.first().map(String::as_str) {
+        Some("config") => config(&args[1..], &path),
+        Some("synth" | "tts") => synth(&args[1..], &path),
+        _ => Err(HELP.into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn parser_checks_inputs_and_overrides() {
+        let args = |s: &[&str]| s.iter().map(|s| (*s).to_string()).collect::<Vec<_>>();
+        let parsed = parse_synth(&args(&[
+            "-",
+            "-o",
+            "-",
+            "--format",
+            "wav",
+            "--silence-scale",
+            "0.5",
+            "--set",
+            "shortcuts.stop",
+            "",
+        ]))
+        .unwrap();
+        assert_eq!(parsed.text.as_deref(), Some("-"));
+        assert_eq!(parsed.overrides[0], ("silence_scale".into(), "0.5".into()));
+        let parsed = parse_synth(&args(&["hi", "--verbose", "--out", "a.wav"])).unwrap();
+        assert_eq!(parsed.output, "a.wav");
+        assert!(parsed.overrides.is_empty());
+        for invalid in [
+            &["--out"][..],
+            &["hello", "--file", "a", "-o", "b.wav"],
+            &["-o", "b.wav", "--sample-rate", "0"],
+        ] {
+            assert!(parse_synth(&args(invalid)).is_err());
+        }
+    }
+    #[test]
+    fn config_validates_without_mutating_on_failure() {
+        let mut settings = Settings::default();
+        for (key, value) in [
+            ("speed", "0"),
+            ("voice", "invalid"),
+            ("phonon_voice", "invalid"),
+            ("model", "invalid"),
+            ("persian_voice", "invalid"),
+            ("shortcuts.stop", "invalid"),
+            ("silence_scale", "0"),
+            ("resample_filter_zeros", "65"),
+            ("unknown", "true"),
+        ] {
+            let before = settings.clone();
+            assert!(set(&mut settings, key, value).is_err(), "{key}");
+            assert_eq!(settings, before);
+        }
+        set(&mut settings, "speed", "1.25").unwrap();
+        set(&mut settings, "shortcuts.stop", "").unwrap();
+        let dir =
+            std::env::temp_dir().join(format!("smart-voices-cli-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.toml");
+        settings.save(&path).unwrap();
+        assert_eq!(
+            values(&load(&path).unwrap()).unwrap()["speed"],
+            serde_json::json!(1.25)
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}

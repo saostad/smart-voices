@@ -81,7 +81,7 @@ fn resample_to_rate(samples: &[f32], from: u32, to: u32) -> Result<Vec<f32>, Aud
 /// for where the values come from). The defaults (six zero crossings, 0.99
 /// cutoff) match the old Kaldi linear resampler. The cutoff follows the
 /// lower Nyquist rate.
-fn resample_with(
+pub fn resample_with(
     samples: &[f32],
     from: u32,
     to: u32,

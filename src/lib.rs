@@ -27,3 +27,6 @@ mod misaki;
 mod espeak;
 
 mod onnx_tts;
+
+pub mod cli;
+pub mod export;

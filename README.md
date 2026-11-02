@@ -205,3 +205,68 @@ Piper inference scales are read from the tarball’s `<voice>.onnx.json` file
 Playback resampling also accepts `resample_cutoff_ratio = 0.99` (0–1,
 exclusive of 0) and `resample_filter_zeros = 6` (1–64) in settings.toml.
 These retain the old resampler’s cutoff and window defaults.
+
+### Command-line audio export and settings
+
+Generate audio without a tray, desktop session, or audio output device:
+
+```sh
+smart-voices synth "Hello world." -o hello.wav
+smart-voices synth --file article.md -o article.flac --speed 1.25
+printf 'Hello world.' | smart-voices synth -o - --format mp3 > hello.mp3
+smart-voices speak "Hello world." --out hello.ogg --model phonon
+smart-voices synth "Hello." -o float.wav --float --sample-rate 48000
+smart-voices synth "Hello." -o hello.wav --silence-scale 0.5 --set resample_filter_zeros 12
+```
+
+Input is one quoted text argument, `--file PATH`, or stdin (text `-`, or
+omitted when piped). Markdown cleanup, pronunciation rules, language detection,
+Persian voice selection and chunk pauses match playback. Use `--` before text
+starting with `--`. Existing `speak TEXT` still plays through speakers.
+
+WAV and raw PCM (`.pcm` / `.raw`) are built in: mono, signed 16-bit
+little-endian by default, or IEEE float32 with `--float`. FLAC, MP3 and Ogg
+Opus (`.ogg` / `.opus`) require **ffmpeg on PATH**, with the `flac`,
+`libmp3lame` and `libopus` encoders respectively. No substitute format is
+written if an encoder is missing. These external encoders add no bundled
+dependencies or licensing changes to the app binary; your ffmpeg distribution
+has its own license. Its default compression settings apply. Output extension
+selects the format; `--format` must agree if supplied. Stdout and extensionless
+paths require `--format`. Progress/errors go to stderr; stdout contains audio
+only for `--out -`. Output uses the first chunk's sample rate by default;
+mixed-rate chunks are resampled with the configured filter.
+
+Export requires installed models and never downloads them implicitly. Discover
+models/voices with `smart-voices voices` or `voices --model phonon`; install
+with `smart-voices download --model phonon` (or another model), and
+`download --persian-voice pocket-v2` for Persian. All settings use saved defaults.
+Override any Settings key for one export with `--key-name VALUE` or
+`--set dotted.key VALUE`. For example `--phonon-voice default`,
+`--persian-voice amir`, `--pause-min-seconds 0.1`, or
+`--set shortcuts.stop ""`. Desktop-only settings have no effect on file export.
+
+```sh
+smart-voices config list                 # All values and voice/model catalogs
+smart-voices config list --json          # Machine-readable values
+smart-voices config get shortcuts.stop
+smart-voices config set speed 1.25
+smart-voices config set shortcuts.stop 'ctrl+alt+Q'
+smart-voices config set autostart true   # OS Launch at Login setting
+smart-voices config get pronunciations
+smart-voices config set pronunciations '[{"written":"SQL","spoken":"sequel","case_sensitive":false,"whole_word":true}]'
+smart-voices config get pronunciations.path
+smart-voices config reset speed
+smart-voices config reset                # Reset settings.toml, keeping dictionary/login item
+smart-voices config path
+```
+
+Settings changes are validated by the same service used when loading/saving UI
+settings. Speed must be 0.5–2; voice/model values must be catalog IDs. Shortcut
+values use the app's existing shortcut parser; an empty string disables one.
+Pronunciation set replaces the full dictionary; reset restores built-in rules.
+Autostart reset disables Launch at Login. Restart a running tray app after
+editing settings: it holds settings in memory and may overwrite external edits.
+Pronunciations reload at the next reading; autostart updates the OS immediately.
+`SMART_VOICES_CONFIG` selects an alternate settings file (the pronunciation file
+is adjacent); `SMART_VOICES_MODELS` selects the models directory.
+Run `smart-voices --help` for the complete CLI usage.

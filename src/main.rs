@@ -17,7 +17,7 @@ use smart_voices::reader::render::{Frame, Painter, Theme};
 use smart_voices::sanitize::SanitizerOptions;
 use smart_voices::settings::{Settings, settings_path};
 
-const USAGE: &str = "Usage: smart-voices (starts the tray app)\n       smart-voices speak \"<text>\" [--voice <name>] [--speed <f>] [--model fast|small|phonon|paradee] [--persian-voice <id>] [--verbose]\n       smart-voices download [--model fast|small|phonon|paradee] [--persian] [--persian-voice <id>]\n       smart-voices clean [<file>]\n       smart-voices watch [--auto-read]\n       smart-voices reader-preview <out.bmp> [--dark] [--width 440] [--height 300] [--scale 2]";
+const USAGE: &str = "Usage: smart-voices (starts the tray app)\n       smart-voices speak \"<text>\" [--voice <name>] [--speed <f>] [--model fast|small|phonon|paradee] [--persian-voice <id>] [--verbose] [--out PATH|-]\n       smart-voices synth [TEXT|-] --out PATH|- [--format wav|pcm|flac|mp3|ogg|opus] [--file PATH] [--SETTING VALUE]\n       smart-voices config list|get|set|reset|path\n       smart-voices voices [--model MODEL]\n       smart-voices download [--model fast|small|phonon|paradee] [--persian] [--persian-voice <id>]\n       smart-voices clean [<file>]\n       smart-voices watch [--auto-read]\n       smart-voices reader-preview <out.bmp> [--dark] [--width 440] [--height 300] [--scale 2]\nFull help: smart-voices --help";
 
 fn main() {
     std::process::exit(run());
@@ -45,6 +45,26 @@ fn run() -> i32 {
             // Best effort: a missing lock must not stop the app.
             InstanceLock::Unavailable => app::run(),
         },
+        Some("synth" | "tts" | "config" | "voices" | "--help" | "-h") => {
+            match smart_voices::cli::run(&args) {
+                Ok(()) => 0,
+                Err(error) => {
+                    eprintln!("error: CLI operation failed: {error}");
+                    1
+                }
+            }
+        }
+        Some("speak") if args.iter().any(|a| a == "--out" || a == "-o") => {
+            let mut args = args.clone();
+            args[0] = "synth".into();
+            match smart_voices::cli::run(&args) {
+                Ok(()) => 0,
+                Err(error) => {
+                    eprintln!("error: CLI operation failed: {error}");
+                    1
+                }
+            }
+        }
         Some("speak") => speak(&args[1..]),
         Some("download") => download_cmd(&args[1..]),
         Some("clean") => clean(&args[1..]),

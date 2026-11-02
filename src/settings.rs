@@ -130,6 +130,36 @@ impl Default for Settings {
 }
 
 impl Settings {
+    /// Stricter check for values written from the CLI: speed range, voice
+    /// catalogs and shortcut syntax on top of [`Settings::validate`]. Kept
+    /// out of `validate` (used by `load`) so one stale voice or bad shortcut
+    /// in an existing file doesn't discard every saved setting; the tray
+    /// already repairs those field by field with a visible notice.
+    pub fn validate_strict(&self) -> Result<(), String> {
+        self.validate()?;
+        if !self.speed.is_finite() || !(0.5..=2.0).contains(&self.speed) {
+            return Err("speed must be between 0.5 and 2".into());
+        }
+        if !crate::engine::VOICES.contains(&self.voice.as_str()) {
+            return Err("unknown voice; run smart-voices voices".into());
+        }
+        if !crate::phonon::is_known_voice(&self.phonon_voice) {
+            return Err("unknown phonon_voice; run smart-voices voices --model phonon".into());
+        }
+        if !crate::engine::is_paradee_voice(&self.paradee_voice) {
+            return Err("unknown paradee_voice; run smart-voices voices --model paradee".into());
+        }
+        for binding in [
+            &self.shortcuts.read_or_pause,
+            &self.shortcuts.stop,
+            &self.shortcuts.next,
+            &self.shortcuts.previous,
+        ] {
+            crate::shortcuts::parse_binding(binding)?;
+        }
+        Ok(())
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         if !self.silence_scale.is_finite() || !(0.01..=10.).contains(&self.silence_scale) {
             return Err("silence_scale must be between 0.01 and 10".into());
@@ -218,9 +248,54 @@ pub fn settings_path() -> Option<PathBuf> {
     }
 }
 
+// A scoped override lets synchronous CLI synthesis share the app's dynamic
+// pause settings without changing the environment or writing a settings file.
+thread_local! {
+    static INVOCATION: std::cell::RefCell<Option<Settings>> = const { std::cell::RefCell::new(None) };
+}
+pub(crate) fn invocation_settings() -> Option<Settings> {
+    INVOCATION.with(|slot| slot.borrow().clone())
+}
+pub(crate) fn with_invocation<T>(settings: &Settings, f: impl FnOnce() -> T) -> T {
+    struct Restore(Option<Settings>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            INVOCATION.with(|slot| *slot.borrow_mut() = self.0.take());
+        }
+    }
+    let _restore = Restore(INVOCATION.with(|slot| slot.replace(Some(settings.clone()))));
+    f()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn load_keeps_file_with_stale_voice_and_bad_shortcut() {
+        // The tray repairs these field by field; load must not discard the
+        // whole file. Only the CLI's strict check rejects them.
+        let settings = Settings {
+            speed: 1.5,
+            phonon_voice: "retired-voice".into(),
+            shortcuts: Shortcuts {
+                stop: "ctrl+alt+frobnicate".into(),
+                ..Shortcuts::default()
+            },
+            ..Settings::default()
+        };
+        let dir = std::env::temp_dir().join(format!(
+            "smart-voices-stale-settings-{}",
+            std::process::id()
+        ));
+        let path = dir.join("settings.toml");
+        settings.save(&path).unwrap();
+        let (loaded, err) = Settings::load(&path);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(err.is_none(), "{err:?}");
+        assert_eq!(loaded, settings);
+        assert!(settings.validate_strict().is_err());
+    }
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static TEST_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);

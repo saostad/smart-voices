@@ -126,6 +126,9 @@ fn pause_values_from(path: Option<&Path>) -> (f32, f32, f32) {
     )
 }
 fn pause_values() -> (f32, f32, f32) {
+    if let Some(s) = crate::settings::invocation_settings() {
+        return (s.silence_scale, s.pause_min_seconds, s.pause_amplitude);
+    }
     pause_values_from(crate::settings::settings_path().as_deref())
 }
 /// The espeak fallback notice is shown once per process: unknown words and
