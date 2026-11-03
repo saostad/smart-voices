@@ -329,6 +329,9 @@ The settings table and defaults are:
 | --read-timeout-secs | server.read_timeout_secs | 10 | positive seconds, at most u32::MAX; total headers/body deadline |
 | --max-header-bytes | server.max_header_bytes | 16384 | positive integer |
 | --accept-poll-ms | server.accept_poll_ms | 10 | positive milliseconds, at most u32::MAX; accept/shutdown polling interval |
+| --linger-drain-bytes | server.linger_drain_bytes | 1048576 | positive integer |
+| --linger-secs | server.linger_secs | 2 | positive seconds, at most u32::MAX |
+| --max-lingering-rejections | server.max_lingering_rejections | 4 | positive integer |
 | --max-handlers | server.max_handlers | 16 | positive integer; simultaneous request handlers |
 | --max-queue | server.max_queue | 4 | nonnegative integer |
 | --max-chars | server.max_chars | 20000 | positive Unicode character count |
@@ -394,3 +397,9 @@ For a systemd user service, copy
 `systemctl --user daemon-reload` and
 `systemctl --user enable --now smart-voices-serve.service`.
 Set server defaults with `config set` before starting it.
+
+Early HTTP rejections send the full response and FIN, then discard incoming bytes
+until EOF, `server.linger_drain_bytes`, or `server.linger_secs`. Overflow
+rejections run outside the accept loop, bounded by `server.max_lingering_rejections`.
+If both handler and rejection capacity are exhausted, new sockets are closed
+without a response and a warning is logged. Fully consumed requests close immediately.

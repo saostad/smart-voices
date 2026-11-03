@@ -15,6 +15,7 @@ pub const HELP: &str = r#"Usage:
                      [--max-concurrency N] [--max-queue N] [--max-chars N]
                      [--max-body-bytes N] [--idle-unload-secs N] [--max-handlers N]
                      [--read-timeout-secs N] [--max-header-bytes N] [--accept-poll-ms N]
+                     [--linger-drain-bytes N] [--linger-secs N] [--max-lingering-rejections N]
   smart-voices speak TEXT              Play through speakers (existing flags)
   smart-voices speak TEXT --out PATH   Same as synth
   smart-voices config list [--json]
@@ -38,7 +39,8 @@ Output defaults to the first chunk's sample rate; --sample-rate overrides it.
 serve defaults (also server.* settings): listen=127.0.0.1:7341, token_file=""
 (auth off), max_concurrency=1, max_queue=4, max_chars=20000,
 max_body_bytes=1048576, idle_unload_secs=1200 (0=never), max_handlers=16,
-read_timeout_secs=10, max_header_bytes=16384, accept_poll_ms=10.
+read_timeout_secs=10, max_header_bytes=16384, accept_poll_ms=10,
+linger_drain_bytes=1048576, linger_secs=2, max_lingering_rejections=4.
 Without a token, anyone who can reach the port can use the API.
 GET /v1/health, GET /v1/capabilities, POST /v1/speak (JSON).
 Prefer localhost/Tailscale. Requests never download models.

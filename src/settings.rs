@@ -73,6 +73,9 @@ pub struct ServerSettings {
     pub max_concurrency: usize,
     pub max_queue: usize,
     pub max_handlers: usize,
+    pub linger_drain_bytes: usize,
+    pub linger_secs: u64,
+    pub max_lingering_rejections: usize,
     pub read_timeout_secs: u64,
     pub max_header_bytes: usize,
     pub accept_poll_ms: u64,
@@ -89,6 +92,9 @@ impl Default for ServerSettings {
             max_concurrency: 1,
             max_queue: 4,
             max_handlers: 16,
+            linger_drain_bytes: 1048576,
+            linger_secs: 2,
+            max_lingering_rejections: 4,
             read_timeout_secs: 10,
             max_header_bytes: 16384,
             accept_poll_ms: 10,
@@ -100,6 +106,13 @@ impl Default for ServerSettings {
 }
 impl ServerSettings {
     pub fn validate(&self) -> Result<(), String> {
+        if self.linger_secs == 0
+            || self.linger_secs > u32::MAX.into()
+            || self.linger_drain_bytes == 0
+            || self.max_lingering_rejections == 0
+        {
+            return Err("server linger_secs must be positive and at most u32::MAX; linger_drain_bytes and max_lingering_rejections must be positive".into());
+        }
         self.listen
             .parse::<std::net::SocketAddr>()
             .map_err(|_| "server.listen must be an IP address and port")?;

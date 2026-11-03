@@ -597,6 +597,10 @@ pub fn run(args: &[String], path: &Path) -> Result<(), String> {
             "--max-concurrency" => "max_concurrency",
             "--max-queue" => "max_queue",
             "--max-handlers" => "max_handlers",
+            "--linger-drain-bytes" => "linger_drain_bytes",
+            "--linger-secs" => "linger_secs",
+            "--max-lingering-rejections" => "max_lingering_rejections",
+
             "--read-timeout-secs" => "read_timeout_secs",
             "--max-header-bytes" => "max_header_bytes",
             "--accept-poll-ms" => "accept_poll_ms",
@@ -675,25 +679,41 @@ fn serve_http(
     let caps = Arc::new(caps);
     let settings = Arc::new(settings);
     let handlers = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let mut rejections = Vec::new();
     while !stop.load(Ordering::Relaxed) {
+        rejections.retain(|thread: &std::thread::JoinHandle<()>| !thread.is_finished());
         let Some(request) = server
             .recv_timeout(Duration::from_millis(settings.server.accept_poll_ms))
             .map_err(|e| format!("HTTP receive failed: {e}"))?
         else {
             continue;
         };
+        let mut request = request;
+        request.configure_close(
+            settings.server.linger_drain_bytes,
+            Duration::from_secs(settings.server.linger_secs),
+        );
         if handlers.load(Ordering::Acquire) >= settings.server.max_handlers {
-            respond(
-                request,
-                Reply::error(ApiError::new(
-                    429,
-                    None,
-                    "queue_full",
-                    "Service is busy; retry later",
-                )),
-                Instant::now(),
-                0,
-            );
+            if rejections.len() >= settings.server.max_lingering_rejections {
+                eprintln!(
+                    "warn: fallback=true HTTP rejection capacity exhausted; closing connection without response"
+                );
+                drop(request);
+                continue;
+            }
+            rejections.push(std::thread::spawn(move || {
+                respond(
+                    request,
+                    Reply::error(ApiError::new(
+                        429,
+                        None,
+                        "queue_full",
+                        "Service is busy; retry later",
+                    )),
+                    Instant::now(),
+                    0,
+                );
+            }));
             continue;
         }
         handlers.fetch_add(1, Ordering::AcqRel);
@@ -856,6 +876,11 @@ fn serve_http(
             }
         });
     }
+    for rejection in rejections {
+        rejection
+            .join()
+            .map_err(|_| "HTTP rejection handler panicked")?;
+    }
     queue.0.lock().expect("queue lock").closed = true;
     queue.1.notify_all();
     for worker in workers {
@@ -965,6 +990,54 @@ mod tests {
             .unwrap()
     }
     #[test]
+    fn rejected_upload_does_not_hold_health_while_lingering() {
+        let mut settings = Settings::default();
+        settings.server.max_body_bytes = 16;
+        settings.server.linger_secs = 1;
+        settings.server.linger_drain_bytes = usize::MAX;
+        settings.server.max_handlers = 2;
+        let server = TestServer::start(settings, None, |_| Box::new(Fake));
+        let mut upload = TcpStream::connect(&server.address).unwrap();
+        upload
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        write!(upload, "POST /v1/speak HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: 100000\r\n\r\npartial").unwrap();
+        let mut response = String::new();
+        upload.read_to_string(&mut response).unwrap();
+        assert!(response.starts_with("HTTP/1.1 413"), "{response}");
+        let (_, body) = response.split_once("\r\n\r\n").unwrap();
+        let json: Value = serde_json::from_str(body).unwrap();
+        assert!(json.get("error").is_some(), "{json}");
+        assert!(
+            server
+                .request("GET", "/v1/health", "", "")
+                .starts_with("HTTP/1.1 200")
+        );
+        let mut sender = upload.try_clone().unwrap();
+        sender
+            .set_write_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        let (done, completion) = std::sync::mpsc::channel();
+        let writer = std::thread::spawn(move || {
+            while sender.write_all(&[0; 4096]).is_ok() {}
+            done.send(()).unwrap();
+        });
+        assert!(
+            server
+                .request("GET", "/v1/health", "", "")
+                .starts_with("HTTP/1.1 200")
+        );
+        completion
+            .recv_timeout(Duration::from_secs(3))
+            .expect("continuous upload outlived linger deadline");
+        writer.join().unwrap();
+        assert!(
+            server
+                .request("GET", "/v1/health", "", "")
+                .starts_with("HTTP/1.1 200")
+        );
+    }
+    #[test]
     fn stalled_body_does_not_block_health_or_capabilities() {
         let server = TestServer::start(Settings::default(), None, |_| Box::new(Fake));
         // A body larger than tiny_http's old eager buffer also exercises the original bug.
@@ -1018,8 +1091,7 @@ mod tests {
             .unwrap();
         write!(overflow, "POST /v1/speak HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 4096\r\n\r\n{{").unwrap();
         fn read_response(stream: &mut TcpStream) -> String {
-            // HTTP clients read Content-Length, not EOF (an unread upload may
-            // cause a TCP reset after the complete rejection response).
+            // Assert the entire framed JSON response while keeping the upload open.
             let mut headers = Vec::new();
             while !headers.ends_with(b"\r\n\r\n") {
                 let mut byte = [0];
@@ -1325,6 +1397,9 @@ mod tests {
             ("max_concurrency", "2"),
             ("max_queue", "0"),
             ("max_handlers", "2"),
+            ("linger_secs", "2"),
+            ("linger_drain_bytes", "1024"),
+            ("max_lingering_rejections", "2"),
             ("read_timeout_secs", "2"),
             ("max_header_bytes", "4096"),
             ("accept_poll_ms", "1"),
@@ -1338,6 +1413,10 @@ mod tests {
             ("listen", "bad"),
             ("max_concurrency", "0"),
             ("max_handlers", "0"),
+            ("linger_secs", "0"),
+            ("linger_secs", "4294967296"),
+            ("linger_drain_bytes", "0"),
+            ("max_lingering_rejections", "0"),
             ("read_timeout_secs", "0"),
             ("read_timeout_secs", "4294967296"),
             ("max_header_bytes", "0"),
