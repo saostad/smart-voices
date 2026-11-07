@@ -160,7 +160,12 @@ pub fn render_chunks(
             let voice = voice_for_language(settings, language);
             let mut audio = synthesize(
                 language,
-                &pronunciations.apply(&chunk.text),
+                &crate::pipeline::spoken_text(
+                    &chunk.text,
+                    language,
+                    pronunciations,
+                    settings.normalize_options(),
+                ),
                 voice,
                 settings.speed,
             )?;

@@ -1,0 +1,2657 @@
+[
+{
+"in": "The temperature is -3.5°C right now.",
+"plain": "The temperature is minus three point five degrees Celsius right now.",
+"names": "The temperature is minus three point five degrees Celsius right now."
+},
+{
+"in": "Tonight it will drop to -12°C, so cover the plants.",
+"plain": "Tonight it will drop to minus twelve degrees Celsius, so cover the plants.",
+"names": "Tonight it will drop to minus twelve degrees Celsius, so cover the plants."
+},
+{
+"in": "Set the oven to 180°C and bake for 25 minutes.",
+"plain": "Set the oven to one hundred and eighty degrees Celsius and bake for twenty five minutes.",
+"names": "Set the oven to one hundred and eighty degrees Celsius and bake for twenty five minutes."
+},
+{
+"in": "Your freezer should stay at -18°C.",
+"plain": "Your freezer should stay at minus eighteen degrees Celsius.",
+"names": "Your freezer should stay at minus eighteen degrees Celsius."
+},
+{
+"in": "The forecast says 21°C with a low of 9°C.",
+"plain": "The forecast says twenty one degrees Celsius with a low of nine degrees Celsius.",
+"names": "The forecast says twenty one degrees Celsius with a low of nine degrees Celsius."
+},
+{
+"in": "Store the vaccine between 2°C and 8°C.",
+"plain": "Store the vaccine between two degrees Celsius and eight degrees Celsius.",
+"names": "Store the vaccine between two degrees Celsius and eight degrees Celsius."
+},
+{
+"in": "It feels like -20°C with the wind chill.",
+"plain": "It feels like minus twenty degrees Celsius with the wind chill.",
+"names": "It feels like minus twenty degrees Celsius with the wind chill."
+},
+{
+"in": "The pool is heated to 27°C.",
+"plain": "The pool is heated to twenty seven degrees Celsius.",
+"names": "The pool is heated to twenty seven degrees Celsius."
+},
+{
+"in": "A fever above 38.5°C needs a doctor.",
+"plain": "A fever above thirty eight point five degrees Celsius needs a doctor.",
+"names": "A fever above thirty eight point five degrees Celsius needs a doctor."
+},
+{
+"in": "The server room is at 31°C, which is too warm.",
+"plain": "The server room is at thirty one degrees Celsius, which is too warm.",
+"names": "The server room is at thirty one degrees Celsius, which is too warm."
+},
+{
+"in": "Preheat to 220°C, or 200°C with the fan.",
+"plain": "Preheat to two hundred and twenty degrees Celsius, or two hundred degrees Celsius with the fan.",
+"names": "Preheat to two hundred and twenty degrees Celsius, or two hundred degrees Celsius with the fan."
+},
+{
+"in": "Expect highs around 35°C this weekend.",
+"plain": "Expect highs around thirty five degrees Celsius this weekend.",
+"names": "Expect highs around thirty five degrees Celsius this weekend."
+},
+{
+"in": "The CPU is running at 72°C under load.",
+"plain": "The CPU is running at seventy two degrees Celsius under load.",
+"names": "The CPU is running at seventy two degrees Celsius under load."
+},
+{
+"in": "Keep the wine at 12°C.",
+"plain": "Keep the wine at twelve degrees Celsius.",
+"names": "Keep the wine at twelve degrees Celsius."
+},
+{
+"in": "Mars averages about -63°C.",
+"plain": "Mars averages about minus sixty three degrees Celsius.",
+"names": "Mars averages about minus sixty three degrees Celsius."
+},
+{
+"in": "It was -7°C at the airport this morning.",
+"plain": "It was minus seven degrees Celsius at the airport this morning.",
+"names": "It was minus seven degrees Celsius at the airport this morning."
+},
+{
+"in": "The thermostat is set to 19.5°C.",
+"plain": "The thermostat is set to nineteen point five degrees Celsius.",
+"names": "The thermostat is set to nineteen point five degrees Celsius."
+},
+{
+"in": "Cook the chicken to an internal 74°C.",
+"plain": "Cook the chicken to an internal seventy four degrees Celsius.",
+"names": "Cook the chicken to an internal seventy four degrees Celsius."
+},
+{
+"in": "Lows of -2°C are expected on Thursday.",
+"plain": "Lows of minus two degrees Celsius are expected on Thursday.",
+"names": "Lows of minus two degrees Celsius are expected on Thursday."
+},
+{
+"in": "The sea is 16°C, a bit cold for swimming.",
+"plain": "The sea is sixteen degrees Celsius, a bit cold for swimming.",
+"names": "The sea is sixteen degrees Celsius, a bit cold for swimming."
+},
+{
+"in": "Your body temperature was 36.8°C.",
+"plain": "Your body temperature was thirty six point eight degrees Celsius.",
+"names": "Your body temperature was thirty six point eight degrees Celsius."
+},
+{
+"in": "The lab keeps samples at -80°C.",
+"plain": "The lab keeps samples at minus eighty degrees Celsius.",
+"names": "The lab keeps samples at minus eighty degrees Celsius."
+},
+{
+"in": "Set the fridge to 4°C.",
+"plain": "Set the fridge to four degrees Celsius.",
+"names": "Set the fridge to four degrees Celsius."
+},
+{
+"in": "The warmest day was 41°C in July.",
+"plain": "The warmest day was forty one degrees Celsius in July.",
+"names": "The warmest day was forty one degrees Celsius in July."
+},
+{
+"in": "The cabin was -5°C when we arrived.",
+"plain": "The cabin was minus five degrees Celsius when we arrived.",
+"names": "The cabin was minus five degrees Celsius when we arrived."
+},
+{
+"in": "We are open 9-5, Monday to Friday.",
+"plain": "We are open nine to five, Monday to Friday.",
+"names": "We are open nine to five, Monday to Friday."
+},
+{
+"in": "Delivery takes 3-5 working days.",
+"plain": "Delivery takes three to five working days.",
+"names": "Delivery takes three to five working days."
+},
+{
+"in": "Pages 12-18 are missing from the PDF.",
+"plain": "Pages twelve to eighteen are missing from the PDF.",
+"names": "Pages twelve to eighteen are missing from the PDF."
+},
+{
+"in": "The course is for ages 8-12.",
+"plain": "The course is for ages eight to twelve.",
+"names": "The course is for ages eight to twelve."
+},
+{
+"in": "Expect a wait of 10-15 minutes.",
+"plain": "Expect a wait of ten to fifteen minutes.",
+"names": "Expect a wait of ten to fifteen minutes."
+},
+{
+"in": "Rooms 201-210 are on the second floor.",
+"plain": "Rooms two hundred and one to two hundred and ten are on the second floor.",
+"names": "Rooms two hundred and one to two hundred and ten are on the second floor."
+},
+{
+"in": "The price is in the 40-60 euro range.",
+"plain": "The price is in the forty to sixty euro range.",
+"names": "The price is in the forty to sixty euro range."
+},
+{
+"in": "Your slot is 14:00-16:00 tomorrow.",
+"plain": "Your slot is fourteen hundred to sixteen hundred tomorrow.",
+"names": "Your slot is fourteen hundred to sixteen hundred tomorrow."
+},
+{
+"in": "We need 20-25 volunteers for Saturday.",
+"plain": "We need twenty to twenty five volunteers for Saturday.",
+"names": "We need twenty to twenty five volunteers for Saturday."
+},
+{
+"in": "The 2019-2023 figures are in the second table.",
+"plain": "The twenty nineteen to twenty twenty three figures are in the second table.",
+"names": "The twenty nineteen to twenty twenty three figures are in the second table."
+},
+{
+"in": "Take 1-2 tablets every 4-6 hours.",
+"plain": "Take one to two tablets every four to six hours.",
+"names": "Take one to two tablets every four to six hours."
+},
+{
+"in": "Sizes S-XL are back in stock.",
+"plain": "Sizes S-XL are back in stock.",
+"names": "Sizes S-XL are back in stock."
+},
+{
+"in": "The speed limit is 80-100 km/h on that road.",
+"plain": "The speed limit is eighty to one hundred kilometers per hour on that road.",
+"names": "The speed limit is eighty to one hundred kilometers per hour on that road."
+},
+{
+"in": "Read chapters 3-7 before the next class.",
+"plain": "Read chapters three to seven before the next class.",
+"names": "Read chapters three to seven before the next class."
+},
+{
+"in": "Seats 12-15 in row F are together.",
+"plain": "Seats twelve to fifteen in row F are together.",
+"names": "Seats twelve to fifteen in row F are together."
+},
+{
+"in": "The battery lasts 8-10 hours.",
+"plain": "The battery lasts eight to ten hours.",
+"names": "The battery lasts eight to ten hours."
+},
+{
+"in": "Flights 1-3 are delayed this evening.",
+"plain": "Flights one to three are delayed this evening.",
+"names": "Flights one to three are delayed this evening."
+},
+{
+"in": "Lunch is served 12:00-14:00.",
+"plain": "Lunch is served twelve o'clock to fourteen hundred.",
+"names": "Lunch is served twelve o'clock to fourteen hundred."
+},
+{
+"in": "Children 0-2 travel free.",
+"plain": "Children zero to two travel free.",
+"names": "Children zero to two travel free."
+},
+{
+"in": "The budget is 5-6 million.",
+"plain": "The budget is five to six million.",
+"names": "The budget is five to six million."
+},
+{
+"in": "Doses of 5-10 mg are typical.",
+"plain": "Doses of five to ten milligrams are typical.",
+"names": "Doses of five to ten milligrams are typical."
+},
+{
+"in": "The exhibition runs 3-17 November.",
+"plain": "The exhibition runs the third to the seventeenth of November.",
+"names": "The exhibition runs the third to the seventeenth of November."
+},
+{
+"in": "Expect 2-3 cm of snow overnight.",
+"plain": "Expect two to three centimeters of snow overnight.",
+"names": "Expect two to three centimeters of snow overnight."
+},
+{
+"in": "The team scored 3-2 after extra time.",
+"plain": "The team scored three to two after extra time.",
+"names": "The team scored three to two after extra time."
+},
+{
+"in": "Grades 7-9 use the east entrance.",
+"plain": "Grades seven to nine use the east entrance.",
+"names": "Grades seven to nine use the east entrance."
+},
+{
+"in": "Your booking reference is AB-4471-Z.",
+"plain": "Your booking reference is A B four four seven one Z.",
+"names": "Your booking reference is A B four four seven one Z."
+},
+{
+"in": "The part number is XK-2290-B.",
+"plain": "The part number is X K two two nine zero B.",
+"names": "The part number is X K two two nine zero B."
+},
+{
+"in": "Use promo code SAVE-20 at checkout.",
+"plain": "Use promo code Save twenty at checkout.",
+"names": "Use promo code Save twenty at checkout."
+},
+{
+"in": "The licence plate is KT-738-RP.",
+"plain": "The licence plate is K T seven three eight R P.",
+"names": "The licence plate is K T seven three eight R P."
+},
+{
+"in": "Your confirmation code is X7K-29Q.",
+"plain": "Your confirmation code is X seven K two nine Q.",
+"names": "Your confirmation code is X seven K two nine Q."
+},
+{
+"in": "The serial number starts with SN-00412.",
+"plain": "The serial number starts with S N zero zero four one two.",
+"names": "The serial number starts with S N zero zero four one two."
+},
+{
+"in": "Flight BA-2490 departs from gate B12.",
+"plain": "Flight B A two four nine zero departs from gate B twelve.",
+"names": "Flight B A two four nine zero departs from gate B twelve."
+},
+{
+"in": "The return label reads RMA-5581-C.",
+"plain": "The return label reads R M A five five eight one C.",
+"names": "The return label reads R M A five five eight one C."
+},
+{
+"in": "Your ticket ID is TK-30977.",
+"plain": "Your ticket ID is T K three zero nine seven seven.",
+"names": "Your ticket ID is T K three zero nine seven seven."
+},
+{
+"in": "The device model is HP-V2-114.",
+"plain": "The device model is H P V two one one four.",
+"names": "The device model is H P V two one one four."
+},
+{
+"in": "Enter the code 4F-8H-2Q to unlock it.",
+"plain": "Enter the code four F eight H two Q to unlock it.",
+"names": "Enter the code four F eight H two Q to unlock it."
+},
+{
+"in": "The case number is CS-2026-0813.",
+"plain": "The case number is C S two zero two six zero eight one three.",
+"names": "The case number is C S two zero two six zero eight one three."
+},
+{
+"in": "Your parcel ID is PK-77-410-A.",
+"plain": "Your parcel ID is P K seventy seven four one zero A.",
+"names": "Your parcel ID is P K seventy seven four one zero A."
+},
+{
+"in": "The batch code is L-2208-K7.",
+"plain": "The batch code is L two two zero eight K seven.",
+"names": "The batch code is L two two zero eight K seven."
+},
+{
+"in": "Reference INV-00928 is now paid.",
+"plain": "Reference I N V zero zero nine two eight is now paid.",
+"names": "Reference I N V zero zero nine two eight is now paid."
+},
+{
+"in": "The Wi-Fi password is QZ-7731-mt.",
+"plain": "The Wi-Fi password is Q Z seven seven three one M T.",
+"names": "The Wi-Fi password is Q Z seven seven three one M T."
+},
+{
+"in": "Seat 14C on train IC-2042.",
+"plain": "Seat fourteen C on train I C two zero four two.",
+"names": "Seat fourteen C on train I C two zero four two."
+},
+{
+"in": "The invoice number is INV-2026-144.",
+"plain": "The invoice number is I N V two zero two six one four four.",
+"names": "The invoice number is I N V two zero two six one four four."
+},
+{
+"in": "The voucher code is WELCOME-15.",
+"plain": "The voucher code is Welcome fifteen.",
+"names": "The voucher code is Welcome fifteen."
+},
+{
+"in": "Your order key is ORD-9Q2-77L.",
+"plain": "Your order key is O R D nine Q two seven seven L.",
+"names": "Your order key is O R D nine Q two seven seven L."
+},
+{
+"in": "The claim reference is CLM-04-8812.",
+"plain": "The claim reference is C L M zero four eight eight one two.",
+"names": "The claim reference is C L M zero four eight eight one two."
+},
+{
+"in": "The product SKU is BLK-M-2024.",
+"plain": "The product SKU is B L K M two zero two four.",
+"names": "The product SKU is B L K M two zero two four."
+},
+{
+"in": "The contract number is CT-55-2039.",
+"plain": "The contract number is C T fifty five two zero three nine.",
+"names": "The contract number is C T fifty five two zero three nine."
+},
+{
+"in": "Your membership ID is MB-11-4820.",
+"plain": "Your membership ID is M B eleven four eight two zero.",
+"names": "Your membership ID is M B eleven four eight two zero."
+},
+{
+"in": "The error code was E-404-B.",
+"plain": "The error code was E four zero four B.",
+"names": "The error code was E four zero four B."
+},
+{
+"in": "Your appointment is on 14/03/2026 at 10:00.",
+"plain": "Your appointment is on the fourteenth of March twenty twenty six at ten o'clock.",
+"names": "Your appointment is on the fourteenth of March twenty twenty six at ten o'clock."
+},
+{
+"in": "The invoice is dated 31/12/2025.",
+"plain": "The invoice is dated the thirty first of December twenty twenty five.",
+"names": "The invoice is dated the thirty first of December twenty twenty five."
+},
+{
+"in": "The warranty expires on 2027-06-30.",
+"plain": "The warranty expires on June thirtieth, twenty twenty seven.",
+"names": "The warranty expires on June thirtieth, twenty twenty seven."
+},
+{
+"in": "You were born on 07/04/1990, correct?",
+"plain": "You were born on July fourth nineteen ninety, correct?",
+"names": "You were born on July fourth nineteen ninety, correct?"
+},
+{
+"in": "The deadline is 15.11.2026.",
+"plain": "The deadline is the fifteenth of November twenty twenty six.",
+"names": "The deadline is the fifteenth of November twenty twenty six."
+},
+{
+"in": "Payment was received on 02/10/2026.",
+"plain": "Payment was received on February tenth twenty twenty six.",
+"names": "Payment was received on February tenth twenty twenty six."
+},
+{
+"in": "The contract starts 01/01/2027.",
+"plain": "The contract starts January first twenty twenty seven.",
+"names": "The contract starts January first twenty twenty seven."
+},
+{
+"in": "Your last login was 2026-10-11.",
+"plain": "Your last login was October eleventh, twenty twenty six.",
+"names": "Your last login was October eleventh, twenty twenty six."
+},
+{
+"in": "The meeting moved to 23/09.",
+"plain": "The meeting moved to the twenty third of September.",
+"names": "The meeting moved to the twenty third of September."
+},
+{
+"in": "The return window closes on 28/02/2026.",
+"plain": "The return window closes on the twenty eighth of February twenty twenty six.",
+"names": "The return window closes on the twenty eighth of February twenty twenty six."
+},
+{
+"in": "The report covers 01/07 to 30/09.",
+"plain": "The report covers the first of July to the thirtieth of September.",
+"names": "The report covers the first of July to the thirtieth of September."
+},
+{
+"in": "Shipped on 09/10/2026, arriving 12/10.",
+"plain": "Shipped on September tenth twenty twenty six, arriving the twelfth of October.",
+"names": "Shipped on September tenth twenty twenty six, arriving the twelfth of October."
+},
+{
+"in": "The policy renews on 2026-12-01.",
+"plain": "The policy renews on December first, twenty twenty six.",
+"names": "The policy renews on December first, twenty twenty six."
+},
+{
+"in": "Your card expires 08/27.",
+"plain": "Your card expires August twenty seventh.",
+"names": "Your card expires August twenty seventh."
+},
+{
+"in": "The course begins 05.01.2027.",
+"plain": "The course begins the fifth of January twenty twenty seven.",
+"names": "The course begins the fifth of January twenty twenty seven."
+},
+{
+"in": "The ticket is valid until 30/06/2026.",
+"plain": "The ticket is valid until the thirtieth of June twenty twenty six.",
+"names": "The ticket is valid until the thirtieth of June twenty twenty six."
+},
+{
+"in": "Updated on 2026-04-18 at 09:12.",
+"plain": "Updated on April eighteenth, twenty twenty six at nine twelve.",
+"names": "Updated on April eighteenth, twenty twenty six at nine twelve."
+},
+{
+"in": "The visit is scheduled for 19/11/2026.",
+"plain": "The visit is scheduled for the nineteenth of November twenty twenty six.",
+"names": "The visit is scheduled for the nineteenth of November twenty twenty six."
+},
+{
+"in": "Your subscription ends 03/03/2027.",
+"plain": "Your subscription ends March third twenty twenty seven.",
+"names": "Your subscription ends March third twenty twenty seven."
+},
+{
+"in": "Backup completed on 10/10/2026.",
+"plain": "Backup completed on October tenth twenty twenty six.",
+"names": "Backup completed on October tenth twenty twenty six."
+},
+{
+"in": "The exam is on 2026-05-22.",
+"plain": "The exam is on May twenty second, twenty twenty six.",
+"names": "The exam is on May twenty second, twenty twenty six."
+},
+{
+"in": "The order was placed on 27/08/2026.",
+"plain": "The order was placed on the twenty seventh of August twenty twenty six.",
+"names": "The order was placed on the twenty seventh of August twenty twenty six."
+},
+{
+"in": "Filed on 12.09.2026.",
+"plain": "Filed on the twelfth of September twenty twenty six.",
+"names": "Filed on the twelfth of September twenty twenty six."
+},
+{
+"in": "The sale runs 20/11 to 27/11.",
+"plain": "The sale runs the twentieth of November to the twenty seventh of November.",
+"names": "The sale runs the twentieth of November to the twenty seventh of November."
+},
+{
+"in": "The baby was born on 03/02/2026.",
+"plain": "The baby was born on March second twenty twenty six.",
+"names": "The baby was born on March second twenty twenty six."
+},
+{
+"in": "The train leaves at 07:05 from platform 3.",
+"plain": "The train leaves at seven oh five from platform three.",
+"names": "The train leaves at seven oh five from platform three."
+},
+{
+"in": "Your call is booked for 14:30.",
+"plain": "Your call is booked for fourteen thirty.",
+"names": "Your call is booked for fourteen thirty."
+},
+{
+"in": "We close at 18:45 on Saturdays.",
+"plain": "We close at eighteen forty five on Saturdays.",
+"names": "We close at eighteen forty five on Saturdays."
+},
+{
+"in": "The alarm is set for 06:00.",
+"plain": "The alarm is set for six o'clock.",
+"names": "The alarm is set for six o'clock."
+},
+{
+"in": "Check-in is after 3 p.m.",
+"plain": "Check-in is after three PM.",
+"names": "Check-in is after three PM."
+},
+{
+"in": "The webinar starts at 4 p.m. ET.",
+"plain": "The webinar starts at four PM. ET.",
+"names": "The webinar starts at four PM. ET."
+},
+{
+"in": "The last bus is at 23:50.",
+"plain": "The last bus is at twenty three fifty.",
+"names": "The last bus is at twenty three fifty."
+},
+{
+"in": "Your delivery window is 9.30 to 11.30.",
+"plain": "Your delivery window is nine point three zero to eleven point three zero.",
+"names": "Your delivery window is nine point three zero to eleven point three zero."
+},
+{
+"in": "The meeting ran from 10:15 to 11:50.",
+"plain": "The meeting ran from ten fifteen to eleven fifty.",
+"names": "The meeting ran from ten fifteen to eleven fifty."
+},
+{
+"in": "Doors open at 7.30 pm.",
+"plain": "Doors open at seven.thirty PM.",
+"names": "Doors open at seven.thirty PM."
+},
+{
+"in": "The flight lands at 00:15 local time.",
+"plain": "The flight lands at zero fifteen local time.",
+"names": "The flight lands at zero fifteen local time."
+},
+{
+"in": "Breakfast is served until 10:30.",
+"plain": "Breakfast is served until ten thirty.",
+"names": "Breakfast is served until ten thirty."
+},
+{
+"in": "The race time was 2:03:45.",
+"plain": "The race time was two hours, three minutes, forty five seconds.",
+"names": "The race time was two hours, three minutes, forty five seconds."
+},
+{
+"in": "Support is available 8am to 8pm.",
+"plain": "Support is available eight AM to eight PM.",
+"names": "Support is available eight AM to eight PM."
+},
+{
+"in": "Your table is reserved for 20:00.",
+"plain": "Your table is reserved for twenty hundred.",
+"names": "Your table is reserved for twenty hundred."
+},
+{
+"in": "The next slot is at 11:20.",
+"plain": "The next slot is at eleven twenty.",
+"names": "The next slot is at eleven twenty."
+},
+{
+"in": "The store opens at 9 a.m. sharp.",
+"plain": "The store opens at nine AM sharp.",
+"names": "The store opens at nine AM sharp."
+},
+{
+"in": "The webinar is at 17:00 CET.",
+"plain": "The webinar is at seventeen hundred CET.",
+"names": "The webinar is at seventeen hundred CET."
+},
+{
+"in": "Pickup is between 11:00 and 11:30.",
+"plain": "Pickup is between eleven o'clock and eleven thirty.",
+"names": "Pickup is between eleven o'clock and eleven thirty."
+},
+{
+"in": "The call lasted 1:42.",
+"plain": "The call lasted one forty two.",
+"names": "The call lasted one forty two."
+},
+{
+"in": "The dentist can see you at 15:10.",
+"plain": "The dentist can see you at fifteen ten.",
+"names": "The dentist can see you at fifteen ten."
+},
+{
+"in": "The parade starts at 2.15 pm.",
+"plain": "The parade starts at two.fifteen PM.",
+"names": "The parade starts at two.fifteen PM."
+},
+{
+"in": "Your shift is 22:00 to 06:00.",
+"plain": "Your shift is twenty two hundred to six o'clock.",
+"names": "Your shift is twenty two hundred to six o'clock."
+},
+{
+"in": "The recording is 48:12 long.",
+"plain": "The recording is forty eight twelve long.",
+"names": "The recording is forty eight twelve long."
+},
+{
+"in": "Kick-off is at 20:45.",
+"plain": "Kick-off is at twenty forty five.",
+"names": "Kick-off is at twenty forty five."
+},
+{
+"in": "Your order number is 48213907.",
+"plain": "Your order number is four eight two one three nine zero seven.",
+"names": "Your order number is four eight two one three nine zero seven."
+},
+{
+"in": "The tracking number is 1Z 999 AA1 01 2345 6784.",
+"plain": "The tracking number is 1Z nine hundred and ninety nine A A one zero one, two three four five, six seven eight four.",
+"names": "The tracking number is 1Z nine hundred and ninety nine A A one zero one, two three four five, six seven eight four."
+},
+{
+"in": "Order 2026-118-4409 has shipped.",
+"plain": "Order two zero two six, one one eight, four four zero nine has shipped.",
+"names": "Order two zero two six, one one eight, four four zero nine has shipped."
+},
+{
+"in": "Your customer ID is 00731522.",
+"plain": "Your customer ID is zero zero seven three one five two two.",
+"names": "Your customer ID is zero zero seven three one five two two."
+},
+{
+"in": "The transaction ID is 7718 2093 4451.",
+"plain": "The transaction ID is seven seven one eight, two zero nine three, four four five one.",
+"names": "The transaction ID is seven seven one eight, two zero nine three, four four five one."
+},
+{
+"in": "Please quote reference 65-882-1904.",
+"plain": "Please quote reference six five, eight eight two, one nine zero four.",
+"names": "Please quote reference six five, eight eight two, one nine zero four."
+},
+{
+"in": "Your parcel number is 4502 1187 3390 2.",
+"plain": "Your parcel number is four five zero two, one one eight seven, three three nine zero two.",
+"names": "Your parcel number is four five zero two, one one eight seven, three three nine zero two."
+},
+{
+"in": "The ticket number is 1049238.",
+"plain": "The ticket number is one zero four nine two three eight.",
+"names": "The ticket number is one zero four nine two three eight."
+},
+{
+"in": "Order 91-220-0017 is ready for pickup.",
+"plain": "Order nine one, two two zero, zero zero one seven is ready for pickup.",
+"names": "Order nine one, two two zero, zero zero one seven is ready for pickup."
+},
+{
+"in": "The account number ends in 4471.",
+"plain": "The account number ends in four four seven one.",
+"names": "The account number ends in four four seven one."
+},
+{
+"in": "Your case ID is 2026-77-10543.",
+"plain": "Your case ID is twenty twenty six to seventy seven-one zero five four three.",
+"names": "Your case ID is twenty twenty six to seventy seven-one zero five four three."
+},
+{
+"in": "The tracking code is RR 123 456 789 GB.",
+"plain": "The tracking code is RR one two three, four five six, seven eight nine GB.",
+"names": "The tracking code is RR one two three, four five six, seven eight nine GB."
+},
+{
+"in": "Payment 3391-8820 was declined.",
+"plain": "Payment three three nine one, eight eight two zero was declined.",
+"names": "Payment three three nine one, eight eight two zero was declined."
+},
+{
+"in": "Your policy number is 88 410 227 3.",
+"plain": "Your policy number is eight eight, four one zero, two two seven three.",
+"names": "Your policy number is eight eight, four one zero, two two seven three."
+},
+{
+"in": "Confirmation number 20261012-0417.",
+"plain": "Confirmation number two zero two six one zero one two-four hundred and seventeen.",
+"names": "Confirmation number two zero two six one zero one two-four hundred and seventeen."
+},
+{
+"in": "The delivery note is 71 002 4489.",
+"plain": "The delivery note is seven one, zero zero two, four four eight nine.",
+"names": "The delivery note is seven one, zero zero two, four four eight nine."
+},
+{
+"in": "Reference 5500-2317-98 is still open.",
+"plain": "Reference five five zero zero, two three one seven, nine eight is still open.",
+"names": "Reference five five zero zero, two three one seven, nine eight is still open."
+},
+{
+"in": "Your receipt number is 000 418 227.",
+"plain": "Your receipt number is zero zero zero, four one eight, two two seven.",
+"names": "Your receipt number is zero zero zero, four one eight, two two seven."
+},
+{
+"in": "Order 7741890 was refunded today.",
+"plain": "Order seven seven four one eight nine zero was refunded today.",
+"names": "Order seven seven four one eight nine zero was refunded today."
+},
+{
+"in": "The claim number is 2026/0917/44.",
+"plain": "The claim number is twenty twenty six slash nine hundred and seventeen slash forty four.",
+"names": "The claim number is twenty twenty six slash nine hundred and seventeen slash forty four."
+},
+{
+"in": "Your reservation number is 3309 77 215.",
+"plain": "Your reservation number is three three zero nine, seven seven, two one five.",
+"names": "Your reservation number is three three zero nine, seven seven, two one five."
+},
+{
+"in": "Container 2210 4487 is at the port.",
+"plain": "Container two two one zero, four four eight seven is at the port.",
+"names": "Container two two one zero, four four eight seven is at the port."
+},
+{
+"in": "The invoice total matches order 1183 492.",
+"plain": "The invoice total matches order one one eight three, four nine two.",
+"names": "The invoice total matches order one one eight three, four nine two."
+},
+{
+"in": "Shipment 20 4471 0092 cleared customs.",
+"plain": "Shipment two zero, four four seven one, zero zero nine two cleared customs.",
+"names": "Shipment two zero, four four seven one, zero zero nine two cleared customs."
+},
+{
+"in": "The purchase order is PO 4471 203.",
+"plain": "The purchase order is PO four four seven one, two zero three.",
+"names": "The purchase order is PO four four seven one, two zero three."
+},
+{
+"in": "The file is called report_final_v3.pdf.",
+"plain": "The file is called report underscore final underscore v three dot pdf.",
+"names": "The file is called report underscore final underscore v three dot pdf."
+},
+{
+"in": "Go to gradium.sh/docs for the guide.",
+"plain": "Go to gradium dot sh slash docs for the guide.",
+"names": "Go to gradium dot sh slash docs for the guide."
+},
+{
+"in": "Send it to support@example.com.",
+"plain": "Send it to support at example dot com.",
+"names": "Send it to support at example dot com."
+},
+{
+"in": "The export is saved as sales_2026-Q3.xlsx.",
+"plain": "The export is saved as sales underscore two zero two six Q three dot xlsx.",
+"names": "The export is saved as sales underscore two zero two six Q three dot xlsx."
+},
+{
+"in": "Visit www.example.org/help to reset it.",
+"plain": "Visit w w w dot example dot org slash help to reset it.",
+"names": "Visit w w w dot example dot org slash help to reset it."
+},
+{
+"in": "Attach the file invoice_0412.png.",
+"plain": "Attach the file invoice underscore four hundred and twelve dot png.",
+"names": "Attach the file invoice underscore four hundred and twelve dot png."
+},
+{
+"in": "Download it from downloads.example.com/setup.exe.",
+"plain": "Download it from downloads dot example dot com slash setup dot exe.",
+"names": "Download it from downloads dot example dot com slash setup dot exe."
+},
+{
+"in": "The log is in /var/log/app/error.log.",
+"plain": "The log is in slash var slash log slash app slash error dot log.",
+"names": "The log is in slash var slash log slash app slash error dot log."
+},
+{
+"in": "Email billing@company.co.uk with the receipt.",
+"plain": "Email billing at company dot co dot uk with the receipt.",
+"names": "Email billing at company dot co dot uk with the receipt."
+},
+{
+"in": "The link is bit.ly/3kTx9Q.",
+"plain": "The link is bit dot ly slash three K T X nine Q.",
+"names": "The link is bit dot ly slash three K T X nine Q."
+},
+{
+"in": "Rename it to photo_01.jpg before uploading.",
+"plain": "Rename it to photo underscore one dot jpg before uploading.",
+"names": "Rename it to photo underscore one dot jpg before uploading."
+},
+{
+"in": "Open settings.json and change the port.",
+"plain": "Open settings dot json and change the port.",
+"names": "Open settings dot json and change the port."
+},
+{
+"in": "The page is example.com/account/orders.",
+"plain": "The page is example dot com slash account slash orders.",
+"names": "The page is example dot com slash account slash orders."
+},
+{
+"in": "Your backup is in Documents/backup_2026.zip.",
+"plain": "Your backup is in Documents slash backup underscore twenty twenty six dot zip.",
+"names": "Your backup is in Documents slash backup underscore twenty twenty six dot zip."
+},
+{
+"in": "Reply to no-reply@shop.example.com is not monitored.",
+"plain": "Reply to no dash reply at shop dot example dot com is not monitored.",
+"names": "Reply to no dash reply at shop dot example dot com is not monitored."
+},
+{
+"in": "The config file is nginx.conf.",
+"plain": "The config file is nginx dot conf.",
+"names": "The config file is Engine-ex dot conf."
+},
+{
+"in": "Upload the CSV named customers_export.csv.",
+"plain": "Upload the CSV named customers underscore export dot csv.",
+"names": "Upload the CSV named customers underscore export dot csv."
+},
+{
+"in": "The docs live at docs.example.io/api/v2.",
+"plain": "The docs live at docs dot example dot io slash api slash v two.",
+"names": "The docs live at docs dot example dot io slash api slash v two."
+},
+{
+"in": "The image is logo_dark@2x.png.",
+"plain": "The image is logo underscore dark at 2x dot png.",
+"names": "The image is logo underscore dark at 2x dot png."
+},
+{
+"in": "Write to hello@gradium.sh for access.",
+"plain": "Write to hello at gradium dot sh for access.",
+"names": "Write to hello at gradium dot sh for access."
+},
+{
+"in": "Check the URL https://status.example.com.",
+"plain": "Check the URL status dot example dot com.",
+"names": "Check the URL status dot example dot com."
+},
+{
+"in": "The script is deploy.sh in the root folder.",
+"plain": "The script is deploy dot sh in the root folder.",
+"names": "The script is deploy dot sh in the root folder."
+},
+{
+"in": "The presentation is Q4_review_final.pptx.",
+"plain": "The presentation is Q four underscore review underscore final dot pptx.",
+"names": "The presentation is Q four underscore review underscore final dot pptx."
+},
+{
+"in": "The subdomain is app.example.com.",
+"plain": "The subdomain is app dot example dot com.",
+"names": "The subdomain is app dot example dot com."
+},
+{
+"in": "Save it as notes.txt on the desktop.",
+"plain": "Save it as notes dot txt on the desktop.",
+"names": "Save it as notes dot txt on the desktop."
+},
+{
+"in": "Version 3.10 fixed the login bug.",
+"plain": "Version three point one zero fixed the login bug.",
+"names": "Version three point one zero fixed the login bug."
+},
+{
+"in": "Please update to v2.4.1 first.",
+"plain": "Please update to version two point four point one first.",
+"names": "Please update to version two point four point one first."
+},
+{
+"in": "The app requires iOS 17.2 or later.",
+"plain": "The app requires iOS seventeen point two or later.",
+"names": "The app requires iOS seventeen point two or later."
+},
+{
+"in": "We tested it on Python 3.12.",
+"plain": "We tested it on Python three point one two.",
+"names": "We tested it on Python three point one two."
+},
+{
+"in": "Firmware 1.0.8 is now available.",
+"plain": "Firmware one point zero point eight is now available.",
+"names": "Firmware one point zero point eight is now available."
+},
+{
+"in": "The iPhone 15 Pro has a 6.1-inch screen.",
+"plain": "The iPhone fifteen Pro has a six point one I N C H screen.",
+"names": "The iPhone fifteen Pro has a six point one I N C H screen."
+},
+{
+"in": "Release 24.04 is a long-term version.",
+"plain": "Release twenty four point zero four is a long-term version.",
+"names": "Release twenty four point zero four is a long-term version."
+},
+{
+"in": "The driver version is 535.129.03.",
+"plain": "The driver version is five hundred and thirty five point one hundred and twenty nine point three.",
+"names": "The driver version is five hundred and thirty five point one hundred and twenty nine point three."
+},
+{
+"in": "Model S Plaid goes 0 to 100 in 2.1 seconds.",
+"plain": "Model S Plaid goes zero to one hundred in two point one seconds.",
+"names": "Model S Plaid goes zero to one hundred in two point one seconds."
+},
+{
+"in": "Chrome 118 dropped support for that API.",
+"plain": "Chrome one hundred and eighteen dropped support for that API.",
+"names": "Chrome one hundred and eighteen dropped support for that API."
+},
+{
+"in": "The Galaxy S24 Ultra ships with Android 14.",
+"plain": "The Galaxy S twenty four Ultra ships with Android fourteen.",
+"names": "The Galaxy S twenty four Ultra ships with Android fourteen."
+},
+{
+"in": "Switch to Node 20.11 for this build.",
+"plain": "Switch to Node twenty point one one for this build.",
+"names": "Switch to Node twenty point one one for this build."
+},
+{
+"in": "Kernel 6.5.0-14 is installed.",
+"plain": "Kernel six point five point zero to fourteen is installed.",
+"names": "Kernel six point five point zero to fourteen is installed."
+},
+{
+"in": "The library moved from 0.9 to 1.0.",
+"plain": "The library moved from zero point nine to one point zero.",
+"names": "The library moved from zero point nine to one point zero."
+},
+{
+"in": "The PS5 Pro launches in November.",
+"plain": "The P S five Pro launches in November.",
+"names": "The P S five Pro launches in November."
+},
+{
+"in": "Patch 2.0.3 rolls out tonight.",
+"plain": "Patch two point zero point three rolls out tonight.",
+"names": "Patch two point zero point three rolls out tonight."
+},
+{
+"in": "The Pixel 8a costs less than the Pixel 8.",
+"plain": "The Pixel 8a costs less than the Pixel eight.",
+"names": "The Pixel 8a costs less than the Pixel eight."
+},
+{
+"in": "Java 21 is the current LTS.",
+"plain": "Java twenty one is the current LTS.",
+"names": "Java twenty one is the current LTS."
+},
+{
+"in": "The router runs firmware 3.0.0.4.388.",
+"plain": "The router runs firmware three point zero point zero point four point three hundred and eighty eight.",
+"names": "The router runs firmware three point zero point zero point four point three hundred and eighty eight."
+},
+{
+"in": "macOS 15.1 fixes the Wi-Fi issue.",
+"plain": "macOS fifteen point one fixes the Wi-Fi issue.",
+"names": "macOS fifteen point one fixes the Wi-Fi issue."
+},
+{
+"in": "The RTX 4070 Ti uses 285 watts.",
+"plain": "The RTX forty seventy Ti uses two hundred and eighty five watts.",
+"names": "The RTX forty seventy Ti uses two hundred and eighty five watts."
+},
+{
+"in": "Upgrade from 1.18 to 1.21 directly.",
+"plain": "Upgrade from one point one eight to one point two one directly.",
+"names": "Upgrade from one point one eight to one point two one directly."
+},
+{
+"in": "The Model 3 Highland has a new interior.",
+"plain": "The Model three Highland has a new interior.",
+"names": "The Model three Highland has a new interior."
+},
+{
+"in": "Version 10.0.19045 is Windows 10.",
+"plain": "Version ten point zero point one nine zero four five is Windows ten.",
+"names": "Version ten point zero point one nine zero four five is Windows ten."
+},
+{
+"in": "The X1 Carbon Gen 12 weighs 1.1 kg.",
+"plain": "The X one Carbon Gen twelve weighs one point one kilograms.",
+"names": "The X one Carbon Gen twelve weighs one point one kilograms."
+},
+{
+"in": "We are the #1 choice in town.",
+"plain": "We are the number one choice in town.",
+"names": "We are the number one choice in town."
+},
+{
+"in": "Ticket #4471 is now closed.",
+"plain": "Ticket number four four seven one is now closed.",
+"names": "Ticket number four four seven one is now closed."
+},
+{
+"in": "Your position in the queue is #12.",
+"plain": "Your position in the queue is number twelve.",
+"names": "Your position in the queue is number twelve."
+},
+{
+"in": "Room no. 7 is on the left.",
+"plain": "Room number seven is on the left.",
+"names": "Room number seven is on the left."
+},
+{
+"in": "Bug #2093 has been fixed.",
+"plain": "Bug number two zero nine three has been fixed.",
+"names": "Bug number two zero nine three has been fixed."
+},
+{
+"in": "Table #14 is ready for you.",
+"plain": "Table number fourteen is ready for you.",
+"names": "Table number fourteen is ready for you."
+},
+{
+"in": "Apartment no. 3B, second floor.",
+"plain": "Apartment number three B, second floor.",
+"names": "Apartment number three B, second floor."
+},
+{
+"in": "Item #A12 is out of stock.",
+"plain": "Item number A twelve is out of stock.",
+"names": "Item number A twelve is out of stock."
+},
+{
+"in": "Pull request #882 was merged.",
+"plain": "Pull request number eight hundred and eighty two was merged.",
+"names": "Pull request number eight hundred and eighty two was merged."
+},
+{
+"in": "Bus no. 42 stops right outside.",
+"plain": "Bus forty two stops right outside.",
+"names": "Bus forty two stops right outside."
+},
+{
+"in": "You are caller #3 in line.",
+"plain": "You are caller number three in line.",
+"names": "You are caller number three in line."
+},
+{
+"in": "Locker #118 is yours for the day.",
+"plain": "Locker number one eighteen is yours for the day.",
+"names": "Locker number one eighteen is yours for the day."
+},
+{
+"in": "Case #2026-77 has been escalated.",
+"plain": "Case number two zero two six to seventy seven has been escalated.",
+"names": "Case number two zero two six to seventy seven has been escalated."
+},
+{
+"in": "Platform no. 9 is at the far end.",
+"plain": "Platform number nine is at the far end.",
+"names": "Platform number nine is at the far end."
+},
+{
+"in": "Model #KX-300 is discontinued.",
+"plain": "Model number K X three zero zero is discontinued.",
+"names": "Model number K X three zero zero is discontinued."
+},
+{
+"in": "Order #773102 left the warehouse.",
+"plain": "Order number seven seven three one zero two left the warehouse.",
+"names": "Order number seven seven three one zero two left the warehouse."
+},
+{
+"in": "He finished #2 in the race.",
+"plain": "He finished number two in the race.",
+"names": "He finished number two in the race."
+},
+{
+"in": "Seat no. 24 is by the window.",
+"plain": "Seat number twenty four is by the window.",
+"names": "Seat number twenty four is by the window."
+},
+{
+"in": "Issue #15 blocks the release.",
+"plain": "Issue number fifteen blocks the release.",
+"names": "Issue number fifteen blocks the release."
+},
+{
+"in": "Dock no. 5 is for pickups.",
+"plain": "Dock number five is for pickups.",
+"names": "Dock number five is for pickups."
+},
+{
+"in": "Gate #B7 for the 10:40 flight.",
+"plain": "Gate number B seven for the ten forty flight.",
+"names": "Gate number B seven for the ten forty flight."
+},
+{
+"in": "Question #6 on the form is optional.",
+"plain": "Question number six on the form is optional.",
+"names": "Question number six on the form is optional."
+},
+{
+"in": "Invoice #2026-0417 is overdue.",
+"plain": "Invoice number two zero two six, zero four one seven is overdue.",
+"names": "Invoice number two zero two six, zero four one seven is overdue."
+},
+{
+"in": "Exit no. 12 for the airport.",
+"plain": "Exit number twelve for the airport.",
+"names": "Exit number twelve for the airport."
+},
+{
+"in": "Track #3 is the fastest lap.",
+"plain": "Track number three is the fastest lap.",
+"names": "Track number three is the fastest lap."
+},
+{
+"in": "Confirmed: 14:30.",
+"plain": "Confirmed: fourteen thirty.",
+"names": "Confirmed: fourteen thirty."
+},
+{
+"in": "Total: €42.",
+"plain": "Total: forty two euros.",
+"names": "Total: forty two euros."
+},
+{
+"in": "Done, order #4471.",
+"plain": "Done, order number four four seven one.",
+"names": "Done, order number four four seven one."
+},
+{
+"in": "Yes, 3-5 days.",
+"plain": "Yes, three to five days.",
+"names": "Yes, three to five days."
+},
+{
+"in": "Delivered on 12/10.",
+"plain": "Delivered on the twelfth of October.",
+"names": "Delivered on the twelfth of October."
+},
+{
+"in": "Noted, -3°C.",
+"plain": "Noted, minus three degrees Celsius.",
+"names": "Noted, minus three degrees Celsius."
+},
+{
+"in": "Reference: AB-22.",
+"plain": "Reference: A B twenty two.",
+"names": "Reference: A B twenty two."
+},
+{
+"in": "Ready at 18:00.",
+"plain": "Ready at eighteen hundred.",
+"names": "Ready at eighteen hundred."
+},
+{
+"in": "Paid: $19.99.",
+"plain": "Paid: nineteen dollars and ninety nine cents.",
+"names": "Paid: nineteen dollars and ninety nine cents."
+},
+{
+"in": "Flight BA-2490, gate 12.",
+"plain": "Flight B A two four nine zero, gate twelve.",
+"names": "Flight B A two four nine zero, gate twelve."
+},
+{
+"in": "OK, 2 kg.",
+"plain": "OK, two kilograms.",
+"names": "OK, two kilograms."
+},
+{
+"in": "Code 7X-19.",
+"plain": "Code seven X nineteen.",
+"names": "Code seven X nineteen."
+},
+{
+"in": "Due 31/12.",
+"plain": "Due the thirty first of December.",
+"names": "Due the thirty first of December."
+},
+{
+"in": "Table no. 7.",
+"plain": "Table number seven.",
+"names": "Table number seven."
+},
+{
+"in": "Yes, v2.4.",
+"plain": "Yes, version two point four.",
+"names": "Yes, version two point four."
+},
+{
+"in": "Shipped: 09/10.",
+"plain": "Shipped: the ninth of October.",
+"names": "Shipped: the ninth of October."
+},
+{
+"in": "Balance: -€12.50.",
+"plain": "Balance: -twelve euros and fifty cents.",
+"names": "Balance: -twelve euros and fifty cents."
+},
+{
+"in": "Room 201-210.",
+"plain": "Room two hundred and one to two hundred and ten.",
+"names": "Room two hundred and one to two hundred and ten."
+},
+{
+"in": "Call 020 7946 0018.",
+"plain": "Call zero two zero, seven nine four six, zero zero one eight.",
+"names": "Call zero two zero, seven nine four six, zero zero one eight."
+},
+{
+"in": "Deadline: 17:00.",
+"plain": "Deadline: seventeen hundred.",
+"names": "Deadline: seventeen hundred."
+},
+{
+"in": "Seat 14C.",
+"plain": "Seat fourteen C.",
+"names": "Seat fourteen C."
+},
+{
+"in": "Price: £7.50.",
+"plain": "Price: seven pounds fifty.",
+"names": "Price: seven pounds fifty."
+},
+{
+"in": "Score 3-2.",
+"plain": "Score three to two.",
+"names": "Score three to two."
+},
+{
+"in": "Open 9-5.",
+"plain": "Open nine to five.",
+"names": "Open nine to five."
+},
+{
+"in": "ETA 10-15 min.",
+"plain": "ETA ten to fifteen minutes",
+"names": "ETA ten to fifteen minutes"
+},
+{
+"in": "Call us on 020 7946 0018.",
+"plain": "Call us on zero two zero, seven nine four six, zero zero one eight.",
+"names": "Call us on zero two zero, seven nine four six, zero zero one eight."
+},
+{
+"in": "Her mobile is 07700 900123.",
+"plain": "Her mobile is zero seven seven zero zero nine zero zero one two three.",
+"names": "Her mobile is zero seven seven zero zero nine zero zero one two three."
+},
+{
+"in": "The hotline is 0800 123 4567.",
+"plain": "The hotline is zero eight zero zero, one two three, four five six seven.",
+"names": "The hotline is zero eight zero zero, one two three, four five six seven."
+},
+{
+"in": "Dial +44 20 7946 0018 from abroad.",
+"plain": "Dial plus four four, two zero, seven nine four six, zero zero one eight from abroad.",
+"names": "Dial plus four four, two zero, seven nine four six, zero zero one eight from abroad."
+},
+{
+"in": "Text 60066 to confirm.",
+"plain": "Text six zero zero six six to confirm.",
+"names": "Text six zero zero six six to confirm."
+},
+{
+"in": "The office number is 0161 496 0123.",
+"plain": "The office number is zero one six one, four nine six, zero one two three.",
+"names": "The office number is zero one six one, four nine six, zero one two three."
+},
+{
+"in": "Reach him at +1 (415) 555-0132.",
+"plain": "Reach him at plus one four one five, five five five, zero one three two.",
+"names": "Reach him at plus one four one five, five five five, zero one three two."
+},
+{
+"in": "Emergency: call 999 or 112.",
+"plain": "Emergency: call nine nine nine or one hundred and twelve.",
+"names": "Emergency: call nine nine nine or one hundred and twelve."
+},
+{
+"in": "The fax is 020 7946 0999.",
+"plain": "The fax is zero two zero, seven nine four six, zero nine nine nine.",
+"names": "The fax is zero two zero, seven nine four six, zero nine nine nine."
+},
+{
+"in": "Customer service: 0330 123 0100.",
+"plain": "Customer service: zero three three zero, one two three, zero one zero zero.",
+"names": "Customer service: zero three three zero, one two three, zero one zero zero."
+},
+{
+"in": "My number is 07911 123456.",
+"plain": "My number is zero seven nine one one one two three four five six.",
+"names": "My number is zero seven nine one one one two three four five six."
+},
+{
+"in": "Call extension 4471.",
+"plain": "Call extension forty four seventy one.",
+"names": "Call extension forty four seventy one."
+},
+{
+"in": "The clinic is on 01632 960 420.",
+"plain": "The clinic is on zero one six three two nine hundred and sixty four hundred and twenty.",
+"names": "The clinic is on zero one six three two nine hundred and sixty four hundred and twenty."
+},
+{
+"in": "Press 2, then enter 1234.",
+"plain": "Press two, then enter twelve thirty four.",
+"names": "Press two, then enter twelve thirty four."
+},
+{
+"in": "The pharmacy number is 020 8123 4567.",
+"plain": "The pharmacy number is zero two zero, eight one two three, four five six seven.",
+"names": "The pharmacy number is zero two zero, eight one two three, four five six seven."
+},
+{
+"in": "Ring 0345 600 0789 for claims.",
+"plain": "Ring zero three four five, six zero zero, zero seven eight nine for claims.",
+"names": "Ring zero three four five, six zero zero, zero seven eight nine for claims."
+},
+{
+"in": "His direct line is +44 7700 900 456.",
+"plain": "His direct line is plus four four, seven seven zero zero, nine zero zero, four five six.",
+"names": "His direct line is plus four four, seven seven zero zero, nine zero zero, four five six."
+},
+{
+"in": "The PIN is 4471.",
+"plain": "The PIN is four thousand four hundred and seventy one.",
+"names": "The PIN is four thousand four hundred and seventy one."
+},
+{
+"in": "The sales desk is 0117 496 0303.",
+"plain": "The sales desk is zero one one seven, four nine six, zero three zero three.",
+"names": "The sales desk is zero one one seven, four nine six, zero three zero three."
+},
+{
+"in": "Call 111 for non-urgent advice.",
+"plain": "Call one one one for non-urgent advice.",
+"names": "Call one one one for non-urgent advice."
+},
+{
+"in": "The taxi firm is 020 7946 0200.",
+"plain": "The taxi firm is zero two zero, seven nine four six, zero two zero zero.",
+"names": "The taxi firm is zero two zero, seven nine four six, zero two zero zero."
+},
+{
+"in": "Enter the 6-digit code 302 118.",
+"plain": "Enter the six digit code three zero two, one one eight.",
+"names": "Enter the six digit code three zero two, one one eight."
+},
+{
+"in": "Her work number is 0113 496 0770.",
+"plain": "Her work number is zero one one three, four nine six, zero seven seven zero.",
+"names": "Her work number is zero one one three, four nine six, zero seven seven zero."
+},
+{
+"in": "The hotel is on +44 1632 960 111.",
+"plain": "The hotel is on plus four four, one six three two, nine six zero, one one one.",
+"names": "The hotel is on plus four four, one six three two, nine six zero, one one one."
+},
+{
+"in": "Text STOP to 88800 to unsubscribe.",
+"plain": "Text STOP to eight eight eight zero zero to unsubscribe.",
+"names": "Text STOP to eight eight eight zero zero to unsubscribe."
+},
+{
+"in": "The parcel weighs 2.4 kg.",
+"plain": "The parcel weighs two point four kilograms.",
+"names": "The parcel weighs two point four kilograms."
+},
+{
+"in": "The room is 3.5 m by 4.2 m.",
+"plain": "The room is three point five meters by four point two meters.",
+"names": "The room is three point five meters by four point two meters."
+},
+{
+"in": "Add 250 ml of milk.",
+"plain": "Add two hundred and fifty milliliters of milk.",
+"names": "Add two hundred and fifty milliliters of milk."
+},
+{
+"in": "The screen is 6.1 inches.",
+"plain": "The screen is six point one inches.",
+"names": "The screen is six point one inches."
+},
+{
+"in": "The route is 12.8 km long.",
+"plain": "The route is twelve point eight kilometers long.",
+"names": "The route is twelve point eight kilometers long."
+},
+{
+"in": "Tyre pressure should be 2.3 bar.",
+"plain": "Tyre pressure should be two point three bar.",
+"names": "Tyre pressure should be two point three bar."
+},
+{
+"in": "The bottle holds 1.5 L.",
+"plain": "The bottle holds one point five liters.",
+"names": "The bottle holds one point five liters."
+},
+{
+"in": "He is 1.82 m tall.",
+"plain": "He is one point eight two meters tall.",
+"names": "He is one point eight two meters tall."
+},
+{
+"in": "The file is 48 MB.",
+"plain": "The file is forty eight megabytes.",
+"names": "The file is forty eight megabytes."
+},
+{
+"in": "The battery is 5,000 mAh.",
+"plain": "The battery is five thousand milliamp hours.",
+"names": "The battery is five thousand milliamp hours."
+},
+{
+"in": "The laptop weighs 1.3 kg.",
+"plain": "The laptop weighs one point three kilograms.",
+"names": "The laptop weighs one point three kilograms."
+},
+{
+"in": "The dose is 500 mg twice a day.",
+"plain": "The dose is five hundred milligrams twice a day.",
+"names": "The dose is five hundred milligrams twice a day."
+},
+{
+"in": "It uses 9.5 kWh per day.",
+"plain": "It uses nine point five kilowatt hours per day.",
+"names": "It uses nine point five kilowatt hours per day."
+},
+{
+"in": "The ceiling is 2.6 m high.",
+"plain": "The ceiling is two point six meters high.",
+"names": "The ceiling is two point six meters high."
+},
+{
+"in": "The garden is 120 m².",
+"plain": "The garden is one hundred and twenty square meters.",
+"names": "The garden is one hundred and twenty square meters."
+},
+{
+"in": "The engine makes 180 hp.",
+"plain": "The engine makes one hundred and eighty hp.",
+"names": "The engine makes one hundred and eighty hp."
+},
+{
+"in": "The baby weighed 3.4 kg at birth.",
+"plain": "The baby weighed three point four kilograms at birth.",
+"names": "The baby weighed three point four kilograms at birth."
+},
+{
+"in": "The wall is 25 cm thick.",
+"plain": "The wall is twenty five centimeters thick.",
+"names": "The wall is twenty five centimeters thick."
+},
+{
+"in": "The download is 1.2 GB.",
+"plain": "The download is one point two gigabytes.",
+"names": "The download is one point two gigabytes."
+},
+{
+"in": "The speed limit is 30 km/h here.",
+"plain": "The speed limit is thirty kilometers per hour here.",
+"names": "The speed limit is thirty kilometers per hour here."
+},
+{
+"in": "The pool is 25 m long.",
+"plain": "The pool is twenty five meters long.",
+"names": "The pool is twenty five meters long."
+},
+{
+"in": "The sofa is 220 cm wide.",
+"plain": "The sofa is two hundred and twenty centimeters wide.",
+"names": "The sofa is two hundred and twenty centimeters wide."
+},
+{
+"in": "Use 2 tsp of salt.",
+"plain": "Use two teaspoons of salt.",
+"names": "Use two teaspoons of salt."
+},
+{
+"in": "The plot is 0.4 ha.",
+"plain": "The plot is zero point four ha.",
+"names": "The plot is zero point four ha."
+},
+{
+"in": "The flight is 1,050 km.",
+"plain": "The flight is one thousand and fifty kilometers.",
+"names": "The flight is one thousand and fifty kilometers."
+},
+{
+"in": "Your appointment is on March 14, 2026.",
+"plain": "Your appointment is on March fourteenth, twenty twenty six.",
+"names": "Your appointment is on March fourteenth, twenty twenty six."
+},
+{
+"in": "The invoice is due on the 3rd of May.",
+"plain": "The invoice is due on the third of May.",
+"names": "The invoice is due on the third of May."
+},
+{
+"in": "We moved in on 1 September 2024.",
+"plain": "We moved in on the first of September twenty twenty four.",
+"names": "We moved in on the first of September twenty twenty four."
+},
+{
+"in": "The store is closed on December 25.",
+"plain": "The store is closed on December twenty fifth.",
+"names": "The store is closed on December twenty fifth."
+},
+{
+"in": "The course starts on Monday, 5 January.",
+"plain": "The course starts on Monday, the fifth of January.",
+"names": "The course starts on Monday, the fifth of January."
+},
+{
+"in": "The last payment was in June 2025.",
+"plain": "The last payment was in June twenty twenty five.",
+"names": "The last payment was in June twenty twenty five."
+},
+{
+"in": "Her birthday is on 22 February.",
+"plain": "Her birthday is on the twenty second of February.",
+"names": "Her birthday is on the twenty second of February."
+},
+{
+"in": "The sale ends Sunday, 30 November.",
+"plain": "The sale ends Sunday, the thirtieth of November.",
+"names": "The sale ends Sunday, the thirtieth of November."
+},
+{
+"in": "The contract was signed in 2019.",
+"plain": "The contract was signed in twenty nineteen.",
+"names": "The contract was signed in twenty nineteen."
+},
+{
+"in": "The next review is in Q2 2027.",
+"plain": "The next review is in Q two twenty twenty seven.",
+"names": "The next review is in Q two twenty twenty seven."
+},
+{
+"in": "The festival is in late August.",
+"plain": "The festival is in late August.",
+"names": "The festival is in late August."
+},
+{
+"in": "He joined us on 15 October 2021.",
+"plain": "He joined us on the fifteenth of October twenty twenty one.",
+"names": "He joined us on the fifteenth of October twenty twenty one."
+},
+{
+"in": "The offer expires on April 30.",
+"plain": "The offer expires on April thirtieth.",
+"names": "The offer expires on April thirtieth."
+},
+{
+"in": "The baby is due in mid-July.",
+"plain": "The baby is due in mid-July.",
+"names": "The baby is due in mid-July."
+},
+{
+"in": "The meeting is on Tuesday the 17th.",
+"plain": "The meeting is on Tuesday the seventeenth.",
+"names": "The meeting is on Tuesday the seventeenth."
+},
+{
+"in": "The warranty runs until September 2028.",
+"plain": "The warranty runs until September twenty twenty eight.",
+"names": "The warranty runs until September twenty twenty eight."
+},
+{
+"in": "The results come out on 12 June.",
+"plain": "The results come out on the twelfth of June.",
+"names": "The results come out on the twelfth of June."
+},
+{
+"in": "The vote was held on 4 July 2024.",
+"plain": "The vote was held on the fourth of July twenty twenty four.",
+"names": "The vote was held on the fourth of July twenty twenty four."
+},
+{
+"in": "The renovation finishes in early March.",
+"plain": "The renovation finishes in early March.",
+"names": "The renovation finishes in early March."
+},
+{
+"in": "Registration opens on 1 December.",
+"plain": "Registration opens on the first of December.",
+"names": "Registration opens on the first of December."
+},
+{
+"in": "The company was founded in 1998.",
+"plain": "The company was founded in nineteen ninety eight.",
+"names": "The company was founded in nineteen ninety eight."
+},
+{
+"in": "The exam is on Friday, 22 May.",
+"plain": "The exam is on Friday, the twenty second of May.",
+"names": "The exam is on Friday, the twenty second of May."
+},
+{
+"in": "Your card was issued in August 2026.",
+"plain": "Your card was issued in August twenty twenty six.",
+"names": "Your card was issued in August twenty twenty six."
+},
+{
+"in": "The lease ends on 31 January.",
+"plain": "The lease ends on the thirty first of January.",
+"names": "The lease ends on the thirty first of January."
+},
+{
+"in": "Term starts on 8 September.",
+"plain": "Term starts on the eighth of September.",
+"names": "Term starts on the eighth of September."
+},
+{
+"in": "You ordered 3 items and 2 are in stock.",
+"plain": "You ordered three items and two are in stock.",
+"names": "You ordered three items and two are in stock."
+},
+{
+"in": "We have 12 seats left.",
+"plain": "We have twelve seats left.",
+"names": "We have twelve seats left."
+},
+{
+"in": "The pack contains 24 bottles.",
+"plain": "The pack contains twenty four bottles.",
+"names": "The pack contains twenty four bottles."
+},
+{
+"in": "There are 1,200 units in the warehouse.",
+"plain": "There are one thousand two hundred units in the warehouse.",
+"names": "There are one thousand two hundred units in the warehouse."
+},
+{
+"in": "Please send 2 copies of the form.",
+"plain": "Please send two copies of the form.",
+"names": "Please send two copies of the form."
+},
+{
+"in": "The team has 15 members.",
+"plain": "The team has fifteen members.",
+"names": "The team has fifteen members."
+},
+{
+"in": "The recipe serves 4 people.",
+"plain": "The recipe serves four people.",
+"names": "The recipe serves four people."
+},
+{
+"in": "The box holds 6 cans.",
+"plain": "The box holds six cans.",
+"names": "The box holds six cans."
+},
+{
+"in": "We received 48 applications.",
+"plain": "We received forty eight applications.",
+"names": "We received forty eight applications."
+},
+{
+"in": "The class has 28 students.",
+"plain": "The class has twenty eight students.",
+"names": "The class has twenty eight students."
+},
+{
+"in": "The bus carries 55 passengers.",
+"plain": "The bus carries fifty five passengers.",
+"names": "The bus carries fifty five passengers."
+},
+{
+"in": "The book has 312 pages.",
+"plain": "The book has three hundred and twelve pages.",
+"names": "The book has three hundred and twelve pages."
+},
+{
+"in": "We need 100 chairs for the event.",
+"plain": "We need one hundred chairs for the event.",
+"names": "We need one hundred chairs for the event."
+},
+{
+"in": "The order is for 250 badges.",
+"plain": "The order is for two hundred and fifty badges.",
+"names": "The order is for two hundred and fifty badges."
+},
+{
+"in": "There are 7 steps to follow.",
+"plain": "There are seven steps to follow.",
+"names": "There are seven steps to follow."
+},
+{
+"in": "The library has 40,000 books.",
+"plain": "The library has forty thousand books.",
+"names": "The library has forty thousand books."
+},
+{
+"in": "The parcel contains 3 shirts and 1 jacket.",
+"plain": "The parcel contains three shirts and one jacket.",
+"names": "The parcel contains three shirts and one jacket."
+},
+{
+"in": "The town has 8,500 residents.",
+"plain": "The town has eight thousand five hundred residents.",
+"names": "The town has eight thousand five hundred residents."
+},
+{
+"in": "Buy 2, get 1 free.",
+"plain": "Buy two, get one free.",
+"names": "Buy two, get one free."
+},
+{
+"in": "The survey had 1,034 responses.",
+"plain": "The survey had one thousand and thirty four responses.",
+"names": "The survey had one thousand and thirty four responses."
+},
+{
+"in": "The venue holds 2,000 people.",
+"plain": "The venue holds two thousand people.",
+"names": "The venue holds two thousand people."
+},
+{
+"in": "The pack includes 10 masks.",
+"plain": "The pack includes ten masks.",
+"names": "The pack includes ten masks."
+},
+{
+"in": "The garden has 9 apple trees.",
+"plain": "The garden has nine apple trees.",
+"names": "The garden has nine apple trees."
+},
+{
+"in": "We sold 365 tickets.",
+"plain": "We sold three hundred and sixty five tickets.",
+"names": "We sold three hundred and sixty five tickets."
+},
+{
+"in": "The hotel has 120 rooms.",
+"plain": "The hotel has one hundred and twenty rooms.",
+"names": "The hotel has one hundred and twenty rooms."
+},
+{
+"in": "Order 48213907 ships on 14/03 and arrives in 3-5 days.",
+"plain": "Order four eight two one three nine zero seven ships on the fourteenth of March and arrives in three to five days.",
+"names": "Order four eight two one three nine zero seven ships on the fourteenth of March and arrives in three to five days."
+},
+{
+"in": "Your flight BA-2490 departs at 07:05 from gate B12.",
+"plain": "Your flight B A two four nine zero departs at seven oh five from gate B twelve.",
+"names": "Your flight B A two four nine zero departs at seven oh five from gate B twelve."
+},
+{
+"in": "Table no. 7 is booked for 20:00 on 22 February.",
+"plain": "Table number seven is booked for twenty hundred on the twenty second of February.",
+"names": "Table number seven is booked for twenty hundred on the twenty second of February."
+},
+{
+"in": "The parcel weighs 2.4 kg and costs €12.50 to send.",
+"plain": "The parcel weighs two point four kilograms and costs twelve euros and fifty cents to send.",
+"names": "The parcel weighs two point four kilograms and costs twelve euros and fifty cents to send."
+},
+{
+"in": "Room 204 is 19°C, set to 21°C by 18:00.",
+"plain": "Room two oh four is nineteen degrees Celsius, set to twenty one degrees Celsius by eighteen hundred.",
+"names": "Room two oh four is nineteen degrees Celsius, set to twenty one degrees Celsius by eighteen hundred."
+},
+{
+"in": "Invoice INV-2026-144 for $1,250 is due 31/12.",
+"plain": "Invoice I N V two zero two six one four four for one thousand two hundred and fifty dollars is due the thirty first of December.",
+"names": "Invoice I N V two zero two six one four four for one thousand two hundred and fifty dollars is due the thirty first of December."
+},
+{
+"in": "Call 020 7946 0018 between 9-5 to confirm booking AB-4471-Z.",
+"plain": "Call zero two zero, seven nine four six, zero zero one eight between nine to five to confirm booking A B four four seven one Z.",
+"names": "Call zero two zero, seven nine four six, zero zero one eight between nine to five to confirm booking A B four four seven one Z."
+},
+{
+"in": "Version 2.4.1 adds 3 fixes and 12 new icons.",
+"plain": "Version two point four point one adds three fixes and twelve new icons.",
+"names": "Version two point four point one adds three fixes and twelve new icons."
+},
+{
+"in": "Ticket #4471 was opened on 2026-10-11 at 09:12.",
+"plain": "Ticket number four four seven one was opened on October eleventh, twenty twenty six at nine twelve.",
+"names": "Ticket number four four seven one was opened on October eleventh, twenty twenty six at nine twelve."
+},
+{
+"in": "Your 6.1-inch model costs £799, or £33.29 a month.",
+"plain": "Your six point one I N C H model costs seven hundred and ninety nine pounds, or thirty three pounds twenty nine a month.",
+"names": "Your six point one I N C H model costs seven hundred and ninety nine pounds, or thirty three pounds twenty nine a month."
+},
+{
+"in": "The train leaves at 14:30 from platform 3 and takes 2h 15.",
+"plain": "The train leaves at fourteen thirty from platform three and takes two hours fifteen minutes.",
+"names": "The train leaves at fourteen thirty from platform three and takes two hours fifteen minutes."
+},
+{
+"in": "Seat 14C on train IC-2042, arriving 23:50.",
+"plain": "Seat fourteen C on train I C two zero four two, arriving twenty three fifty.",
+"names": "Seat fourteen C on train I C two zero four two, arriving twenty three fifty."
+},
+{
+"in": "Refund of €42 for order #773102 was issued on 09/10.",
+"plain": "Refund of forty two euros for order number seven seven three one zero two was issued on the ninth of October.",
+"names": "Refund of forty two euros for order number seven seven three one zero two was issued on the ninth of October."
+},
+{
+"in": "The 12.8 km route takes 10-15 minutes by car.",
+"plain": "The twelve point eight kilometers route takes ten to fifteen minutes by car.",
+"names": "The twelve point eight kilometers route takes ten to fifteen minutes by car."
+},
+{
+"in": "Code SAVE-20 gives 20% off until 30/11.",
+"plain": "Code Save twenty gives twenty percent off until the thirtieth of November.",
+"names": "Code Save twenty gives twenty percent off until the thirtieth of November."
+},
+{
+"in": "The pack has 24 bottles of 250 ml.",
+"plain": "The pack has twenty four bottles of two hundred and fifty milliliters.",
+"names": "The pack has twenty four bottles of two hundred and fifty milliliters."
+},
+{
+"in": "Case CS-2026-0813 is at step 3 of 7.",
+"plain": "Case C S two zero two six zero eight one three is at step three of seven.",
+"names": "Case C S two zero two six zero eight one three is at step three of seven."
+},
+{
+"in": "Dose: 500 mg at 08:00 and 20:00.",
+"plain": "Dose: five hundred milligrams at eight o'clock and twenty hundred.",
+"names": "Dose: five hundred milligrams at eight o'clock and twenty hundred."
+},
+{
+"in": "Pages 12-18 of report_final_v3.pdf are blank.",
+"plain": "Pages twelve to eighteen of report underscore final underscore v three dot pdf are blank.",
+"names": "Pages twelve to eighteen of report underscore final underscore v three dot pdf are blank."
+},
+{
+"in": "Batch L-2208-K7, 1,200 units, shipped 02/10.",
+"plain": "Batch L two two zero eight K seven, one thousand two hundred units, shipped the second of October.",
+"names": "Batch L two two zero eight K seven, one thousand two hundred units, shipped the second of October."
+},
+{
+"in": "Deposit $250 by 15.11.2026 to hold room 201.",
+"plain": "Deposit two hundred and fifty dollars by the fifteenth of November twenty twenty six to hold room two oh one.",
+"names": "Deposit two hundred and fifty dollars by the fifteenth of November twenty twenty six to hold room two oh one."
+},
+{
+"in": "The 2019-2023 total is €3.5 million.",
+"plain": "The twenty nineteen to twenty twenty three total is three point five million euros.",
+"names": "The twenty nineteen to twenty twenty three total is three point five million euros."
+},
+{
+"in": "Your PIN is 4471 and your ID is MB-11-4820.",
+"plain": "Your PIN is four thousand four hundred and seventy one and your ID is M B eleven four eight two zero.",
+"names": "Your PIN is four thousand four hundred and seventy one and your ID is M B eleven four eight two zero."
+},
+{
+"in": "Bus no. 42 runs every 10-15 minutes until 23:50.",
+"plain": "Bus forty two runs every ten to fifteen minutes until twenty three fifty.",
+"names": "Bus forty two runs every ten to fifteen minutes until twenty three fifty."
+},
+{
+"in": "Lows of -2°C on Thursday, 12/11.",
+"plain": "Lows of minus two degrees Celsius on Thursday, the twelfth of November.",
+"names": "Lows of minus two degrees Celsius on Thursday, the twelfth of November."
+},
+{
+"in": "The total comes to €1,234.56.",
+"plain": "The total comes to one thousand two hundred and thirty four euros and fifty six cents.",
+"names": "The total comes to one thousand two hundred and thirty four euros and fifty six cents."
+},
+{
+"in": "The plan costs $9.99 a month.",
+"plain": "The plan costs nine dollars and ninety nine cents a month.",
+"names": "The plan costs nine dollars and ninety nine cents a month."
+},
+{
+"in": "We raised €3.5bn last year.",
+"plain": "We raised three point five billion euros last year.",
+"names": "We raised three point five billion euros last year."
+},
+{
+"in": "The deal is worth $1.5M.",
+"plain": "The deal is worth one point five million dollars.",
+"names": "The deal is worth one point five million dollars."
+},
+{
+"in": "Tickets are £7.50 each.",
+"plain": "Tickets are seven pounds fifty each.",
+"names": "Tickets are seven pounds fifty each."
+},
+{
+"in": "The fee is $250.",
+"plain": "The fee is two hundred and fifty dollars.",
+"names": "The fee is two hundred and fifty dollars."
+},
+{
+"in": "Your balance is -€12.50.",
+"plain": "Your balance is -twelve euros and fifty cents.",
+"names": "Your balance is -twelve euros and fifty cents."
+},
+{
+"in": "The house sold for £3.2m.",
+"plain": "The house sold for three point two million pounds.",
+"names": "The house sold for three point two million pounds."
+},
+{
+"in": "Fuel is €1.89 per litre.",
+"plain": "Fuel is one euro and eighty nine cents per litre.",
+"names": "Fuel is one euro and eighty nine cents per litre."
+},
+{
+"in": "The refund of $42.00 is on its way.",
+"plain": "The refund of forty two dollars is on its way.",
+"names": "The refund of forty two dollars is on its way."
+},
+{
+"in": "Shares closed at $0.07.",
+"plain": "Shares closed at seven cents.",
+"names": "Shares closed at seven cents."
+},
+{
+"in": "The budget is US$4.2 million.",
+"plain": "The budget is four point two million dollars.",
+"names": "The budget is four point two million dollars."
+},
+{
+"in": "It costs 50¢ per item.",
+"plain": "It costs fifty cents per item.",
+"names": "It costs fifty cents per item."
+},
+{
+"in": "Revenue hit $2.3B in the quarter.",
+"plain": "Revenue hit two point three billion dollars in the quarter.",
+"names": "Revenue hit two point three billion dollars in the quarter."
+},
+{
+"in": "The deposit is €500.",
+"plain": "The deposit is five hundred euros.",
+"names": "The deposit is five hundred euros."
+},
+{
+"in": "The fine is between $250 and $500.",
+"plain": "The fine is between two hundred and fifty dollars and five hundred dollars.",
+"names": "The fine is between two hundred and fifty dollars and five hundred dollars."
+},
+{
+"in": "Lunch was CHF 28.",
+"plain": "Lunch was twenty eight Swiss francs.",
+"names": "Lunch was twenty eight Swiss francs."
+},
+{
+"in": "The bonus is £1,000.",
+"plain": "The bonus is one thousand pounds.",
+"names": "The bonus is one thousand pounds."
+},
+{
+"in": "The company is valued at €12bn.",
+"plain": "The company is valued at twelve billion euros.",
+"names": "The company is valued at twelve billion euros."
+},
+{
+"in": "Delivery is $4.99, or free over $35.",
+"plain": "Delivery is four dollars and ninety nine cents, or free over thirty five dollars.",
+"names": "Delivery is four dollars and ninety nine cents, or free over thirty five dollars."
+},
+{
+"in": "The coffee was €3.20.",
+"plain": "The coffee was three euros and twenty cents.",
+"names": "The coffee was three euros and twenty cents."
+},
+{
+"in": "She earns $85k a year.",
+"plain": "She earns eighty five thousand dollars a year.",
+"names": "She earns eighty five thousand dollars a year."
+},
+{
+"in": "The subscription is £119 a year.",
+"plain": "The subscription is one hundred and nineteen pounds a year.",
+"names": "The subscription is one hundred and nineteen pounds a year."
+},
+{
+"in": "The ring cost $12,400.",
+"plain": "The ring cost twelve thousand four hundred dollars.",
+"names": "The ring cost twelve thousand four hundred dollars."
+},
+{
+"in": "Rent is €950 a month.",
+"plain": "Rent is nine hundred and fifty euros a month.",
+"names": "Rent is nine hundred and fifty euros a month."
+},
+{
+"in": "You get 15% off today.",
+"plain": "You get fifteen percent off today.",
+"names": "You get fifteen percent off today."
+},
+{
+"in": "Battery is at 23%.",
+"plain": "Battery is at twenty three percent.",
+"names": "Battery is at twenty three percent."
+},
+{
+"in": "Sales rose 3.5% this quarter.",
+"plain": "Sales rose three point five percent this quarter.",
+"names": "Sales rose three point five percent this quarter."
+},
+{
+"in": "Interest is 0.5% a year.",
+"plain": "Interest is zero point five percent a year.",
+"names": "Interest is zero point five percent a year."
+},
+{
+"in": "Only 1/4 of the seats are left.",
+"plain": "Only one quarter of the seats are left.",
+"names": "Only one quarter of the seats are left."
+},
+{
+"in": "Add 1½ cups of flour.",
+"plain": "Add one and a half cups of flour.",
+"names": "Add one and a half cups of flour."
+},
+{
+"in": "Humidity is 78%.",
+"plain": "Humidity is seventy eight percent.",
+"names": "Humidity is seventy eight percent."
+},
+{
+"in": "The tax rate is 20%.",
+"plain": "The tax rate is twenty percent.",
+"names": "The tax rate is twenty percent."
+},
+{
+"in": "Two thirds of users said yes.",
+"plain": "Two thirds of users said yes.",
+"names": "Two thirds of users said yes."
+},
+{
+"in": "Unemployment fell to 4.2%.",
+"plain": "Unemployment fell to four point two percent.",
+"names": "Unemployment fell to four point two percent."
+},
+{
+"in": "Use ¾ of the bottle.",
+"plain": "Use three quarters of the bottle.",
+"names": "Use three quarters of the bottle."
+},
+{
+"in": "The discount is 12.5%.",
+"plain": "The discount is twelve point five percent.",
+"names": "The discount is twelve point five percent."
+},
+{
+"in": "Just 0.1% of orders arrive late.",
+"plain": "Just zero point one percent of orders arrive late.",
+"names": "Just zero point one percent of orders arrive late."
+},
+{
+"in": "The exam pass mark is 65%.",
+"plain": "The exam pass mark is sixty five percent.",
+"names": "The exam pass mark is sixty five percent."
+},
+{
+"in": "Fill the tank 3/4 full.",
+"plain": "Fill the tank three quarters full.",
+"names": "Fill the tank three quarters full."
+},
+{
+"in": "The deposit is 10% of the price.",
+"plain": "The deposit is ten percent of the price.",
+"names": "The deposit is ten percent of the price."
+},
+{
+"in": "The share price dropped 2%.",
+"plain": "The share price dropped two percent.",
+"names": "The share price dropped two percent."
+},
+{
+"in": "Half a teaspoon is enough.",
+"plain": "Half a teaspoon is enough.",
+"names": "Half a teaspoon is enough."
+},
+{
+"in": "Occupancy is at 92%.",
+"plain": "Occupancy is at ninety two percent.",
+"names": "Occupancy is at ninety two percent."
+},
+{
+"in": "Inflation is 1.8%.",
+"plain": "Inflation is one point eight percent.",
+"names": "Inflation is one point eight percent."
+},
+{
+"in": "The CPU is at 100%.",
+"plain": "The CPU is at one hundred percent.",
+"names": "The CPU is at one hundred percent."
+},
+{
+"in": "About 1/3 of the budget is spent.",
+"plain": "About one third of the budget is spent.",
+"names": "About one third of the budget is spent."
+},
+{
+"in": "The tip was 12%.",
+"plain": "The tip was twelve percent.",
+"names": "The tip was twelve percent."
+},
+{
+"in": "The fee is 2.9% plus 30¢.",
+"plain": "The fee is two point nine percent plus thirty cents.",
+"names": "The fee is two point nine percent plus thirty cents."
+},
+{
+"in": "Storage is 85% full.",
+"plain": "Storage is eighty five percent full.",
+"names": "Storage is eighty five percent full."
+},
+{
+"in": "Dr. Patel will see you at 10:00.",
+"plain": "Doctor Patel will see you at ten o'clock.",
+"names": "Doctor Patel will see you at ten o'clock."
+},
+{
+"in": "The office is on Main St.",
+"plain": "The office is on Main Street.",
+"names": "The office is on Main Street."
+},
+{
+"in": "Turn left onto 5th Ave.",
+"plain": "Turn left onto fifth Avenue.",
+"names": "Turn left onto fifth Avenue."
+},
+{
+"in": "Mr. and Mrs. Clarke have arrived.",
+"plain": "Mister and Missus Clarke have arrived.",
+"names": "Mister and Missus Clarke have arrived."
+},
+{
+"in": "It takes approx. 20 minutes.",
+"plain": "It takes approximately twenty minutes.",
+"names": "It takes approximately twenty minutes."
+},
+{
+"in": "The parcel is at 12 Oak Rd.",
+"plain": "The parcel is at twelve Oak Road.",
+"names": "The parcel is at twelve Oak Road."
+},
+{
+"in": "Send it to the HR dept.",
+"plain": "Send it to the HR department",
+"names": "Send it to the HR department"
+},
+{
+"in": "Bring your ID, passport, etc.",
+"plain": "Bring your ID, passport, et cetera",
+"names": "Bring your ID, passport, et cetera"
+},
+{
+"in": "Prof. Nguyen teaches on Mondays.",
+"plain": "Professor Nguyen teaches on Mondays.",
+"names": "Professor Win teaches on Mondays."
+},
+{
+"in": "The St. James branch is closed.",
+"plain": "The Saint James branch is closed.",
+"names": "The Saint James branch is closed."
+},
+{
+"in": "Pay by card, cash, i.e. no cheques.",
+"plain": "Pay by card, cash, that is no cheques.",
+"names": "Pay by card, cash, that is no cheques."
+},
+{
+"in": "Mt. Everest is 8,849 m high.",
+"plain": "Mount Everest is eight thousand eight hundred and forty nine meters high.",
+"names": "Mount Everest is eight thousand eight hundred and forty nine meters high."
+},
+{
+"in": "It is 30 min. by bus.",
+"plain": "It is thirty minutes by bus.",
+"names": "It is thirty minutes by bus."
+},
+{
+"in": "Please see fig. 3 on page 12.",
+"plain": "Please see figure three on page twelve.",
+"names": "Please see figure three on page twelve."
+},
+{
+"in": "The meeting is on the 3rd fl.",
+"plain": "The meeting is on the third floor",
+"names": "The meeting is on the third floor"
+},
+{
+"in": "Contact Sgt. Harris at the station.",
+"plain": "Contact Sergeant Harris at the station.",
+"names": "Contact Sergeant Harris at the station."
+},
+{
+"in": "The store is on Park Blvd.",
+"plain": "The store is on Park Boulevard.",
+"names": "The store is on Park Boulevard."
+},
+{
+"in": "Vol. 2 ships next week.",
+"plain": "Vol. two ships next week.",
+"names": "Vol. two ships next week."
+},
+{
+"in": "Our address is 8 Church Ln.",
+"plain": "Our address is eight Church Lane.",
+"names": "Our address is eight Church Lane."
+},
+{
+"in": "Ms. Lopez is on leave until Fri.",
+"plain": "Miz Lopez is on leave until Friday.",
+"names": "Miz Lopez is on leave until Friday."
+},
+{
+"in": "Delivery Mon.-Fri., 8am to 6pm.",
+"plain": "Delivery Monday to Friday, eight AM to six PM.",
+"names": "Delivery Monday to Friday, eight AM to six PM."
+},
+{
+"in": "The ref. no. is 4471.",
+"plain": "The reference no. is four thousand four hundred and seventy one.",
+"names": "The reference no. is four thousand four hundred and seventy one."
+},
+{
+"in": "The max. load is 500 kg.",
+"plain": "The maximum load is five hundred kilograms.",
+"names": "The maximum load is five hundred kilograms."
+},
+{
+"in": "Est. arrival is 14:30.",
+"plain": "Estimated arrival is fourteen thirty.",
+"names": "Estimated arrival is fourteen thirty."
+},
+{
+"in": "Capt. Lewis will fly today.",
+"plain": "Captain Lewis will fly today.",
+"names": "Captain Lewis will fly today."
+},
+{
+"in": "The margin is ±2 mm.",
+"plain": "The margin is plus or minus two millimeters.",
+"names": "The margin is plus or minus two millimeters."
+},
+{
+"in": "The room is 3 × 4 metres.",
+"plain": "The room is three by four metres.",
+"names": "The room is three by four metres."
+},
+{
+"in": "Use the + button to add a stop.",
+"plain": "Use the plus button to add a stop.",
+"names": "Use the plus button to add a stop."
+},
+{
+"in": "Set the angle to 45°.",
+"plain": "Set the angle to forty five degrees.",
+"names": "Set the angle to forty five degrees."
+},
+{
+"in": "The result must be < 100.",
+"plain": "The result must be < one hundred.",
+"names": "The result must be < one hundred."
+},
+{
+"in": "Enter a value ≥ 18.",
+"plain": "Enter a value greater than or equal to eighteen.",
+"names": "Enter a value greater than or equal to eighteen."
+},
+{
+"in": "Price × quantity = total.",
+"plain": "Price by quantity equals total.",
+"names": "Price by quantity equals total."
+},
+{
+"in": "It runs at 2× speed.",
+"plain": "It runs at two by speed.",
+"names": "It runs at two by speed."
+},
+{
+"in": "The ratio is 16:9.",
+"plain": "The ratio is sixteen to nine.",
+"names": "The ratio is sixteen to nine."
+},
+{
+"in": "The limit is 10 ± 1 seconds.",
+"plain": "The limit is ten plus or minus one seconds.",
+"names": "The limit is ten plus or minus one seconds."
+},
+{
+"in": "The sum 12 + 8 = 20 is correct.",
+"plain": "The sum twelve plus eight equals twenty is correct.",
+"names": "The sum twelve plus eight equals twenty is correct."
+},
+{
+"in": "Rotate by 90° clockwise.",
+"plain": "Rotate by ninety degrees clockwise.",
+"names": "Rotate by ninety degrees clockwise."
+},
+{
+"in": "Values > 50 trigger an alert.",
+"plain": "Values > fifty trigger an alert.",
+"names": "Values > fifty trigger an alert."
+},
+{
+"in": "The scale is 1:25,000.",
+"plain": "The scale is one to twenty five thousand.",
+"names": "The scale is one to twenty five thousand."
+},
+{
+"in": "The sign is 2 m × 1 m.",
+"plain": "The sign is two meters by one meter.",
+"names": "The sign is two meters by one meter."
+},
+{
+"in": "Divide 48 ÷ 6 to get 8.",
+"plain": "Divide forty eight divided by six to get eight.",
+"names": "Divide forty eight divided by six to get eight."
+},
+{
+"in": "Keep it ≤ 5 kg.",
+"plain": "Keep it less than or equal to five kilograms.",
+"names": "Keep it less than or equal to five kilograms."
+},
+{
+"in": "A 3:1 mix of sand and cement.",
+"plain": "A three to one mix of sand and cement.",
+"names": "A three to one mix of sand and cement."
+},
+{
+"in": "The error was ±0.5%.",
+"plain": "The error was plus or minus zero point five percent.",
+"names": "The error was plus or minus zero point five percent."
+},
+{
+"in": "Turn 180° and go back.",
+"plain": "Turn one hundred and eighty degrees and go back.",
+"names": "Turn one hundred and eighty degrees and go back."
+},
+{
+"in": "The aspect ratio is 4:3.",
+"plain": "The aspect ratio is four to three.",
+"names": "The aspect ratio is four to three."
+},
+{
+"in": "The odds are 2:1 against.",
+"plain": "The odds are two to one against.",
+"names": "The odds are two to one against."
+},
+{
+"in": "Press Ctrl+C to copy.",
+"plain": "Press Ctrl plus C to copy.",
+"names": "Press Ctrl plus C to copy."
+},
+{
+"in": "The photo is 4 × 6 inches.",
+"plain": "The photo is four by six inches.",
+"names": "The photo is four by six inches."
+},
+{
+"in": "7 − 3 = 4, as expected.",
+"plain": "seven minus three equals four, as expected.",
+"names": "seven minus three equals four, as expected."
+},
+{
+"in": "This is your 3rd reminder.",
+"plain": "This is your third reminder.",
+"names": "This is your third reminder."
+},
+{
+"in": "She finished 2nd in the race.",
+"plain": "She finished second in the race.",
+"names": "She finished second in the race."
+},
+{
+"in": "Take the 1st exit at the roundabout.",
+"plain": "Take the first exit at the roundabout.",
+"names": "Take the first exit at the roundabout."
+},
+{
+"in": "It is on the 21st floor.",
+"plain": "It is on the twenty first floor.",
+"names": "It is on the twenty first floor."
+},
+{
+"in": "Happy 40th birthday!",
+"plain": "Happy fortieth birthday!",
+"names": "Happy fortieth birthday!"
+},
+{
+"in": "The 5th of May is a holiday.",
+"plain": "The fifth of May is a holiday.",
+"names": "The fifth of May is a holiday."
+},
+{
+"in": "He came 11th out of 200.",
+"plain": "He came eleventh out of two hundred.",
+"names": "He came eleventh out of two hundred."
+},
+{
+"in": "The 2nd season starts in May.",
+"plain": "The second season starts in May.",
+"names": "The second season starts in May."
+},
+{
+"in": "Press 1 for the 1st option.",
+"plain": "Press one for the first option.",
+"names": "Press one for the first option."
+},
+{
+"in": "The 100th customer wins a prize.",
+"plain": "The one hundredth customer wins a prize.",
+"names": "The one hundredth customer wins a prize."
+},
+{
+"in": "It is the 4th time this week.",
+"plain": "It is the fourth time this week.",
+"names": "It is the fourth time this week."
+},
+{
+"in": "Louis XIV built Versailles.",
+"plain": "Louis the fourteenth built Versailles.",
+"names": "Louis the fourteenth built Ver-sigh."
+},
+{
+"in": "Chapter IV is the hardest.",
+"plain": "Chapter four is the hardest.",
+"names": "Chapter four is the hardest."
+},
+{
+"in": "Pope John Paul II visited in 1982.",
+"plain": "Pope John Paul the second visited in nineteen eighty two.",
+"names": "Pope John Paul the second visited in nineteen eighty two."
+},
+{
+"in": "The 12th edition is out now.",
+"plain": "The twelfth edition is out now.",
+"names": "The twelfth edition is out now."
+},
+{
+"in": "Turn to the 23rd page.",
+"plain": "Turn to the twenty third page.",
+"names": "Turn to the twenty third page."
+},
+{
+"in": "Our 10th anniversary is in June.",
+"plain": "Our tenth anniversary is in June.",
+"names": "Our tenth anniversary is in June."
+},
+{
+"in": "The 22nd of the month is payday.",
+"plain": "The twenty second of the month is payday.",
+"names": "The twenty second of the month is payday."
+},
+{
+"in": "Elizabeth II reigned for 70 years.",
+"plain": "Elizabeth the second reigned for seventy years.",
+"names": "Elizabeth the second reigned for seventy years."
+},
+{
+"in": "You are in the 8th row.",
+"plain": "You are in the eighth row.",
+"names": "You are in the eighth row."
+},
+{
+"in": "The 31st of December is a Friday.",
+"plain": "The thirty first of December is a Friday.",
+"names": "The thirty first of December is a Friday."
+},
+{
+"in": "The 1st and 15th are payment days.",
+"plain": "The first and fifteenth are payment days.",
+"names": "The first and fifteenth are payment days."
+},
+{
+"in": "Henry VIII had six wives.",
+"plain": "Henry the eighth had six wives.",
+"names": "Henry the eighth had six wives."
+},
+{
+"in": "The 50th state is Hawaii.",
+"plain": "The fiftieth state is Hawaii.",
+"names": "The fiftieth state is Hawaii."
+},
+{
+"in": "The 9th symphony is her favourite.",
+"plain": "The ninth symphony is her favourite.",
+"names": "The ninth symphony is her favourite."
+},
+{
+"in": "Call 1-800-829-1040 now or 1-800-FLOWERS today.",
+"plain": "Call one eight hundred, eight two nine, one zero four zero now or one eight hundred, Flowers today.",
+"names": "Call one eight hundred, eight two nine, one zero four zero now or one eight hundred, Flowers today."
+},
+{
+"in": "It costs $4.2 million, or $50-75 per day, EUR 12.99, ¥300, C$12.50, 5 USD, 99¢ and £1,200.50.",
+"plain": "It costs four point two million dollars, or fifty to seventy five dollars per day, twelve euros and ninety nine cents, three hundred, yen twelve Canadian dollars and fifty cents, five dollars, ninety nine cents and one thousand two hundred pounds fifty.",
+"names": "It costs four point two million dollars, or fifty to seventy five dollars per day, twelve euros and ninety nine cents, three hundred, yen twelve Canadian dollars and fifty cents, five dollars, ninety nine cents and one thousand two hundred pounds fifty."
+},
+{
+"in": "Range $1.50-$2.50 and €3-5k and $2m-3bn.",
+"plain": "Range one dollar and fifty cents to two dollars and fifty cents and three to five thousand euros and two million to three billion dollars.",
+"names": "Range one dollar and fifty cents to two dollars and fifty cents and three to five thousand euros and two million to three billion dollars."
+},
+{
+"in": "The '80s and 1990s and the 2000s, back in '98 and '05.",
+"plain": "The eighties and nineteen nineties and the two thousands, back in ninety eight and oh five.",
+"names": "The eighties and nineteen nineties and the two thousands, back in ninety eight and oh five."
+},
+{
+"in": "Chapter XIV, Super Bowl LIX, World War II, WW2, Type II, Rocky IV, John Smith III, Pope Benedict XVI, Queen Elizabeth II, Appendix V.",
+"plain": "Chapter fourteen, Super Bowl fifty nine, World War two, World War Two, Type two, Rocky four, John Smith the third, Pope Benedict the sixteenth, Queen Elizabeth the second, Appendix V.",
+"names": "Chapter fourteen, Super Bowl fifty nine, World War two, World War Two, Type two, Rocky four, John Smith the third, Pope Benedict the sixteenth, Queen Elizabeth the second, Appendix V."
+},
+{
+"in": "See parts I through IV, sections II and III.",
+"plain": "See parts I through four, sections two and III.",
+"names": "See parts I through four, sections two and III."
+},
+{
+"in": "x^2 and 10^23 and 6.02 x 10^23 and 5 m^2 and 3 ft^3 and H2O and C6H12O6 and CO2.",
+"plain": "x squared and ten to the twenty third and six point zero two times ten to the twenty third and five square meters and three cubic feet and H two O and C six H twelve O six and C O two.",
+"names": "x squared and ten to the twenty third and six point zero two times ten to the twenty third and five square meters and three cubic feet and H two O and C six H twelve O six and C O two."
+},
+{
+"in": "Solve 3x - 2 = 11 and 4 x 5 = 20; it is 2.5x faster than the old 10x better one.",
+"plain": "Solve three x minus two equals eleven and four times five equals twenty; it is two point five x faster than the old ten x better one.",
+"names": "Solve three x minus two equals eleven and four times five equals twenty; it is two point five x faster than the old ten x better one."
+},
+{
+"in": "The 4.5M visitors and 3bn dollars, a 5K run.",
+"plain": "The four point five million visitors and three billion dollars, a five K run.",
+"names": "The four point five million visitors and three billion dollars, a five K run."
+},
+{
+"in": "Visit https://www.example.com/page, http://foo.co.uk, sftp://host.name.org, ftp://, www.site.org and docs.rs today.",
+"plain": "Visit w w w dot example dot com slash page, foo dot co dot uk, S F T P colon slash slash host dot name dot org, F T P colon slash slash, w w w dot site dot org and docs dot rs today.",
+"names": "Visit w w w dot example dot com slash page, foo dot co dot uk, S F T P colon slash slash host dot name dot org, F T P colon slash slash, w w w dot site dot org and docs dot rs today."
+},
+{
+"in": "Mail jane.doe_x@my-site.co.uk or mailto:a@b.io; see localhost:8080 and db.example.com:5432.",
+"plain": "Mail jane.doe underscore x at my dash site dot co dot uk or mail to a at b dot io; see localhost colon eighty eighty and db dot example dot com colon fifty four thirty two.",
+"names": "Mail jane.doe underscore x at my dash site dot co dot uk or mail to a at b dot io; see localhost colon eighty eighty and db dot example dot com colon fifty four thirty two."
+},
+{
+"in": "Open report_final_v3.pdf, /etc/nginx/nginx.conf, src/main_loop.rs, C:\\Users\\me, .env and API_KEY.",
+"plain": "Open report underscore final underscore v three dot pdf, slash etc slash nginx slash nginx dot conf, src slash main underscore loop dot rs, C colon backslash Users backslash me, dot env and API underscore KEY.",
+"names": "Open report underscore final underscore v three dot pdf, slash etc slash Engine-ex slash Engine-ex dot conf, src slash main underscore loop dot rs, C colon backslash Users backslash me, dot env and API underscore KEY."
+},
+{
+"in": "Use getUserName() in C#, C++ or .NET, ASP.NET and F#, with @openai and @Jane_Doe, #TheBest and #1.",
+"plain": "Use get User Name in C sharp, C plus plus or dot net, A S P dot net and F sharp, with at open A I and at Jane underscore Doe, hashtag The Best and number one.",
+"names": "Use get User Name in C sharp, C plus plus or dot net, A S P dot net and F sharp, with at open A I and at Jane underscore Doe, hashtag The Best and number one."
+},
+{
+"in": "Shipped 12-25-1999 and 14.03.2027, due 2026-10-21, on 3-17 November and 14th of March 2027, the 3rd of May.",
+"plain": "Shipped December twenty fifth nineteen ninety nine and the fourteenth of March twenty twenty seven, due October twenty first, twenty twenty six, on the third to the seventeenth of November and the fourteenth of March twenty twenty seven, the third of May.",
+"names": "Shipped December twenty fifth nineteen ninety nine and the fourteenth of March twenty twenty seven, due October twenty first, twenty twenty six, on the third to the seventeenth of November and the fourteenth of March twenty twenty seven, the third of May."
+},
+{
+"in": "From 1968-2020, 1990-95, 3/2027, 24/7, 50/50, 9/11, 1 1/2 cups, 3/4 cup, due 3/4, rated 4/5 stars.",
+"plain": "From nineteen sixty eight to twenty twenty, nineteen ninety to ninety five, March twenty twenty seven, twenty four seven, fifty fifty, nine eleven, one and a half cups, three quarters cup, due the third of April, rated four out of five stars.",
+"names": "From nineteen sixty eight to twenty twenty, nineteen ninety to ninety five, March twenty twenty seven, twenty four seven, fifty fifty, nine eleven, one and a half cups, three quarters cup, due the third of April, rated four out of five stars."
+},
+{
+"in": "Open Mon-Fri, Tue.-Thu., on Sat, next Wed. Then Sun., Jan. 5, Feb 12, 3 Oct.",
+"plain": "Open Monday to Friday, Tuesday to Thursday, on Saturday, next Wednesday. Then Sunday, January fifth, February twelfth, the third of October",
+"names": "Open Monday to Friday, Tuesday to Thursday, on Saturday, next Wednesday. Then Sunday, January fifth, February twelfth, the third of October"
+},
+{
+"in": "Lives at 742 Evergreen Terrace, 4 Elm Rd., 221B Baker St, Oak Ave and I-95 N, near Mount St Helens.",
+"plain": "Lives at seven forty two Evergreen Terrace, four Elm Road, two twenty one B Baker Street, Oak Avenue and I ninety five North, near Mount St Helens.",
+"names": "Lives at seven forty two Evergreen Terrace, four Elm Road, two twenty one B Baker Street, Oak Avenue and I ninety five North, near Mount St Helens."
+},
+{
+"in": "Dr. Patel, Mr. Lee, Mrs. Kim, Ms. Fox, Prof. Xu, St. John, Sgt. Pepper, Lt. Dan, 5 Main St. and more, approx. 3, No. 5, est. 1999, vs. them, e.g. this, i.e. that, etc. Dr.",
+"plain": "Doctor Patel, Mister Lee, Missus Kim, Miz Fox, Professor Xu, Saint John, Sergeant Pepper, Lieutenant Dan, five Main Street and more, approximately three, number five, established nineteen ninety nine, versus them, for example this, that is that, et cetera Drive",
+"names": "Doctor Patel, Mister Lee, Missus Kim, Miz Fox, Professor Xu, Saint John, Sergeant Pepper, Lieutenant Dan, five Main Street and more, approximately three, number five, established nineteen ninety nine, versus them, for example this, that is that, et cetera Drive"
+},
+{
+"in": "It lasted 2:03:45, at 2:03:45 today, 10:00-16:30, 8 AM-6 PM, 9am-5pm, 7:05 p.m., 14:00, 12:00 noon, 3:2 odds, ratio of 16:9, 00:00.",
+"plain": "It lasted two hours, three minutes, forty five seconds, at two oh three and forty five seconds today, ten o'clock to sixteen thirty, eight AM to six PM, nine AM to five PM, seven oh five PM., fourteen hundred, twelve noon, three to two odds, ratio of sixteen to nine, zero hundred.",
+"names": "It lasted two hours, three minutes, forty five seconds, at two oh three and forty five seconds today, ten o'clock to sixteen thirty, eight AM to six PM, nine AM to five PM, seven oh five PM., fourteen hundred, twelve noon, three to two odds, ratio of sixteen to nine, zero hundred."
+},
+{
+"in": "Code AB-4471-Z, ORD-9Q2-77L, CS-2026-0813, X7K9, 4hQx8Z, a9F2k, SAVE-20, WINTER-2026, promo-code-15.",
+"plain": "Code A B four four seven one Z, O R D nine Q two seven seven L, C S two zero two six zero eight one three, X seven K nine, four H Q X eight Z, A nine F two K, Save twenty, Winter two zero two six, promo code fifteen.",
+"names": "Code A B four four seven one Z, O R D nine Q two seven seven L, C S two zero two six zero eight one three, X seven K nine, four H Q X eight Z, A nine F two K, Save twenty, Winter two zero two six, promo code fifteen."
+},
+{
+"in": "Call +44 20 7946 0018, (415) 555-0199, 415.555.0199, dial 911, text 12345.",
+"plain": "Call plus four four, two zero, seven nine four six, zero zero one eight, four one five, five five five, zero one nine nine, four hundred and fifteen point five hundred and fifty five point one hundred and ninety nine, dial nine one one, text one two three four five.",
+"names": "Call plus four four, two zero, seven nine four six, zero zero one eight, four one five, five five five, zero one nine nine, four hundred and fifteen point five hundred and fifty five point one hundred and ninety nine, dial nine one one, text one two three four five."
+},
+{
+"in": "It is 5 ft 10 in, 6'2\", 10 mg/kg, 60 km/h, 1 kg, 1 mile, 100 Mbps, 3.5 GHz, 2 GB, 1 s, 1,200 W, 5 in, 3 m/s, 1 ft.",
+"plain": "It is five feet ten inches, six foot two, ten milligrams per kilogram, sixty kilometers per hour, one kilogram, one mile, one hundred megabits per second, three point five gigahertz, two gigabytes, one s, one thousand two hundred watts, five in, three meters per second, one foot.",
+"names": "It is five feet ten inches, six foot two, ten milligrams per kilogram, sixty kilometers per hour, one kilogram, one mile, one hundred megabits per second, three point five gigahertz, two gigabytes, one s, one thousand two hundred watts, five in, three meters per second, one foot."
+},
+{
+"in": "Room 402, gate 47B, flight UA 482, seat 12C, B12, AA229, A380, Boeing 747, route 66, room No. 12, Bus #9, order A12.",
+"plain": "Room four oh two, gate forty seven B, flight U A four eighty two, seat twelve C, B twelve, A A two twenty nine, A three eight zero, Boeing seven forty seven, route sixty six, room number twelve, Bus number nine, order A one two.",
+"names": "Room four oh two, gate forty seven B, flight U A four eighty two, seat twelve C, B twelve, A A two twenty nine, A three eight zero, Boeing seven forty seven, route sixty six, room number twelve, Bus number nine, order A one two."
+},
+{
+"in": "Numbers 1,234,567.89, 1.5, 12%, 3.5 %, -5, 45th, 2nd, 1st, 21st, 103rd, 1900, 2005, 1066, 12345678, 007.",
+"plain": "Numbers one million two hundred and thirty four thousand five hundred and sixty seven point eight nine, one point five, twelve percent, three point five percent, minus five, forty fifth, second, first, twenty first, one hundred and third, nineteen hundred, two thousand and five, one thousand and sixty six, one two three four five six seven eight, seven.",
+"names": "Numbers one million two hundred and thirty four thousand five hundred and sixty seven point eight nine, one point five, twelve percent, three point five percent, minus five, forty fifth, second, first, twenty first, one hundred and third, nineteen hundred, two thousand and five, one thousand and sixty six, one two three four five six seven eight, seven."
+},
+{
+"in": "Temperature 72°F, 21 °C, 90°, $1.5, $0.99, $1.00, £0.50, €1, $1, 8am, 8 p.m.",
+"plain": "Temperature seventy two degrees Fahrenheit, twenty one degrees Celsius, ninety degrees, one point five dollars, ninety nine cents, one dollar, zero pounds fifty, one euro, one dollar, eight AM, eight PM.",
+"names": "Temperature seventy two degrees Fahrenheit, twenty one degrees Celsius, ninety degrees, one point five dollars, ninety nine cents, one dollar, zero pounds fifty, one euro, one dollar, eight AM, eight PM."
+},
+{
+"in": "Version 3.10, v2.4.1, 4.0.1-beta, 1.2.3-rc1, 2.0.0-alpha, model v2.",
+"plain": "Version three point one zero, version two point four point one, four point zero point one beta, one point two point three rc one, two point zero point zero alpha, model v two.",
+"names": "Version three point one zero, version two point four point one, four point zero point one beta, one point two point three rc one, two point zero point zero alpha, model v two."
+},
+{
+"in": "5 × 10, 5 x 10, 3 ± 1, a ≥ b, x ≠ y, 5 < 6, 7 > 2, A & B, a → b, √2, 5‰, 1 = 1.",
+"plain": "five by ten, five by ten, three plus or minus one, a greater than or equal to b, x not equal to y, five less than six, seven greater than two, A and B, a to b, square root of two, five per mille, one equals one.",
+"names": "five by ten, five by ten, three plus or minus one, a greater than or equal to b, x not equal to y, five less than six, seven greater than two, A and B, a to b, square root of two, five per mille, one equals one."
+},
+{
+"in": "Postcode SW1A 1AA, M14 5TG, K1A 0B6; PIN 0420, card ending in 4459, last 4 digits of 1234, code 123456.",
+"plain": "Postcode S W one A, one A A, M one four, five T G, K one A, zero B six; PIN zero four two zero, card ending in four four five nine, last four digits of one two three four, code one two three four five six.",
+"names": "Postcode S W one A, one A A, M one four, five T G, K one A, zero B six; PIN zero four two zero, card ending in four four five nine, last four digits of one two three four, code one two three four five six."
+},
+{
+"in": "Siobhan's friend Saoirse Ronan ate gnocchi with Eoin in Worcestershire-glazed sauce; dove-cote stayed; Sean Bean and sean bean.",
+"plain": "Siobhan's friend Saoirse Ronan ate gnocchi with Eoin in Worcestershire-glazed sauce; dove-cote stayed; Sean Bean and sean bean.",
+"names": "Shivawn's friend Seersha Ronan ate nyocky with Owen in Wuster-sher-glazed sauce; dove-cote stayed; Shawn Bean and sean bean."
+},
+{
+"in": "Nguyen, Saeid, Beyoncé, Zoë Kravitz, Łódź, Ségolène Royal’s car.",
+"plain": "Nguyen, Saeid, Beyoncé, Zoë Kravitz, Łódź, Ségolène Royal's car.",
+"names": "Win, Sah-eed, Bee-on-say, Zoë Kravitz, Łódź, Say-goh-len Rwah-yal's car."
+},
+{
+"in": "The quick brown fox jumps over the lazy dog, and nothing here should change at all.",
+"plain": "The quick brown fox jumps over the lazy dog, and nothing here should change at all.",
+"names": "The quick brown fox jumps over the lazy dog, and nothing here should change at all."
+}
+]

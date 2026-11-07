@@ -218,6 +218,12 @@ pub fn download(
     model: ModelId,
     mut progress: impl FnMut(u64, Option<u64>),
 ) -> Result<PathBuf, ModelError> {
+    // The tray and API can both start downloads, and each one clears the
+    // staging folder it is about to use.
+    static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _turn = ONE_AT_A_TIME
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     progress(0, None);
     if let ModelId::Persian(voice) = model
         && let Some(spec) = voice.download_spec()

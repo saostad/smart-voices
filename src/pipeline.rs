@@ -6,6 +6,8 @@
 //! time (the next round's playback controller will own that step).
 
 use crate::chunk::{SpeechChunk, SpeechChunker};
+use crate::lang::Lang;
+use crate::normalize::{NormalizeOptions, normalize};
 use crate::pronounce::Pronunciations;
 use crate::sanitize::{SanitizerOptions, sanitize};
 
@@ -18,6 +20,23 @@ pub fn prepare(
 ) -> Vec<SpeechChunk> {
     let segments = sanitize(text, options);
     SpeechChunker::new().chunks(&segments)
+}
+
+/// The text a voice reads for a chunk: the user's pronunciation rules first,
+/// so they win, then the English normalizer. Persian text has its own front
+/// end in the Pocket engine and only gets the pronunciation rules.
+#[must_use]
+pub fn spoken_text(
+    chunk_text: &str,
+    language: Lang,
+    pronunciations: &Pronunciations,
+    options: NormalizeOptions,
+) -> String {
+    let spoken = pronunciations.apply(chunk_text);
+    match language {
+        Lang::English => normalize(&spoken, options),
+        Lang::Persian => spoken,
+    }
 }
 
 #[cfg(test)]
@@ -33,6 +52,22 @@ mod tests {
         assert_eq!(chunks[0].text, "I love SQL.");
         // ... but synthesis-time application speaks the rule:
         assert_eq!(pronunciations.apply(&chunks[0].text), "I love sequel.");
+    }
+
+    #[test]
+    fn spoken_text_normalizes_english_only_and_rules_win() {
+        let rules = Pronunciations::new(vec![crate::pronounce::PronunciationEntry::new(
+            "#1", "the best",
+        )]);
+        let options = NormalizeOptions::default();
+        assert_eq!(
+            spoken_text("We are #1 at 5 kg.", Lang::English, &rules, options),
+            "We are the best at five kilograms."
+        );
+        assert_eq!(
+            spoken_text("سلام 5 kg.", Lang::Persian, &rules, options),
+            "سلام 5 kg."
+        );
     }
 
     #[test]

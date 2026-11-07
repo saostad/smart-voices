@@ -8,10 +8,11 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::mpsc;
+use std::sync::{Arc, Mutex, RwLock, mpsc};
 use std::time::{Duration, Instant};
 
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
+use serde_json::Value;
 use tray_icon::menu::{
     CheckMenuItem, IsMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu,
     accelerator::Accelerator,
@@ -28,6 +29,7 @@ use winit::window::WindowId;
 use crate::audio::AudioSink;
 use crate::autostart;
 use crate::clipboard::{self, ClipboardEvent, MIN_TEXT_LEN};
+use crate::control::{ControlError, ControlHost, ControlRequest, PlaybackStatus};
 use crate::download::{ProgressThrottle, progress_text};
 use crate::engine::{
     ModelVariant, PARADEE_VOICES, PERSIAN_VOICES, PersianVoice, VOICES, grouped_english_voices,
@@ -35,6 +37,7 @@ use crate::engine::{
 };
 use crate::icon;
 use crate::models::{self, ModelId};
+use crate::normalize::DateOrder;
 use crate::notification;
 use crate::phonon::{DEFAULT_PHONON_VOICE, PHONON_VOICES, PhononVoiceGroup};
 use crate::pipeline::prepare;
@@ -62,6 +65,35 @@ enum AppEvent {
     DownloadStarted(ModelId),
     DownloadProgress(ModelId, u64, Option<u64>),
     DownloadDone(Result<(), String>),
+    /// A request from the HTTP API or CLI; the reply goes back on the channel.
+    Control(ControlRequest, mpsc::Sender<Result<Value, ControlError>>),
+}
+
+/// Longest the API waits for the event loop to answer a control request.
+const CONTROL_REPLY_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The tray side of the HTTP API: requests run on the main thread like menu
+/// clicks do.
+struct TrayControl(Mutex<EventLoopProxy<AppEvent>>);
+
+impl ControlHost for TrayControl {
+    fn host(&self) -> &'static str {
+        "tray"
+    }
+
+    fn call(&self, request: ControlRequest) -> Result<Value, ControlError> {
+        let (reply, answer) = mpsc::channel();
+        self.0
+            .lock()
+            .map_err(|_| {
+                ControlError::new(500, "tray_unavailable", "The tray app isn't responding")
+            })?
+            .send_event(AppEvent::Control(request, reply))
+            .map_err(|_| ControlError::new(503, "tray_closing", "The tray app is closing"))?;
+        answer.recv_timeout(CONTROL_REPLY_TIMEOUT).map_err(|_| {
+            ControlError::new(504, "tray_busy", "The tray app didn't answer in time")
+        })?
+    }
 }
 
 /// Longest status-line text, in characters.
@@ -198,6 +230,24 @@ pub fn run() -> i32 {
 
     // Checked once at startup; the latency probe is zero-cost when off.
     let debug_latency = std::env::var("SMART_VOICES_DEBUG").is_ok_and(|v| v == "1");
+    // The API is how the CLI reaches this reading. The menu, shortcuts and
+    // clipboard work without it, so a failure is shown and the app carries on.
+    let control: Arc<dyn ControlHost> = Arc::new(TrayControl(Mutex::new(proxy.clone())));
+    let mut api_error = None;
+    let api = settings_file.as_ref().and_then(|path| {
+        match crate::server::start_tray_api(&settings, path, models_root.clone(), control) {
+            Ok(api) => Some(api),
+            Err(error) => {
+                eprintln!(
+                    "warn: fallback: true, attempted=tray_api, reason={error}, taken=tray_without_api"
+                );
+                api_error = Some(format!(
+                    "Command-line and API control is unavailable: {error}"
+                ));
+                None
+            }
+        }
+    });
     let mut app = App::new(
         proxy,
         settings,
@@ -206,6 +256,13 @@ pub fn run() -> i32 {
         models_root,
         debug_latency,
     );
+    app.api_settings = api.as_ref().map(|api| api.settings.clone());
+    if let Some(message) = api_error {
+        app.startup_error = Some(match app.startup_error.take() {
+            Some(existing) => format!("{existing}\n{message}"),
+            None => message,
+        });
+    }
     // The clipboard watcher runs on its own thread; its events are forwarded
     // into the loop. A failure here (e.g. Wayland without X11) still shows
     // the tray so manual Read Clipboard keeps working.
@@ -218,7 +275,11 @@ pub fn run() -> i32 {
             None => message,
         });
     }
-    match event_loop.run_app(&mut app) {
+    let result = event_loop.run_app(&mut app);
+    if let Some(api) = api {
+        api.shutdown();
+    }
+    match result {
         Ok(()) => app.exit_code,
         Err(err) => {
             eprintln!("Error: The app event loop failed: {err}.");
@@ -239,6 +300,10 @@ struct App {
     proxy: EventLoopProxy<AppEvent>,
     settings: Settings,
     settings_path: Option<PathBuf>,
+    /// The API's copy of the settings, kept in step by `save_settings`.
+    api_settings: Option<Arc<RwLock<Settings>>>,
+    /// The status line's full text, for API clients.
+    status_text: String,
     pronunciations: Pronunciations,
     models_root: PathBuf,
     model: ModelVariant,
@@ -298,6 +363,9 @@ struct App {
     quit_item: Option<MenuItem>,
     show_reader_item: Option<CheckMenuItem>,
     animate_icon_item: Option<CheckMenuItem>,
+    normalize_text_item: Option<CheckMenuItem>,
+    respell_names_item: Option<CheckMenuItem>,
+    date_order_items: Vec<(DateOrder, CheckMenuItem)>,
     open_reader_item: Option<MenuItem>,
     /// Reading panel state, driven by every player event.
     reader_model: ReaderModel,
@@ -391,6 +459,8 @@ impl App {
             proxy,
             settings,
             settings_path,
+            api_settings: None,
+            status_text: "Ready".to_string(),
             pronunciations,
             models_root,
             model,
@@ -435,6 +505,9 @@ impl App {
             quit_item: None,
             show_reader_item: None,
             animate_icon_item: None,
+            normalize_text_item: None,
+            respell_names_item: None,
+            date_order_items: Vec::new(),
             open_reader_item: None,
             reader_model: ReaderModel::new(),
             reader: None,
@@ -480,6 +553,11 @@ impl App {
     /// Persist the settings after a menu-check change; failures show in the
     /// status line.
     fn save_settings(&mut self) {
+        if let Some(api) = &self.api_settings
+            && let Ok(mut shared) = api.write()
+        {
+            shared.clone_from(&self.settings);
+        }
         let result = match &self.settings_path {
             Some(path) => self.settings.save(path),
             None => return,
@@ -530,6 +608,28 @@ impl App {
             self.settings.animate_icon,
             None,
         );
+        let normalize_text_item = CheckMenuItem::new(
+            "Read Numbers and Symbols Naturally",
+            true,
+            self.settings.normalize_text,
+            None,
+        );
+        let respell_names_item = CheckMenuItem::new(
+            "Fix Hard Names and Foreign Words",
+            true,
+            self.settings.respell_names,
+            None,
+        );
+        let date_order_menu = Submenu::new("Read Dates Like 09/10 As", true);
+        let mut date_order_items = Vec::new();
+        for (order, label) in [
+            (DateOrder::MonthFirst, "Month First (September 10)"),
+            (DateOrder::DayFirst, "Day First (9 October)"),
+        ] {
+            let item = CheckMenuItem::new(label, true, order == self.settings.date_order, None);
+            date_order_menu.append(&item).map_err(menu_build_error)?;
+            date_order_items.push((order, item));
+        }
         let autoread_item = CheckMenuItem::new(
             "Read Copied Text Automatically",
             self.settings.watch_clipboard,
@@ -737,6 +837,15 @@ impl App {
             .append(&animate_icon_item)
             .map_err(menu_build_error)?;
         settings_menu
+            .append(&normalize_text_item)
+            .map_err(menu_build_error)?;
+        settings_menu
+            .append(&respell_names_item)
+            .map_err(menu_build_error)?;
+        settings_menu
+            .append(&date_order_menu)
+            .map_err(menu_build_error)?;
+        settings_menu
             .append(&unload_menu)
             .map_err(menu_build_error)?;
         settings_menu
@@ -817,6 +926,9 @@ impl App {
         self.quit_item = Some(quit_item);
         self.show_reader_item = Some(show_reader_item);
         self.animate_icon_item = Some(animate_icon_item);
+        self.normalize_text_item = Some(normalize_text_item);
+        self.respell_names_item = Some(respell_names_item);
+        self.date_order_items = date_order_items;
         self.open_reader_item = Some(open_reader_item);
         self.tray = Some(tray);
         self.update_english_voice_state();
@@ -828,6 +940,7 @@ impl App {
 
     fn set_status(&mut self, text: &str) {
         self.showing_error = false;
+        self.status_text = text.to_string();
         if let Some(status) = &self.status_item {
             status.set_text(truncate_status(text));
         }
@@ -836,6 +949,7 @@ impl App {
     /// Show an error in the status line and print the full text to stderr.
     fn show_error(&mut self, message: &str) {
         eprintln!("Error: {message}");
+        self.status_text = message.to_string();
         self.showing_error = true;
         if let Some(status) = &self.status_item {
             status.set_text(truncate_status(&format!("Error: {message}")));
@@ -1126,6 +1240,7 @@ impl App {
             unload_after,
             sanitizer_options: SanitizerOptions::default(),
             pronunciations: self.pronunciations.clone(),
+            normalize: self.settings.normalize_options(),
             persian_voice,
             debug_latency: self.debug_latency,
         };
@@ -1358,6 +1473,179 @@ impl App {
         }
     }
 
+    /// Exactly one date order stays checked.
+    fn update_date_order_checks(&self) {
+        for (order, item) in &self.date_order_items {
+            item.set_checked(*order == self.settings.date_order);
+        }
+    }
+
+    /// What a reading is doing, for the HTTP API and CLI.
+    fn control_status(&self) -> Value {
+        let state = if self.paused {
+            "paused"
+        } else if self.active {
+            "playing"
+        } else if self.awaiting_playlist || self.downloading || self.pending_text.is_some() {
+            "loading"
+        } else {
+            "idle"
+        };
+        let chunks = self.reader_model.chunks().to_vec();
+        let index = self.last_chunk.map(|(index, _)| index);
+        PlaybackStatus {
+            state,
+            status: self.status_text.clone(),
+            index,
+            text: index.and_then(|index| chunks.get(index).cloned()),
+            chunks,
+            error: self.showing_error.then(|| self.status_text.clone()),
+        }
+        .to_json("tray")
+    }
+
+    /// Carry out an API or CLI request the way the matching menu item does.
+    fn on_control(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        request: ControlRequest,
+    ) -> Result<Value, ControlError> {
+        match request {
+            ControlRequest::Play(text) => self.play_text(text),
+            ControlRequest::ReadClipboard => self.read_clipboard(),
+            ControlRequest::Pause => {
+                if let Some(player) = &self.player {
+                    player.pause();
+                }
+            }
+            ControlRequest::Resume => {
+                if let Some(player) = &self.player {
+                    player.resume();
+                }
+            }
+            ControlRequest::Toggle => self.on_shortcut_action(ShortcutAction::ReadOrPause),
+            ControlRequest::Stop => self.on_shortcut_action(ShortcutAction::Stop),
+            ControlRequest::Next => self.on_shortcut_action(ShortcutAction::Next),
+            ControlRequest::Previous => self.on_shortcut_action(ShortcutAction::Previous),
+            ControlRequest::Jump(index) => {
+                let count = self.reader_model.chunks().len();
+                if index >= count {
+                    return Err(ControlError::new(
+                        400,
+                        "invalid_request",
+                        format!("index must be below the chunk count ({count})"),
+                    ));
+                }
+                if let Some(player) = &self.player {
+                    player.jump(index);
+                }
+            }
+            ControlRequest::Status => {}
+            ControlRequest::ShowPanel => self.open_reader_pinned(event_loop),
+            ControlRequest::Quit => {
+                if let Some(player) = &self.player {
+                    player.stop();
+                }
+                event_loop.exit();
+            }
+            ControlRequest::ApplySettings(settings) => {
+                self.apply_settings(event_loop, *settings);
+            }
+        }
+        Ok(self.control_status())
+    }
+
+    /// Make new settings take effect as if each one had been picked in the
+    /// menu, and leave the menu showing them.
+    fn apply_settings(&mut self, event_loop: &ActiveEventLoop, new: Settings) {
+        if new.model != self.model {
+            self.on_model_selected(new.model);
+        }
+        if new.voice != self.settings.voice {
+            self.on_voice_selected(&new.voice);
+        }
+        if new.phonon_voice != self.settings.phonon_voice
+            && let Some(id) = self
+                .phonon_voice_items
+                .iter()
+                .map(|(id, _)| *id)
+                .find(|id| *id == new.phonon_voice)
+        {
+            self.on_phonon_voice_selected(id);
+        }
+        if new.paradee_voice != self.settings.paradee_voice
+            && let Some(id) = self
+                .paradee_voice_items
+                .iter()
+                .map(|(id, _)| *id)
+                .find(|id| *id == new.paradee_voice)
+        {
+            self.on_paradee_voice_selected(id);
+        }
+        if new.persian_voice != self.settings.persian_voice {
+            self.on_persian_voice_selected(new.persian_voice);
+        }
+        if new.speed != self.settings.speed {
+            self.on_speed_selected(new.speed);
+        }
+        if new.unload_after_minutes != self.settings.unload_after_minutes {
+            self.on_unload_selected(new.unload_after_minutes);
+        }
+        for (value, item) in &self.pause_items {
+            item.set_checked(*value == new.silence_scale);
+        }
+        if new.watch_clipboard != self.settings.watch_clipboard {
+            if let Some(item) = &self.watch_item {
+                item.set_checked(new.watch_clipboard);
+            }
+            self.on_watch_toggled();
+        }
+        if let Some(item) = &self.autoread_item {
+            item.set_checked(new.auto_read);
+        }
+        if new.show_reader != self.settings.show_reader {
+            if let Some(item) = &self.show_reader_item {
+                item.set_checked(new.show_reader);
+            }
+            self.on_show_reader_toggled(event_loop);
+        }
+        if new.animate_icon != self.settings.animate_icon {
+            if let Some(item) = &self.animate_icon_item {
+                item.set_checked(new.animate_icon);
+            }
+            self.on_animate_icon_toggled();
+        }
+        if let Some(item) = &self.normalize_text_item {
+            item.set_checked(new.normalize_text);
+        }
+        if let Some(item) = &self.respell_names_item {
+            item.set_checked(new.respell_names);
+        }
+        // Watching may have failed to start; that stays off. Everything else
+        // takes the new values, including keys with no live effect.
+        let watching = self.settings.watch_clipboard;
+        self.settings = new;
+        self.settings.watch_clipboard = watching;
+        self.update_date_order_checks();
+        if let Some(player) = &self.player {
+            player.set_normalize(self.settings.normalize_options());
+        }
+        self.save_settings();
+    }
+
+    /// The normalizer checks already hold their new state (muda flips them on
+    /// click). Applies from the next chunk of a running reading.
+    fn on_normalizer_toggled(&mut self) {
+        let is_checked =
+            |item: &Option<CheckMenuItem>| item.as_ref().is_some_and(CheckMenuItem::is_checked);
+        self.settings.normalize_text = is_checked(&self.normalize_text_item);
+        self.settings.respell_names = is_checked(&self.respell_names_item);
+        self.save_settings();
+        if let Some(player) = &self.player {
+            player.set_normalize(self.settings.normalize_options());
+        }
+    }
+
     /// The Animate Icon check already holds its new state (muda flips it on
     /// click).
     fn on_animate_icon_toggled(&mut self) {
@@ -1468,6 +1756,28 @@ impl App {
             .is_some_and(|item| id == item.id())
         {
             self.on_animate_icon_toggled();
+        } else if let Some(order) = self
+            .date_order_items
+            .iter()
+            .find(|(_, item)| id == item.id())
+            .map(|(order, _)| *order)
+        {
+            self.settings.date_order = order;
+            self.update_date_order_checks();
+            if let Some(player) = &self.player {
+                player.set_normalize(self.settings.normalize_options());
+            }
+            self.save_settings();
+        } else if self
+            .normalize_text_item
+            .as_ref()
+            .is_some_and(|item| id == item.id())
+            || self
+                .respell_names_item
+                .as_ref()
+                .is_some_and(|item| id == item.id())
+        {
+            self.on_normalizer_toggled();
         } else if self
             .autoread_item
             .as_ref()
@@ -1993,6 +2303,17 @@ impl ApplicationHandler<AppEvent> for App {
                 self.on_download_progress(model, done, total)
             }
             AppEvent::DownloadDone(result) => self.on_download_done(result),
+            AppEvent::Control(request, reply) => {
+                let result = self.on_control(event_loop, request);
+                // Run the same refresh as every event before answering, so the
+                // reply describes the state the client will see.
+                self.update_transport();
+                self.update_reader(event_loop);
+                if reply.send(result).is_err() {
+                    eprintln!("error: control client went away before its reply");
+                }
+                return;
+            }
         }
         self.update_transport();
         self.update_reader(event_loop);

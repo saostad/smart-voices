@@ -3221,6 +3221,7 @@ dependencies = [
  "ctrlc",
  "dirs",
  "espeak-rs-sys",
+ "fancy-regex",
  "global-hotkey",
  "notify-rust",
  "objc2 0.6.5",

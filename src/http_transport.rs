@@ -18,13 +18,14 @@ impl Server {
         match self.0.accept() {
             // macOS and Windows hand out accepted sockets that inherit the
             // listener's non-blocking mode; deadlines need blocking reads.
-            Ok((stream, _)) => {
+            Ok((stream, remote)) => {
                 if let Err(e) = stream.set_nonblocking(false) {
                     // Drop only this connection; the listener stays up.
                     eprintln!("error: HTTP connection setup failed: {e}");
                     return Ok(None);
                 }
                 Ok(Some(Request {
+                    remote,
                     input: Body {
                         reader: BufReader::new(stream),
                         remaining: 0,
@@ -82,6 +83,7 @@ impl Read for Body {
     }
 }
 pub(crate) struct Request {
+    remote: SocketAddr,
     input: Body,
     method: Method,
     path: String,
@@ -167,6 +169,10 @@ impl Request {
         self.input.remaining = length.unwrap_or(0);
         Ok(())
     }
+    /// The client's address.
+    pub(crate) fn remote(&self) -> SocketAddr {
+        self.remote
+    }
     pub(crate) fn url(&self) -> &str {
         &self.path
     }
@@ -218,7 +224,11 @@ impl Request {
         }
         // Send FIN only after the entire response. Keep receiving so an upload
         // racing the rejection cannot turn the response into a TCP reset.
-        self.input.reader.get_ref().shutdown(Shutdown::Write)?;
+        // A client that read the whole reply may already have closed.
+        match self.input.reader.get_ref().shutdown(Shutdown::Write) {
+            Err(e) if e.kind() != io::ErrorKind::NotConnected => return Err(e),
+            _ => {}
+        }
         if needs_drain {
             self.input.deadline = Some(Instant::now().checked_add(timeout).ok_or_else(|| {
                 io::Error::new(io::ErrorKind::InvalidInput, "linger timeout is too large")

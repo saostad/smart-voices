@@ -100,6 +100,14 @@ The `Settings` submenu holds everything customizable:
 - `Show Reading Panel While Reading` — show the panel automatically while
   reading.
 - `Animate Icon While Reading` — animate the tray icon while reading.
+- `Read Numbers and Symbols Naturally` — with English voices, say numbers,
+  dates, money, codes, units and symbols the way a person would.
+- `Read Dates Like 09/10 As` — month first (the default) or day first, for
+  dates that could be either. A date elsewhere in the text that can only be
+  one way, like 25/10, settles it for that text.
+- `Fix Hard Names and Foreign Words` — off by default. With English voices,
+  respell about 25,000 hard names and foreign words. It helps names a voice
+  gets badly wrong and can hurt ones it already says well.
 - `Free Memory When Idle` — free the voice memory after 1–60 minutes, or
   `Never`.
 - `Shortcuts` — shows the current bindings; change them in `settings.toml`
@@ -165,8 +173,34 @@ Linux, install the audio headers first:
 
 ## Command line
 
-Running `smart-voices` with no arguments starts the tray app. It also has
-headless commands (handy for scripts and testing):
+Running `smart-voices` with no arguments starts the tray app. Everything in the
+tray menu is also available from the command line and the [HTTP API](#http-api):
+
+| Tray menu | Command | HTTP API |
+|---|---|---|
+| Read Clipboard | `read-clipboard` | `POST /v1/playback {"clipboard":true}` |
+| A new copy is read | `play TEXT`, `play -`, `play --file PATH` | `POST /v1/playback {"text":"…"}` |
+| Pause / Resume | `pause`, `resume`, `toggle` | `POST /v1/playback/pause`, `/resume`, `/toggle` |
+| Stop | `stop` | `POST /v1/playback/stop` |
+| Previous / Next Sentence | `previous`, `next` | `POST /v1/playback/previous`, `/next` |
+| Click a paragraph in the panel | `jump N` (from 1) | `POST /v1/playback/jump {"index":N}` (from 0) |
+| Status line, panel text | `status [--json]` | `GET /v1/playback` |
+| Show Reading Panel | `show-panel` | `POST /v1/panel` (tray only) |
+| Quit | `quit` | `POST /v1/quit` |
+| Every Settings entry | `config get`, `config set`, `config reset` | `GET`, `PATCH /v1/settings` |
+| Launch at Login | `config set autostart true` | `GET`, `PUT /v1/autostart` |
+| Edit Pronunciations | `config get`, `set`, `reset pronunciations` | `GET`, `PUT`, `DELETE /v1/pronunciations` |
+| Open Settings File, Change Shortcuts | `config path`, `config set shortcuts.stop …` | `GET`, `PATCH /v1/settings` |
+| Voice download progress | `download` | `POST`, `GET /v1/downloads` |
+| Voice lists | `voices` | `GET /v1/capabilities` |
+
+The commands in the first rows act on the running tray app, or on
+`smart-voices serve` if there's no tray, so `smart-voices pause` pauses whatever
+is reading. `config set` applies right away on a running app, except `server.*`
+and `shortcuts.*`, which need a restart. Set `SMART_VOICES_URL` and
+`SMART_VOICES_TOKEN` to control a service on another machine.
+
+These commands need nothing running (handy for scripts and testing):
 
 - `smart-voices speak "<text>"` — read text aloud (`--voice`, `--speed`,
   `--model fast|small|phonon|paradee`, `--persian-voice pocket|amir|gyro|reza_ibrahim|ganji|ganji_adabi`, `--verbose`).
@@ -273,8 +307,8 @@ Run `smart-voices --help` for the complete CLI usage.
 
 ## HTTP API
 
-Run a device-free service with warm, lazy-loaded engines (models are **never**
-downloaded by requests):
+Run a service with warm, lazy-loaded engines. `/v1/speak` needs no audio device,
+and models are downloaded only when you ask with `POST /v1/downloads`:
 
 ```sh
 smart-voices download --model fast
@@ -337,6 +371,8 @@ The settings table and defaults are:
 | --max-chars | server.max_chars | 20000 | positive Unicode character count |
 | --max-body-bytes | server.max_body_bytes | 1048576 (1 MiB) | positive integer |
 | --idle-unload-secs | server.idle_unload_secs | 1200 | nonnegative integer; 0 keeps engines warm |
+| (tray only) | server.tray_listen | 127.0.0.1:0 | IP address:port; port 0 picks a free port |
+| (tray only) | server.tray_accept_poll_ms | 250 | positive milliseconds, at most u32::MAX |
 
 `GET /v1/health` returns contract/version/ready/missing/auth/modelsLoaded.
 It is always unauthenticated. `ready` is true only when the configured English
@@ -364,6 +400,11 @@ and MP3 require ffmpeg with libopus/libmp3lame.
 | input | markdown (default sanitizer), plain (whitespace cleanup only) |
 | maxChars | Optional positive limit no greater than the service limit |
 | timings | false (default) returns audio; true returns JSON with base64 audio |
+| model | English model for this request: fast, small, phonon or paradee; never persisted |
+| normalizeText | Read numbers and symbols naturally; overrides the setting for this request |
+| respellNames | Respell hard names and foreign words; overrides the setting for this request |
+| dateOrder | month_first or day_first; overrides the setting for this request |
+| silenceScale | Pause length multiplier, 0.01–10; overrides the setting for this request |
 
 Explicit en/fa reject chunks detected in the other language with code 7;
 use auto for mixed text. Per-request settings never modify settings.toml.
@@ -391,6 +432,43 @@ Clients should branch on code, which is null for transport/auth errors.
 | 500 | 6 | Synthesis or encoding failed |
 | 503 | 3 | Required model missing; message gives the exact download command |
 
+### Control routes
+
+`smart-voices serve` and the tray app both serve these, so the CLI and other
+clients can do what the tray menu does. The tray listens on `server.tray_listen`
+(default: a free local port) and always requires a token: it generates one
+unless `server.token_file` is set, and publishes its address and token in
+`tray.control.json` next to the settings file, readable only by you. `serve`
+publishes `serve.control.json` the same way.
+
+Control routes are stricter than `/v1/speak`, because they change settings and
+play sound: any request with an `Origin` header gets 403, so a web page can't
+reach them, and without a token only this machine may call them (403 otherwise).
+`POST`, `PUT`, `PATCH` and `DELETE` need `Content-Type: application/json`.
+
+| Route | Body | Result |
+|---|---|---|
+| `GET /v1/playback` | | Playback status |
+| `POST /v1/playback` | `{"text":"…"}` or `{"clipboard":true}` | Starts reading aloud; status |
+| `POST /v1/playback/pause`, `resume`, `toggle`, `stop`, `next`, `previous` | `{}` | Status |
+| `POST /v1/playback/jump` | `{"index":N}` | Goes to chunk N (from 0); status |
+| `GET /v1/settings` | | `settings` (flat, dotted keys), `paths`, `restartRequired` |
+| `PATCH /v1/settings` | `{"speed":1.25,"date_order":"day_first"}` | Saves and applies all or none |
+| `GET`, `PUT`, `DELETE /v1/pronunciations` | PUT: `{"entries":[{"written":"GUI","spoken":"gooey"}]}` | `entries`; DELETE resets to defaults |
+| `GET`, `PUT /v1/autostart` | PUT: `{"enabled":true}` | `enabled` |
+| `POST /v1/downloads` | `{"model":"phonon"}` and/or `{"persianVoice":"amir"}` | 202; downloads in the background |
+| `GET /v1/downloads` | | `active`, and each job's `state`, `doneBytes`, `totalBytes`, `error` |
+| `POST /v1/panel` | `{}` | Opens the reading panel; 409 on `serve`, which has no window |
+| `POST /v1/quit` | `{}` | Stops the host |
+
+Playback status is `{contract, host, state, status, index, count, text, chunks,
+error}`, with `state` one of `idle`, `loading`, `playing` or `paused`. On `serve`,
+playback opens the audio device on the first reading, and a missing voice returns
+503 instead of downloading; the tray downloads it, as a copied text does.
+
+If `serve` and the tray both run, each reads on its own: the CLI talks to the
+tray first.
+
 For a systemd user service, copy
 `packaging/linux/smart-voices-serve.service` to
 `~/.config/systemd/user/`, adjust ExecStart to your binary path, then run
@@ -403,3 +481,12 @@ until EOF, `server.linger_drain_bytes`, or `server.linger_secs`. Overflow
 rejections run outside the accept loop, bounded by `server.max_lingering_rejections`.
 If both handler and rejection capacity are exhausted, new sockets are closed
 without a response and a warning is logged. Fully consumed requests close immediately.
+
+## Credits
+
+The English text normalizer (`src/normalize.rs`) and name lexicon
+(`assets/respell.tsv`) are ported from
+[Underdog Woof](https://huggingface.co/ConwayResearch/Underdog-Woof), under the
+Underdog Non-Commercial License 1.0: free for non-commercial use with credit.
+Any commercial use of this app would need a license from Underdog or both
+features removed.

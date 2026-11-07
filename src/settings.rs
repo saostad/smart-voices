@@ -83,6 +83,12 @@ pub struct ServerSettings {
     pub max_body_bytes: usize,
     /// Zero keeps engines loaded indefinitely.
     pub idle_unload_secs: u64,
+    /// Where the tray app serves the same API for the CLI and other clients.
+    /// Port 0 picks a free port; `smart-voices` finds it by itself.
+    pub tray_listen: String,
+    /// How often the tray's API checks for new connections (it replaces
+    /// `accept_poll_ms`, keeping the idle tray app quiet).
+    pub tray_accept_poll_ms: u64,
 }
 impl Default for ServerSettings {
     fn default() -> Self {
@@ -101,6 +107,8 @@ impl Default for ServerSettings {
             max_chars: 20000,
             max_body_bytes: 1048576,
             idle_unload_secs: 1200,
+            tray_listen: "127.0.0.1:0".into(),
+            tray_accept_poll_ms: 250,
         }
     }
 }
@@ -116,6 +124,12 @@ impl ServerSettings {
         self.listen
             .parse::<std::net::SocketAddr>()
             .map_err(|_| "server.listen must be an IP address and port")?;
+        self.tray_listen
+            .parse::<std::net::SocketAddr>()
+            .map_err(|_| "server.tray_listen must be an IP address and port")?;
+        if self.tray_accept_poll_ms == 0 || self.tray_accept_poll_ms > u32::MAX.into() {
+            return Err("server.tray_accept_poll_ms must be positive and at most u32::MAX".into());
+        }
         if self.read_timeout_secs == 0
             || self.read_timeout_secs > u32::MAX.into()
             || self.max_header_bytes == 0
@@ -179,8 +193,30 @@ pub struct Settings {
     pub show_reader: bool,
     /// Animate the tray icon while reading.
     pub animate_icon: bool,
+    /// Read numbers, dates, money, codes, units and symbols the way a person
+    /// says them (English voices).
+    pub normalize_text: bool,
+    /// Respell hard names and foreign words from the built-in lexicon
+    /// (English voices). Off by default: it can hurt names a voice already
+    /// says well.
+    pub respell_names: bool,
+    /// How to read a date like 09/10/2026 when nothing else in the text
+    /// settles the order: `month_first` or `day_first`.
+    pub date_order: crate::normalize::DateOrder,
     /// Global shortcut bindings (`[shortcuts]` table).
     pub shortcuts: Shortcuts,
+}
+
+impl Settings {
+    /// The normalizer passes these settings turn on.
+    #[must_use]
+    pub fn normalize_options(&self) -> crate::normalize::NormalizeOptions {
+        crate::normalize::NormalizeOptions {
+            normalize_text: self.normalize_text,
+            respell_names: self.respell_names,
+            date_order: self.date_order,
+        }
+    }
 }
 
 impl Default for Settings {
@@ -203,6 +239,9 @@ impl Default for Settings {
             unload_after_minutes: 15,
             show_reader: true,
             animate_icon: true,
+            normalize_text: true,
+            respell_names: false,
+            date_order: crate::normalize::DateOrder::MonthFirst,
             shortcuts: Shortcuts::default(),
         }
     }
@@ -350,6 +389,7 @@ pub(crate) fn with_invocation<T>(settings: &Settings, f: impl FnOnce() -> T) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::normalize::NormalizeOptions;
 
     #[test]
     fn load_keeps_file_with_stale_voice_and_bad_shortcut() {
@@ -410,6 +450,9 @@ mod tests {
             unload_after_minutes: 0,
             show_reader: false,
             animate_icon: false,
+            normalize_text: false,
+            respell_names: true,
+            date_order: crate::normalize::DateOrder::DayFirst,
             shortcuts: Shortcuts {
                 read_or_pause: String::new(),
                 stop: "ctrl+alt+Q".to_string(),
@@ -681,6 +724,18 @@ mod tests {
         assert!(err.is_none(), "unexpected error: {err:?}");
         assert_eq!(loaded, settings);
         assert!(!loaded.show_reader);
+    }
+
+    #[test]
+    fn old_file_without_normalizer_settings_uses_defaults() {
+        let dir = unique_temp_dir();
+        let path = dir.join("settings.toml");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&path, "voice = \"af_heart\"\n").unwrap();
+        let (loaded, err) = Settings::load(&path);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(err.is_none(), "unexpected error: {err:?}");
+        assert_eq!(loaded.normalize_options(), NormalizeOptions::default());
     }
 
     #[test]

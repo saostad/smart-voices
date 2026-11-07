@@ -1,11 +1,14 @@
-//! Contract 1 HTTP API. No desktop, audio device, download or daemon setup.
+//! Contract 1 HTTP API, served by `smart-voices serve` and by the tray app.
+//! `/v1/speak` needs no desktop or audio device; the control routes (playback,
+//! settings, pronunciations, downloads) do what the tray menu does.
 use std::collections::{BTreeSet, VecDeque};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
+use crate::control::{ControlError, ControlHost, ControlRequest, Downloads};
 use crate::engine::ModelVariant;
 use crate::http_transport::{Request, Server};
 use crate::lang::Lang;
@@ -86,6 +89,13 @@ pub struct Speak {
     max_chars: Option<usize>,
     #[serde(default)]
     timings: bool,
+    /// English model for this request; never persisted.
+    model: Option<String>,
+    normalize_text: Option<bool>,
+    respell_names: Option<bool>,
+    date_order: Option<crate::normalize::DateOrder>,
+    /// Pause length multiplier (the tray's Pause Length), 0.01 to 10.
+    silence_scale: Option<f32>,
 }
 fn default_format() -> String {
     "ogg".into()
@@ -106,10 +116,11 @@ pub trait Synthesizer {
     fn unload(&mut self);
 }
 struct Native {
-    settings: Settings,
+    settings: Arc<RwLock<Settings>>,
+    settings_path: PathBuf,
     root: PathBuf,
-    dictionary: crate::pronounce::Pronunciations,
     english: Option<Box<dyn crate::player::Synth>>,
+    english_id: Option<ModelVariant>,
     persian: Option<Box<dyn crate::player::Synth>>,
     persian_id: Option<crate::engine::PersianVoice>,
     loaded: Arc<Mutex<BTreeSet<String>>>,
@@ -183,6 +194,22 @@ fn request_settings(defaults: &Settings, request: &Speak) -> Result<Settings, Ap
     if let Some(speed) = request.speed {
         settings.speed = speed;
     }
+    if let Some(model) = &request.model {
+        settings.model = ModelVariant::parse(model)
+            .ok_or_else(|| ApiError::bad("Unknown model; see /v1/capabilities"))?;
+    }
+    if let Some(enabled) = request.normalize_text {
+        settings.normalize_text = enabled;
+    }
+    if let Some(enabled) = request.respell_names {
+        settings.respell_names = enabled;
+    }
+    if let Some(order) = request.date_order {
+        settings.date_order = order;
+    }
+    if let Some(scale) = request.silence_scale {
+        settings.silence_scale = scale;
+    }
     if let Some(voice) = &request.voice {
         if let Some(persian) = crate::engine::PersianVoice::parse(voice) {
             settings.persian_voice = persian;
@@ -200,7 +227,30 @@ fn request_settings(defaults: &Settings, request: &Speak) -> Result<Settings, Ap
 }
 impl Synthesizer for Native {
     fn speak(&mut self, request: &Speak) -> Result<Audio, ApiError> {
-        let settings = request_settings(&self.settings, request)?;
+        let live = self.settings.read().expect("settings lock").clone();
+        let settings = request_settings(&live, request)?;
+        let dictionary = crate::cli::pronunciation_path(&self.settings_path)
+            .and_then(|path| crate::cli::pronunciations(&path))
+            .map_err(|message| {
+                eprintln!("error: HTTP pronunciations failed: {message}");
+                ApiError::new(
+                    500,
+                    Some(6),
+                    "pronunciations_invalid",
+                    "The pronunciations file can't be read; fix it or reset it with DELETE /v1/pronunciations",
+                )
+            })?;
+        if self.english_id != Some(settings.model) {
+            self.english = None;
+            if let Some(previous) = self.english_id {
+                self.loaded.lock().expect("loaded lock").remove(&format!(
+                    "{}:{}",
+                    self.worker,
+                    previous.dir_name()
+                ));
+            }
+            self.english_id = Some(settings.model);
+        }
         if self.persian_id != Some(settings.persian_voice) {
             self.persian = None;
             if let Some(previous) = self.persian_id {
@@ -212,7 +262,7 @@ impl Synthesizer for Native {
             }
             self.persian_id = Some(settings.persian_voice);
         }
-        let chunks = prepare(request, &self.dictionary)?;
+        let chunks = prepare(request, &dictionary)?;
         let format = crate::export::Format::parse(&request.format)
             .map_err(|_| ApiError::bad("Invalid format"))?;
         format.check_encoder().map_err(|_| {
@@ -245,7 +295,7 @@ impl Synthesizer for Native {
         let audio = crate::export::render_chunks(
             &chunks,
             &settings,
-            &self.dictionary,
+            &dictionary,
             None,
             |lang, text, voice, speed| {
                 let (slot, id) = match lang {
@@ -412,6 +462,12 @@ fn validate(body: &[u8], settings: &Settings) -> Result<Speak, ApiError> {
             "maxChars must be positive and at most the service limit",
         ));
     }
+    if request
+        .silence_scale
+        .is_some_and(|s| !s.is_finite() || !(0.01..=10.).contains(&s))
+    {
+        return Err(ApiError::bad("silenceScale must be between 0.01 and 10"));
+    }
     if request.text.chars().count() > request.max_chars.unwrap_or(settings.server.max_chars) {
         return Err(ApiError::new(
             413,
@@ -491,9 +547,34 @@ fn capabilities(settings: &Settings, root: &Path) -> Value {
     .collect();
     json!({"contract":1,"version":VERSION,"models":models,"voices":voices,"formats":formats,"languages":["fa","en","auto"],"limits":{"maxChars":settings.server.max_chars,"maxBodyBytes":settings.server.max_body_bytes,"maxConcurrency":settings.server.max_concurrency,"maxQueue":settings.server.max_queue,"maxHandlers":settings.server.max_handlers}})
 }
-fn route(method: &str, path: &str, auth: bool) -> Result<bool, ApiError> {
+/// Control routes and the methods each one takes.
+const CONTROL_ROUTES: &[(&str, &[&str])] = &[
+    ("/v1/playback", &["GET", "POST"]),
+    ("/v1/playback/pause", &["POST"]),
+    ("/v1/playback/resume", &["POST"]),
+    ("/v1/playback/toggle", &["POST"]),
+    ("/v1/playback/stop", &["POST"]),
+    ("/v1/playback/next", &["POST"]),
+    ("/v1/playback/previous", &["POST"]),
+    ("/v1/playback/jump", &["POST"]),
+    ("/v1/settings", &["GET", "PATCH"]),
+    ("/v1/pronunciations", &["GET", "PUT", "DELETE"]),
+    ("/v1/autostart", &["GET", "PUT"]),
+    ("/v1/downloads", &["GET", "POST"]),
+    ("/v1/panel", &["POST"]),
+    ("/v1/quit", &["POST"]),
+];
+
+/// What a request is, once it passed authentication.
+enum Route {
+    Info,
+    Speak,
+    Control,
+}
+
+fn route(method: &str, path: &str, auth: bool, control: bool) -> Result<Route, ApiError> {
     if method == "GET" && path == "/v1/health" {
-        return Ok(false);
+        return Ok(Route::Info);
     }
     if path != "/v1/health" && !auth {
         return Err(ApiError::new(
@@ -502,6 +583,20 @@ fn route(method: &str, path: &str, auth: bool) -> Result<bool, ApiError> {
             "unauthorized",
             "A valid bearer token is required",
         ));
+    }
+    if let Some((_, methods)) = CONTROL_ROUTES.iter().find(|(known, _)| *known == path)
+        && control
+    {
+        return if methods.contains(&method) {
+            Ok(Route::Control)
+        } else {
+            Err(ApiError::new(
+                405,
+                None,
+                "method_not_allowed",
+                "Method not allowed",
+            ))
+        };
     }
     let expected = match path {
         "/v1/health" | "/v1/capabilities" => "GET",
@@ -516,7 +611,235 @@ fn route(method: &str, path: &str, auth: bool) -> Result<bool, ApiError> {
             "Method not allowed",
         ));
     }
-    Ok(path == "/v1/speak")
+    Ok(if path == "/v1/speak" {
+        Route::Speak
+    } else {
+        Route::Info
+    })
+}
+
+/// The state control routes work on.
+pub struct ControlContext {
+    settings: Arc<RwLock<Settings>>,
+    settings_path: PathBuf,
+    root: PathBuf,
+    control: Arc<dyn ControlHost>,
+    downloads: Downloads,
+    /// Control routes that write settings run one at a time.
+    writing: Mutex<()>,
+}
+
+impl From<ControlError> for ApiError {
+    fn from(error: ControlError) -> Self {
+        Self::new(error.status, None, error.kind, error.message)
+    }
+}
+
+/// Keys that only take effect after a restart.
+fn needs_restart(key: &str) -> bool {
+    key.starts_with("server.") || key.starts_with("shortcuts.")
+}
+
+fn settings_reply(ctx: &ControlContext, restart: &[String]) -> Result<Reply, ApiError> {
+    let settings = ctx.settings.read().expect("settings lock").clone();
+    let values = crate::cli::values(&settings).map_err(|e| ApiError::internal("settings", &e))?;
+    let pronunciations = crate::cli::pronunciation_path(&ctx.settings_path)
+        .map_err(|e| ApiError::internal("settings", &e))?;
+    Ok(Reply::json(
+        200,
+        json!({
+            "contract": 1,
+            "settings": values,
+            "restartRequired": restart,
+            "paths": {
+                "settings": ctx.settings_path.display().to_string(),
+                "pronunciations": pronunciations.display().to_string(),
+                "models": ctx.root.display().to_string(),
+            },
+        }),
+    ))
+}
+
+/// Apply `{key: value}` to the saved settings and to the running host. They
+/// are separate copies: `serve` flags override the running host for one run
+/// and must not reach the file.
+fn patch_settings(ctx: &ControlContext, body: &Value) -> Result<Reply, ApiError> {
+    let changes = body
+        .as_object()
+        .ok_or_else(|| ApiError::bad("Send a JSON object of settings keys and values"))?;
+    let _writing = ctx.writing.lock().expect("settings write lock");
+    let mut saved = crate::cli::load(&ctx.settings_path)
+        .map_err(|message| ApiError::new(500, Some(6), "settings_invalid", message))?;
+    let mut live = ctx.settings.read().expect("settings lock").clone();
+    let mut restart = Vec::new();
+    for (key, value) in changes {
+        let text = value
+            .as_str()
+            .map_or_else(|| value.to_string(), str::to_owned);
+        crate::cli::set(&mut saved, key, &text).map_err(|e| ApiError::bad(&e))?;
+        crate::cli::set(&mut live, key, &text).map_err(|e| ApiError::bad(&e))?;
+        if needs_restart(key) {
+            restart.push(key.clone());
+        }
+    }
+    saved
+        .save(&ctx.settings_path)
+        .map_err(|e| ApiError::internal("settings", &e.to_string()))?;
+    *ctx.settings.write().expect("settings lock") = live.clone();
+    ctx.control
+        .call(ControlRequest::ApplySettings(Box::new(live)))?;
+    settings_reply(ctx, &restart)
+}
+
+fn pronunciation_entries(ctx: &ControlContext) -> Result<Reply, ApiError> {
+    let path = crate::cli::pronunciation_path(&ctx.settings_path)
+        .map_err(|e| ApiError::internal("pronunciations", &e))?;
+    let entries = crate::cli::pronunciations(&path)
+        .map_err(|message| ApiError::new(500, Some(6), "pronunciations_invalid", message))?;
+    Ok(Reply::json(
+        200,
+        json!({"contract": 1, "entries": entries.entries()}),
+    ))
+}
+
+fn start_download(ctx: &ControlContext, body: &Value) -> Result<Reply, ApiError> {
+    let mut models = Vec::new();
+    if let Some(id) = body["model"].as_str() {
+        let variant = ModelVariant::parse(id)
+            .ok_or_else(|| ApiError::bad("Unknown model; see /v1/capabilities"))?;
+        models.extend(crate::control::download_set(variant));
+    }
+    if let Some(id) = body["persianVoice"].as_str() {
+        let voice = crate::engine::PersianVoice::parse(id)
+            .ok_or_else(|| ApiError::bad("Unknown Persian voice; see /v1/capabilities"))?;
+        models.push(ModelId::Persian(voice));
+    }
+    models.retain(|model| !crate::models::is_installed(&ctx.root, *model));
+    if body["model"].is_null() && body["persianVoice"].is_null() {
+        return Err(ApiError::bad("Send model and/or persianVoice"));
+    }
+    if !models.is_empty() {
+        ctx.downloads.start(ctx.root.clone(), models);
+    }
+    Ok(Reply::json(202, ctx.downloads.to_json()))
+}
+
+/// Handle one control route (`route` checked the method).
+fn control_reply(
+    ctx: &ControlContext,
+    method: &str,
+    path: &str,
+    body: &[u8],
+    max_chars: usize,
+) -> Result<Reply, ApiError> {
+    let body: Value = if body.is_empty() {
+        json!({})
+    } else {
+        serde_json::from_slice(body).map_err(|_| ApiError::bad("Invalid JSON"))?
+    };
+    let call =
+        |request| -> Result<Reply, ApiError> { Ok(Reply::json(200, ctx.control.call(request)?)) };
+    match (method, path) {
+        ("GET", "/v1/playback") => call(ControlRequest::Status),
+        ("POST", "/v1/playback") => {
+            if body["clipboard"].as_bool() == Some(true) {
+                return call(ControlRequest::ReadClipboard);
+            }
+            let text = body["text"]
+                .as_str()
+                .ok_or_else(|| ApiError::bad("Send text, or clipboard: true"))?;
+            if text.chars().count() > max_chars {
+                return Err(ApiError::new(
+                    413,
+                    Some(5),
+                    "text_limit",
+                    "Text exceeds the character limit",
+                ));
+            }
+            if text.trim().is_empty() {
+                return Err(ApiError::new(
+                    422,
+                    Some(4),
+                    "empty_text",
+                    "Text must not be empty",
+                ));
+            }
+            call(ControlRequest::Play(text.to_string()))
+        }
+        (_, "/v1/playback/pause") => call(ControlRequest::Pause),
+        (_, "/v1/playback/resume") => call(ControlRequest::Resume),
+        (_, "/v1/playback/toggle") => call(ControlRequest::Toggle),
+        (_, "/v1/playback/stop") => call(ControlRequest::Stop),
+        (_, "/v1/playback/next") => call(ControlRequest::Next),
+        (_, "/v1/playback/previous") => call(ControlRequest::Previous),
+        (_, "/v1/playback/jump") => {
+            let index = body["index"]
+                .as_u64()
+                .ok_or_else(|| ApiError::bad("Send index, a chunk number from 0"))?;
+            call(ControlRequest::Jump(index as usize))
+        }
+        ("GET", "/v1/settings") => settings_reply(ctx, &[]),
+        ("PATCH", "/v1/settings") => patch_settings(ctx, &body),
+        ("GET", "/v1/pronunciations") => pronunciation_entries(ctx),
+        ("PUT", "/v1/pronunciations") => {
+            let path = crate::cli::pronunciation_path(&ctx.settings_path)
+                .map_err(|e| ApiError::internal("pronunciations", &e))?;
+            crate::cli::save_pronunciations(&path, &body["entries"].to_string())
+                .map_err(|e| ApiError::bad(&e))?;
+            pronunciation_entries(ctx)
+        }
+        ("DELETE", "/v1/pronunciations") => {
+            let path = crate::cli::pronunciation_path(&ctx.settings_path)
+                .map_err(|e| ApiError::internal("pronunciations", &e))?;
+            crate::pronounce::Pronunciations::with_defaults()
+                .save(&path)
+                .map_err(|e| ApiError::internal("pronunciations", &e.to_string()))?;
+            pronunciation_entries(ctx)
+        }
+        ("GET", "/v1/autostart") => Ok(Reply::json(
+            200,
+            json!({"contract": 1, "enabled": crate::autostart::is_enabled()}),
+        )),
+        ("PUT", "/v1/autostart") => {
+            let enabled = body["enabled"]
+                .as_bool()
+                .ok_or_else(|| ApiError::bad("Send enabled: true or false"))?;
+            crate::autostart::set_enabled(enabled)
+                .map_err(|e| ApiError::internal("autostart", &e.to_string()))?;
+            Ok(Reply::json(
+                200,
+                json!({"contract": 1, "enabled": crate::autostart::is_enabled()}),
+            ))
+        }
+        ("GET", "/v1/downloads") => Ok(Reply::json(200, ctx.downloads.to_json())),
+        ("POST", "/v1/downloads") => start_download(ctx, &body),
+        (_, "/v1/panel") => call(ControlRequest::ShowPanel),
+        (_, "/v1/quit") => call(ControlRequest::Quit),
+        _ => Err(ApiError::new(404, None, "not_found", "Route not found")),
+    }
+}
+
+/// Control routes can change settings and play audio, so they ask for more
+/// than `/v1/speak`: a browser page must not reach them, and without a token
+/// only this machine may.
+fn control_allowed(request: &Request, has_token: bool) -> Result<(), ApiError> {
+    if request.headers().iter().any(|h| h.field.equiv("Origin")) {
+        return Err(ApiError::new(
+            403,
+            None,
+            "browser_origin",
+            "Control routes don't accept browser requests",
+        ));
+    }
+    if !has_token && !request.remote().ip().is_loopback() {
+        return Err(ApiError::new(
+            403,
+            None,
+            "token_required",
+            "Configure server.token_file to use control routes from another machine",
+        ));
+    }
+    Ok(())
 }
 struct Job {
     request: Request,
@@ -527,9 +850,12 @@ fn respond(request: Request, reply: Reply, started: Instant, chars: usize) {
     let method = request.method().to_string();
     // Never log query strings (they may contain caller secrets).
     let path = request.url().split('?').next().unwrap_or("/");
-    let path = match path {
-        "/v1/health" | "/v1/capabilities" | "/v1/speak" => path,
-        _ => "<unknown>",
+    let path = if matches!(path, "/v1/health" | "/v1/capabilities" | "/v1/speak")
+        || CONTROL_ROUTES.iter().any(|(known, _)| *known == path)
+    {
+        path
+    } else {
+        "<unknown>"
     }
     .to_string();
     let status = reply.status;
@@ -614,7 +940,9 @@ pub fn run(args: &[String], path: &Path) -> Result<(), String> {
     settings.validate_strict()?;
     let token = token(&settings.server.token_file)?;
     let root = crate::models::models_root().ok_or("couldn't resolve models directory")?;
-    let dictionary = crate::cli::pronunciations(&crate::cli::pronunciation_path(path)?)?;
+    // A bad pronunciations file should stop the service at startup, not at the
+    // first request.
+    crate::cli::pronunciations(&crate::cli::pronunciation_path(path)?)?;
     let server =
         Server::http(&settings.server.listen).map_err(|e| format!("HTTP listen failed: {e}"))?;
     let stop = Arc::new(AtomicBool::new(false));
@@ -632,33 +960,172 @@ pub fn run(args: &[String], path: &Path) -> Result<(), String> {
         settings.server.idle_unload_secs,
         settings.server.max_handlers
     );
-    let loaded = Arc::new(Mutex::new(BTreeSet::new()));
-    let catalog_settings = settings.clone();
+    let live = Arc::new(RwLock::new(settings.clone()));
+    let control = Arc::new(crate::control::HeadlessControl::new(
+        live.clone(),
+        path.to_path_buf(),
+        root.clone(),
+        stop.clone(),
+    ));
+    let address = format!("http://{}", server.server_addr());
+    let published_token = if settings.server.token_file.is_empty() {
+        None
+    } else {
+        std::fs::read_to_string(&settings.server.token_file)
+            .ok()
+            .map(|value| value.trim().to_string())
+    };
+    if let Err(error) = crate::control::publish(path, "serve", &address, published_token.as_deref())
+    {
+        eprintln!(
+            "warn: fallback: true, attempted=publish_control_address, reason={error}, taken=none; CLI commands won't find this server without SMART_VOICES_URL"
+        );
+    }
+    let result = run_host(server, settings, token, stop, live, path, root, control);
+    crate::control::unpublish(path, "serve");
+    result
+}
+
+/// Serve the full API for one host until `stop` is set.
+#[allow(clippy::too_many_arguments)]
+fn run_host(
+    server: Server,
+    settings: Settings,
+    token: Option<[u8; 32]>,
+    stop: Arc<AtomicBool>,
+    live: Arc<RwLock<Settings>>,
+    settings_path: &Path,
+    root: PathBuf,
+    control: Arc<dyn ControlHost>,
+) -> Result<(), String> {
+    let loaded = Arc::new(Mutex::new(BTreeSet::<String>::new()));
+    let catalog_settings = live.clone();
     let catalog_root = root.clone();
+    let host = control.host();
     let caps = move |health| {
+        let settings = catalog_settings.read().expect("settings lock").clone();
         if health {
-            json!(default_missing(&catalog_settings, &catalog_root))
+            json!(default_missing(&settings, &catalog_root))
         } else {
-            capabilities(&catalog_settings, &catalog_root)
+            let mut value = capabilities(&settings, &catalog_root);
+            value["host"] = json!(host);
+            value
         }
     };
-    let worker_settings = settings.clone();
+    let context = Arc::new(ControlContext {
+        settings: live.clone(),
+        settings_path: settings_path.to_path_buf(),
+        root: root.clone(),
+        control,
+        downloads: Downloads::default(),
+        writing: Mutex::new(()),
+    });
     let worker_loaded = loaded.clone();
-    serve_http(server, settings, token, stop, loaded, caps, move |worker| {
-        Box::new(Native {
-            settings: worker_settings.clone(),
-            root: root.clone(),
-            dictionary: dictionary.clone(),
-            english: None,
-            persian: None,
-            persian_id: None,
-            loaded: worker_loaded.clone(),
-            worker,
+    let worker_path = settings_path.to_path_buf();
+    serve_http(
+        server,
+        settings,
+        token,
+        stop,
+        loaded,
+        caps,
+        Some(context),
+        move |worker| {
+            Box::new(Native {
+                settings: live.clone(),
+                settings_path: worker_path.clone(),
+                root: root.clone(),
+                english: None,
+                english_id: None,
+                persian: None,
+                persian_id: None,
+                loaded: worker_loaded.clone(),
+                worker,
+            })
+        },
+    )
+}
+
+/// The tray app's API, running beside its event loop.
+pub struct TrayApi {
+    stop: Arc<AtomicBool>,
+    thread: std::thread::JoinHandle<Result<(), String>>,
+    settings_path: PathBuf,
+    /// The tray keeps this in step with its own settings.
+    pub settings: Arc<RwLock<Settings>>,
+}
+
+impl TrayApi {
+    /// Stop serving and withdraw the published address.
+    pub fn shutdown(self) {
+        self.stop.store(true, Ordering::Relaxed);
+        crate::control::unpublish(&self.settings_path, "tray");
+        match self.thread.join() {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => eprintln!("error: tray API stopped with an error: {error}"),
+            Err(_) => eprintln!("error: tray API thread panicked"),
+        }
+    }
+}
+
+/// Serve the API from the tray app so CLI commands control its reading.
+pub fn start_tray_api(
+    settings: &Settings,
+    settings_path: &Path,
+    root: PathBuf,
+    control: Arc<dyn ControlHost>,
+) -> Result<TrayApi, String> {
+    let mut hosted = settings.clone();
+    hosted.server.listen.clone_from(&hosted.server.tray_listen);
+    hosted.server.accept_poll_ms = hosted.server.tray_accept_poll_ms;
+    // The tray always has a token: the published file is what lets this
+    // user's CLI in, and nothing else on the machine can read it.
+    let secret = if hosted.server.token_file.is_empty() {
+        crate::control::random_token()?
+    } else {
+        std::fs::read_to_string(&hosted.server.token_file)
+            .map_err(|_| "couldn't read token file")?
+            .trim()
+            .to_string()
+    };
+    if secret.is_empty() {
+        return Err("token file is empty".into());
+    }
+    let token: [u8; 32] = ring::digest::digest(&ring::digest::SHA256, secret.as_bytes())
+        .as_ref()
+        .try_into()
+        .expect("SHA256");
+    let server = Server::http(&hosted.server.listen)
+        .map_err(|e| format!("couldn't listen on {}: {e}", hosted.server.listen))?;
+    let address = format!("http://{}", server.server_addr());
+    crate::control::publish(settings_path, "tray", &address, Some(&secret))?;
+    let stop = Arc::new(AtomicBool::new(false));
+    let live = Arc::new(RwLock::new(settings.clone()));
+    let thread = {
+        let (stop, live, path) = (stop.clone(), live.clone(), settings_path.to_path_buf());
+        std::thread::spawn(move || {
+            run_host(
+                server,
+                hosted,
+                Some(token),
+                stop,
+                live,
+                &path,
+                root,
+                control,
+            )
         })
+    };
+    Ok(TrayApi {
+        stop,
+        thread,
+        settings_path: settings_path.to_path_buf(),
+        settings: live,
     })
 }
 
 /// Shared transport loop; tests inject a device-free fake without encoders or models.
+#[allow(clippy::too_many_arguments)]
 fn serve_http(
     server: Server,
     settings: Settings,
@@ -666,6 +1133,7 @@ fn serve_http(
     stop: Arc<AtomicBool>,
     loaded: Arc<Mutex<BTreeSet<String>>>,
     caps: impl Fn(bool) -> Value + Send + Sync + 'static,
+    control: Option<Arc<ControlContext>>,
     mut factory: impl FnMut(usize) -> Box<dyn Synthesizer + Send>,
 ) -> Result<(), String> {
     let queue: SharedQueue = Arc::default();
@@ -722,6 +1190,7 @@ fn serve_http(
         let queue = queue.clone();
         let loaded = loaded.clone();
         let caps = caps.clone();
+        let control = control.clone();
         std::thread::spawn(move || {
             struct Handler(Arc<std::sync::atomic::AtomicUsize>);
             impl Drop for Handler {
@@ -757,9 +1226,60 @@ fn serve_http(
                 request.method().as_str(),
                 path,
                 authorized(token.as_ref(), auth_header),
+                control.is_some(),
             ) {
                 Err(error) => respond(request, Reply::error(error), started, 0),
-                Ok(false) => {
+                Ok(Route::Control) => {
+                    let method = request.method().to_string();
+                    let path = path.to_string();
+                    let reply = (|| {
+                        control_allowed(&request, token.is_some())?;
+                        let mut body = Vec::new();
+                        if method != "GET" {
+                            let content_type = request
+                                .headers()
+                                .iter()
+                                .find(|h| h.field.equiv("Content-Type"))
+                                .map(|h| h.value.as_str().split(';').next().unwrap_or("").trim());
+                            if !content_type
+                                .is_some_and(|s| s.eq_ignore_ascii_case("application/json"))
+                            {
+                                return Err(ApiError::new(
+                                    415,
+                                    Some(4),
+                                    "content_type",
+                                    "Use Content-Type: application/json",
+                                ));
+                            }
+                            if request
+                                .body_length()
+                                .is_some_and(|n| n > settings.server.max_body_bytes)
+                            {
+                                return Err(ApiError::new(
+                                    413,
+                                    Some(5),
+                                    "body_limit",
+                                    "Request body exceeds the service limit",
+                                ));
+                            }
+                            request
+                                .as_reader()
+                                .take(settings.server.max_body_bytes as u64 + 1)
+                                .read_to_end(&mut body)
+                                .map_err(|e| {
+                                    eprintln!("error: HTTP body read failed: {e}");
+                                    ApiError::bad("Could not read request body")
+                                })?;
+                        }
+                        let context = control.as_ref().ok_or_else(|| {
+                            ApiError::new(404, None, "not_found", "Route not found")
+                        })?;
+                        control_reply(context, &method, &path, &body, settings.server.max_chars)
+                    })()
+                    .unwrap_or_else(Reply::error);
+                    respond(request, reply, started, 0);
+                }
+                Ok(Route::Info) => {
                     let reply = if path == "/v1/health" {
                         let ids: BTreeSet<String> = loaded
                             .lock()
@@ -777,7 +1297,7 @@ fn serve_http(
                     };
                     respond(request, reply, started, 0);
                 }
-                Ok(true) => {
+                Ok(Route::Speak) => {
                     let content_type = request
                         .headers()
                         .iter()
@@ -929,6 +1449,14 @@ mod tests {
             token: Option<[u8; 32]>,
             factory: impl FnMut(usize) -> Box<dyn Synthesizer + Send> + Send + 'static,
         ) -> Self {
+            Self::start_with(settings, token, None, factory)
+        }
+        fn start_with(
+            settings: Settings,
+            token: Option<[u8; 32]>,
+            control: Option<Arc<ControlContext>>,
+            factory: impl FnMut(usize) -> Box<dyn Synthesizer + Send> + Send + 'static,
+        ) -> Self {
             let server = Server::http("127.0.0.1:0").unwrap();
             let address = server.server_addr().to_string();
             let stop = Arc::new(AtomicBool::new(false));
@@ -947,6 +1475,7 @@ mod tests {
                             json!({"contract":1})
                         }
                     },
+                    control,
                     factory,
                 )
             });
@@ -988,6 +1517,235 @@ mod tests {
             .as_ref()
             .try_into()
             .unwrap()
+    }
+    #[derive(Default)]
+    struct FakeHost(Mutex<Vec<ControlRequest>>);
+    impl ControlHost for FakeHost {
+        fn call(&self, request: ControlRequest) -> Result<Value, ControlError> {
+            if request == ControlRequest::ShowPanel {
+                return Err(ControlError::new(409, "no_panel", "No panel here"));
+            }
+            self.0.lock().unwrap().push(request);
+            Ok(json!({"state":"playing"}))
+        }
+        fn host(&self) -> &'static str {
+            "fake"
+        }
+    }
+    struct ControlFixture {
+        dir: PathBuf,
+        host: Arc<FakeHost>,
+        server: Option<TestServer>,
+    }
+    impl ControlFixture {
+        fn new(name: &str, token: Option<[u8; 32]>) -> Self {
+            let dir = std::env::temp_dir()
+                .join(format!("smart-voices-api-{name}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let host = Arc::new(FakeHost::default());
+            let context = Arc::new(ControlContext {
+                settings: Arc::new(RwLock::new(Settings::default())),
+                settings_path: dir.join("settings.toml"),
+                root: dir.clone(),
+                control: host.clone(),
+                downloads: Downloads::default(),
+                writing: Mutex::new(()),
+            });
+            let server = TestServer::start_with(Settings::default(), token, Some(context), |_| {
+                Box::new(Fake)
+            });
+            Self {
+                dir,
+                host,
+                server: Some(server),
+            }
+        }
+        fn request(&self, method: &str, path: &str, body: &str) -> String {
+            self.server
+                .as_ref()
+                .unwrap()
+                .request(method, path, body, "")
+        }
+    }
+    impl Drop for ControlFixture {
+        fn drop(&mut self) {
+            self.server.take();
+            std::fs::remove_dir_all(&self.dir).unwrap();
+        }
+    }
+    #[test]
+    fn playback_routes_reach_the_host() {
+        let fixture = ControlFixture::new("playback", None);
+        assert!(
+            fixture
+                .request("POST", "/v1/playback", r#"{"text":"Hello."}"#)
+                .contains("200")
+        );
+        assert!(
+            fixture
+                .request("POST", "/v1/playback", r#"{"clipboard":true}"#)
+                .contains("200")
+        );
+        for action in ["pause", "resume", "toggle", "stop", "next", "previous"] {
+            let reply = fixture.request("POST", &format!("/v1/playback/{action}"), "{}");
+            assert!(reply.starts_with("HTTP/1.1 200"), "{action}: {reply}");
+        }
+        fixture.request("POST", "/v1/playback/jump", r#"{"index":2}"#);
+        fixture.request("GET", "/v1/playback", "");
+        fixture.request("POST", "/v1/quit", "{}");
+        assert_eq!(
+            *fixture.host.0.lock().unwrap(),
+            vec![
+                ControlRequest::Play("Hello.".into()),
+                ControlRequest::ReadClipboard,
+                ControlRequest::Pause,
+                ControlRequest::Resume,
+                ControlRequest::Toggle,
+                ControlRequest::Stop,
+                ControlRequest::Next,
+                ControlRequest::Previous,
+                ControlRequest::Jump(2),
+                ControlRequest::Status,
+                ControlRequest::Quit,
+            ]
+        );
+    }
+    #[test]
+    fn control_errors_carry_the_host_status_and_bad_input_is_rejected() {
+        let fixture = ControlFixture::new("errors", None);
+        assert!(
+            fixture
+                .request("POST", "/v1/panel", "{}")
+                .starts_with("HTTP/1.1 409")
+        );
+        assert!(
+            fixture
+                .request("POST", "/v1/playback", "{}")
+                .starts_with("HTTP/1.1 400")
+        );
+        assert!(
+            fixture
+                .request("POST", "/v1/playback", r#"{"text":"  "}"#)
+                .starts_with("HTTP/1.1 422")
+        );
+        assert!(
+            fixture
+                .request("POST", "/v1/playback/jump", "{}")
+                .starts_with("HTTP/1.1 400")
+        );
+        assert!(
+            fixture
+                .request("DELETE", "/v1/playback", "")
+                .starts_with("HTTP/1.1 405")
+        );
+        assert!(
+            fixture
+                .request("POST", "/v1/downloads", r#"{"model":"nope"}"#)
+                .starts_with("HTTP/1.1 400")
+        );
+        assert!(fixture.host.0.lock().unwrap().is_empty());
+    }
+    #[test]
+    fn settings_patch_saves_validates_and_tells_the_host() {
+        let fixture = ControlFixture::new("settings", None);
+        let reply = fixture.request(
+            "PATCH",
+            "/v1/settings",
+            r#"{"speed":1.5,"date_order":"day_first","server.max_chars":99}"#,
+        );
+        assert!(reply.starts_with("HTTP/1.1 200"), "{reply}");
+        assert!(
+            reply.contains(r#""restartRequired":["server.max_chars"]"#),
+            "{reply}"
+        );
+        let (saved, error) = Settings::load(&fixture.dir.join("settings.toml"));
+        assert!(error.is_none());
+        assert_eq!(saved.speed, 1.5);
+        assert_eq!(saved.date_order, crate::normalize::DateOrder::DayFirst);
+        assert_eq!(fixture.host.0.lock().unwrap().len(), 1);
+        // One bad key changes nothing.
+        let bad = fixture.request("PATCH", "/v1/settings", r#"{"speed":1.25,"speed_typo":1}"#);
+        assert!(bad.starts_with("HTTP/1.1 400"), "{bad}");
+        assert_eq!(
+            Settings::load(&fixture.dir.join("settings.toml")).0.speed,
+            1.5
+        );
+        let get = fixture.request("GET", "/v1/settings", "");
+        assert!(get.contains(r#""speed":1.5"#), "{get}");
+    }
+    #[test]
+    fn pronunciations_can_be_listed_replaced_and_reset() {
+        let fixture = ControlFixture::new("pronunciations", None);
+        let body = r#"{"entries":[{"written":"GUI","spoken":"gooey"}]}"#;
+        assert!(
+            fixture
+                .request("PUT", "/v1/pronunciations", body)
+                .contains("gooey")
+        );
+        assert!(
+            fixture
+                .request("GET", "/v1/pronunciations", "")
+                .contains("gooey")
+        );
+        let empty = r#"{"entries":[{"written":" ","spoken":"x"}]}"#;
+        assert!(
+            fixture
+                .request("PUT", "/v1/pronunciations", empty)
+                .starts_with("HTTP/1.1 400")
+        );
+        assert!(
+            !fixture
+                .request("DELETE", "/v1/pronunciations", "")
+                .contains("gooey")
+        );
+    }
+    #[test]
+    fn browsers_and_unauthenticated_clients_are_kept_out_of_control_routes() {
+        let fixture = ControlFixture::new("guard", None);
+        let server = fixture.server.as_ref().unwrap();
+        let from_page = server.request(
+            "POST",
+            "/v1/playback/stop",
+            "{}",
+            "Origin: https://example.com\r\n",
+        );
+        assert!(from_page.starts_with("HTTP/1.1 403"), "{from_page}");
+        assert!(fixture.host.0.lock().unwrap().is_empty());
+        drop(fixture);
+
+        let guarded = ControlFixture::new("guard-token", Some(digest("secret")));
+        let server = guarded.server.as_ref().unwrap();
+        assert!(
+            server
+                .request("GET", "/v1/settings", "", "")
+                .starts_with("HTTP/1.1 401")
+        );
+        let allowed = server.request(
+            "GET",
+            "/v1/settings",
+            "",
+            "Authorization: Bearer secret\r\n",
+        );
+        assert!(allowed.starts_with("HTTP/1.1 200"), "{allowed}");
+    }
+    #[test]
+    fn speak_rejects_unknown_model_and_bad_pause_length() {
+        let settings = Settings::default();
+        let request = |json: &str| validate(json.as_bytes(), &settings);
+        assert!(request(r#"{"text":"a","silenceScale":99}"#).is_err());
+        let speak = request(r#"{"text":"a","model":"nope"}"#).unwrap();
+        assert!(request_settings(&settings, &speak).is_err());
+        let speak = request(
+            r#"{"text":"a","model":"phonon","normalizeText":false,"respellNames":true,"dateOrder":"day_first","silenceScale":0.5}"#,
+        )
+        .unwrap();
+        let applied = request_settings(&settings, &speak).unwrap();
+        assert_eq!(applied.model, ModelVariant::Phonon);
+        assert!(!applied.normalize_text);
+        assert!(applied.respell_names);
+        assert_eq!(applied.date_order, crate::normalize::DateOrder::DayFirst);
+        assert_eq!(applied.silence_scale, 0.5);
     }
     #[test]
     fn rejected_upload_does_not_hold_health_while_lingering() {
@@ -1356,10 +2114,11 @@ mod tests {
             std::env::temp_dir().join(format!("smart-voices-no-models-{}", std::process::id()));
         assert!(!root.exists());
         let mut native = Native {
-            settings: Settings::default(),
+            settings: Arc::new(RwLock::new(Settings::default())),
+            settings_path: root.join("settings.toml"),
             root: root.clone(),
-            dictionary: crate::pronounce::Pronunciations::new(vec![]),
             english: None,
+            english_id: None,
             persian: None,
             persian_id: None,
             loaded: Arc::default(),

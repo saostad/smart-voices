@@ -2,9 +2,15 @@
 //!
 //! The voice gives no word timestamps, so the current word is estimated from
 //! the elapsed playback time: each word weighs `chars + 1 + 0.5 × punctuation
-//! chars` (port of `WordTiming` from the old Swift app).
+//! chars` (port of `WordTiming` from the old Swift app). The chars are those of
+//! what gets spoken: "#4471" takes as long as "number four four seven one".
 
+use std::cell::RefCell;
 use std::ops::Range;
+use std::rc::Rc;
+
+use crate::lang::{Lang, chunk_language};
+use crate::normalize::{NormalizeOptions, normalize};
 
 /// Non-ASCII punctuation that slows a word down (beyond
 /// [`char::is_ascii_punctuation`]).
@@ -34,11 +40,49 @@ pub fn word_ranges(text: &str) -> Vec<Range<usize>> {
     ranges
 }
 
-/// Weight of one word: `chars + 1 + 0.5 × punctuation chars`.
-fn weight(word: &str) -> f64 {
-    let chars = word.chars().count();
+/// Weight of one word: `chars + 1 + 0.5 × punctuation chars`. A word with
+/// digits or symbols counts the chars of its spoken form; voices say those in
+/// words whether or not the normalizer setting is on.
+fn weight(word: &str, english: bool) -> f64 {
     let punctuation = word.chars().filter(|c| is_punctuation(*c)).count();
+    let plain = word.chars().all(|c| {
+        c.is_alphabetic()
+            || is_punctuation(c)
+                && !matches!(c, '#' | '$' | '%' | '&' | '@' | '+' | '=' | '/' | '_')
+    });
+    let chars = if english && !plain {
+        normalize(word, NormalizeOptions::default()).chars().count()
+    } else {
+        word.chars().count()
+    };
     (chars + 1) as f64 + 0.5 * (punctuation as f64)
+}
+
+thread_local! {
+    /// Weights of the last chunk: the panel asks on every redraw, and spoken
+    /// forms cost a normalizer pass each.
+    static LAST: RefCell<Option<(String, Rc<Vec<f64>>)>> = const { RefCell::new(None) };
+}
+
+/// Weight of every word in `text`, in order.
+fn weights(text: &str) -> Rc<Vec<f64>> {
+    LAST.with(|last| {
+        let mut last = last.borrow_mut();
+        if let Some((cached, weights)) = last.as_ref()
+            && cached == text
+        {
+            return weights.clone();
+        }
+        let english = chunk_language(text) == Lang::English;
+        let computed = Rc::new(
+            text.split(char::is_whitespace)
+                .filter(|word| !word.is_empty())
+                .map(|word| weight(word, english))
+                .collect::<Vec<_>>(),
+        );
+        *last = Some((text.to_string(), computed.clone()));
+        computed
+    })
 }
 
 /// Estimated index of the word spoken at `elapsed` seconds into a chunk of
@@ -64,14 +108,15 @@ pub fn word_index(text: &str, elapsed: f64, duration: f64) -> Option<usize> {
     if elapsed == duration {
         return Some(words.len() - 1);
     }
-    let total: f64 = words.iter().map(|word| weight(word)).sum();
+    let weights = weights(text);
+    let total: f64 = weights.iter().sum();
     if total <= 0.0 {
         return Some(0);
     }
     let position = (elapsed / duration) * total;
     let mut cumulative = 0.0;
-    for (index, word) in words.iter().enumerate() {
-        cumulative += weight(word);
+    for (index, word_weight) in weights.iter().enumerate() {
+        cumulative += *word_weight;
         if position < cumulative {
             return Some(index);
         }
@@ -99,7 +144,7 @@ pub fn next_boundary(text: &str, elapsed: f64, duration: f64) -> Option<f64> {
         // Past the end is invalid; at the end the current word is the last one.
         return None;
     }
-    let weights: Vec<f64> = words.iter().map(|word| weight(word)).collect();
+    let weights = weights(text);
     let total: f64 = weights.iter().sum();
     if total <= 0.0 {
         return None;
@@ -122,6 +167,25 @@ pub fn next_boundary(text: &str, elapsed: f64, duration: f64) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn numbers_take_as_long_as_their_spoken_form() {
+        // "#4471" is spoken as 25 chars, so it holds the highlight far longer
+        // than its 5 written chars would suggest.
+        assert_eq!(word_index("#4471 ships today", 5.0, 12.0), Some(0));
+        assert_eq!(word_index("#4471 ships today", 11.5, 12.0), Some(2));
+        // Plain words are unaffected.
+        assert_eq!(word_index("aaaaa ships today", 5.0, 12.0), Some(1));
+    }
+
+    #[test]
+    fn persian_digits_are_not_read_as_english_words() {
+        assert_eq!(weight("۱۲۳", false), 4.0);
+        assert_eq!(
+            word_index("سلام #123 دنیا", 3.0, 12.0),
+            word_index("سلام aaaa دنیا", 3.0, 12.0)
+        );
+    }
 
     #[test]
     fn start_of_reading_is_first_word() {

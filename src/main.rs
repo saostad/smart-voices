@@ -54,6 +54,15 @@ fn run() -> i32 {
                 }
             }
         }
+        Some(command) if smart_voices::cli::CONTROL_COMMANDS.contains(&command) => {
+            match smart_voices::cli::run(&args) {
+                Ok(()) => 0,
+                Err(error) => {
+                    eprintln!("error: {error}");
+                    1
+                }
+            }
+        }
         Some("speak") if args.iter().any(|a| a == "--out" || a == "-o") => {
             let mut args = args.clone();
             args[0] = "synth".into();
@@ -240,6 +249,7 @@ fn speak(args: &[String]) -> i32 {
     if let Some(err) = &pronunciations_err {
         eprintln!("Warning: {err}");
     }
+    let normalize = settings.normalize_options();
     let speed = options.speed.unwrap_or(settings.speed);
     let model = options.model.unwrap_or(settings.model);
     let persian_voice = options.persian_voice.unwrap_or(settings.persian_voice);
@@ -323,6 +333,7 @@ fn speak(args: &[String]) -> i32 {
         unload_after,
         sanitizer_options: SanitizerOptions::default(),
         pronunciations,
+        normalize,
         persian_voice,
         debug_latency: false,
     };
@@ -412,17 +423,7 @@ fn download_cmd(args: &[String]) -> i32 {
     };
     let mut models = Vec::with_capacity(3);
     if let Some(variant) = options.kokoro {
-        models.push(ModelId::English(variant));
-        if variant != ModelVariant::Phonon {
-            models.push(ModelId::Misaki);
-        }
-        if variant == ModelVariant::Paradee {
-            models.push(ModelId::EspeakData);
-        }
-        if variant == ModelVariant::Phonon {
-            // The catalog voices, so offline use works afterwards.
-            models.push(ModelId::PhononVoices);
-        }
+        models.extend(smart_voices::control::download_set(variant));
     }
     if let Some(voice) = options.persian {
         models.push(ModelId::Persian(voice));
@@ -681,6 +682,7 @@ struct LazyPlayer {
     speed: f32,
     model: ModelVariant,
     persian_voice: PersianVoice,
+    normalize: smart_voices::normalize::NormalizeOptions,
     unload_after: Option<Duration>,
     pronunciations: Pronunciations,
 }
@@ -711,6 +713,7 @@ impl LazyPlayer {
             speed: settings.speed,
             model: settings.model,
             persian_voice: settings.persian_voice,
+            normalize: settings.normalize_options(),
             unload_after: if settings.unload_after_minutes == 0 {
                 None
             } else {
@@ -775,6 +778,7 @@ impl LazyPlayer {
             unload_after: self.unload_after,
             sanitizer_options: SanitizerOptions::default(),
             pronunciations: self.pronunciations.clone(),
+            normalize: self.normalize,
             persian_voice,
             debug_latency: false,
         };

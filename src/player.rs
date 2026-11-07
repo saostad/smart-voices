@@ -19,8 +19,9 @@ use crate::engine::{
     EngineError, KokoroEngine, ModelVariant, ParadeeEngine, PersianVoice, PiperEngine,
 };
 use crate::lang::{Lang, chunk_language};
+use crate::normalize::NormalizeOptions;
 use crate::phonon::PhononEngine;
-use crate::pipeline::prepare;
+use crate::pipeline::{prepare, spoken_text};
 use crate::pocket::PocketEngine;
 use crate::pronounce::Pronunciations;
 use crate::sanitize::SanitizerOptions;
@@ -233,6 +234,7 @@ pub struct PlayerConfig {
     pub unload_after: Option<Duration>,
     pub sanitizer_options: SanitizerOptions,
     pub pronunciations: Pronunciations,
+    pub normalize: NormalizeOptions,
     pub persian_voice: PersianVoice,
     /// Emit a [`PlayerEvent::Latency`] per reading (off by default).
     pub debug_latency: bool,
@@ -290,6 +292,7 @@ enum Command {
     SetSpeed(f32),
     SetUnloadAfter(Option<Duration>),
     SetPronunciations(Pronunciations),
+    SetNormalize(NormalizeOptions),
     SetPersianVoice(PersianVoice),
     Prewarm,
     Shutdown,
@@ -328,6 +331,12 @@ impl Player {
                     break;
                 }
             }
+        });
+        // Build the normalizer's rules off the playback path, so the first
+        // chunk of the first reading doesn't pay for them.
+        let warm_options = config.normalize;
+        std::thread::spawn(move || {
+            let _ = crate::normalize::normalize("1", warm_options);
         });
         let controller = Controller::new(
             config,
@@ -402,6 +411,11 @@ impl Player {
         self.send(Command::SetPronunciations(pronunciations));
     }
 
+    /// Change the normalizer passes; applies from the next chunk.
+    pub fn set_normalize(&self, options: NormalizeOptions) {
+        self.send(Command::SetNormalize(options));
+    }
+
     /// Switch the Persian voice; applies from the next chunk (the loaded
     /// Persian synth is dropped when the voice changed).
     pub fn set_persian_voice(&self, voice: PersianVoice) {
@@ -439,6 +453,7 @@ struct Controller<O: Output> {
     unload_after: Option<Duration>,
     sanitizer_options: SanitizerOptions,
     pronunciations: Pronunciations,
+    normalize: NormalizeOptions,
     persian_voice: PersianVoice,
     debug_latency: bool,
     factory: Box<dyn FnMut() -> Result<Box<dyn Synth>, String> + Send>,
@@ -491,6 +506,7 @@ impl<O: Output> Controller<O> {
             unload_after: config.unload_after,
             sanitizer_options: config.sanitizer_options,
             pronunciations: config.pronunciations,
+            normalize: config.normalize,
             persian_voice: config.persian_voice,
             debug_latency: config.debug_latency,
             factory,
@@ -595,6 +611,7 @@ impl<O: Output> Controller<O> {
             Command::SetSpeed(speed) => self.speed = speed,
             Command::SetUnloadAfter(after) => self.unload_after = after,
             Command::SetPronunciations(pronunciations) => self.pronunciations = pronunciations,
+            Command::SetNormalize(options) => self.normalize = options,
             Command::SetPersianVoice(voice) => {
                 if self.persian_voice != voice {
                     self.persian_voice = voice;
@@ -832,7 +849,7 @@ impl<O: Output> Controller<O> {
         if !self.ensure_engine(lang) {
             return;
         }
-        let spoken = self.pronunciations.apply(&chunk.text);
+        let spoken = spoken_text(&chunk.text, lang, &self.pronunciations, self.normalize);
         let voice = match lang {
             Lang::English => self.voice.clone(),
             Lang::Persian => self.persian_voice.id().to_string(),
@@ -1126,6 +1143,13 @@ mod tests {
             unload_after,
             sanitizer_options: SanitizerOptions::default(),
             pronunciations: Pronunciations::new(Vec::new()),
+            // These tests assert the exact text the voice receives; the
+            // normalizer has its own test below.
+            normalize: NormalizeOptions {
+                normalize_text: false,
+                respell_names: false,
+                date_order: crate::normalize::DateOrder::MonthFirst,
+            },
             persian_voice: PersianVoice::Amir,
             debug_latency: false,
         }
@@ -1950,6 +1974,29 @@ mod tests {
         assert_eq!(persian_count.load(Ordering::SeqCst), 2);
         // The English engine was never needed.
         assert_eq!(english_count.load(Ordering::SeqCst), 0);
+        player.shutdown();
+    }
+
+    #[test]
+    fn voice_reads_normalized_text_while_display_keeps_the_original() {
+        let (player, events, shared, _, synth) = spawn_player(None, FakeSynth::new());
+        player.set_normalize(NormalizeOptions::default());
+        player.play("It weighs 2 kg.");
+        drain_playlist(&events);
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Loading)
+        );
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Playing)
+        );
+        match next_event(&events) {
+            PlayerEvent::Chunk { text, .. } => assert_eq!(text, "It weighs 2 kg."),
+            event => panic!("expected Chunk, got {event:?}"),
+        }
+        wait_for_enqueued(&shared, 1);
+        assert_eq!(synth.calls.lock().unwrap()[0].0, "It weighs two kilograms.");
         player.shutdown();
     }
 

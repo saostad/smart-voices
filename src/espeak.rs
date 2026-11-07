@@ -28,10 +28,60 @@ unsafe extern "C" {
     );
     fn GetTranslatedPhonemeString(mode: c_int) -> *const c_char;
 }
+/// espeak-ng keeps `<data>/espeak-ng-data` in a fixed buffer
+/// (`N_PATH_HOME`, 160 bytes, 230 on Windows), and init fails beyond it.
+#[cfg(windows)]
+const MAX_DATA_PATH_BYTES: usize = 229 - "/espeak-ng-data".len();
+#[cfg(not(windows))]
+const MAX_DATA_PATH_BYTES: usize = 159 - "/espeak-ng-data".len();
+
+fn link_root() -> PathBuf {
+    dirs::cache_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join("smart-voices")
+        .join("espeak-links")
+}
+
+/// A path to `data` that fits espeak-ng's buffer: `data` itself, or else a
+/// symlink to it under `link_root`.
+fn short_data_path(data: &Path, link_root: &Path) -> Result<PathBuf, String> {
+    let fits = |path: &Path| path.as_os_str().len() <= MAX_DATA_PATH_BYTES;
+    if fits(data) {
+        return Ok(data.to_path_buf());
+    }
+    let too_long = || {
+        format!(
+            "The voice data folder's path is too long ({} characters, limit {MAX_DATA_PATH_BYTES}). Set SMART_VOICES_MODELS to a shorter folder.",
+            data.as_os_str().len()
+        )
+    };
+    let digest = ring::digest::digest(&ring::digest::SHA256, data.as_os_str().as_encoded_bytes());
+    let name: String = digest.as_ref()[..8]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    let link = link_root.join(name);
+    if !fits(&link) {
+        return Err(too_long());
+    }
+    if std::fs::read_link(&link).is_ok_and(|target| target == data) {
+        return Ok(link);
+    }
+    std::fs::create_dir_all(link_root).map_err(|_| too_long())?;
+    let _ = std::fs::remove_file(&link);
+    #[cfg(unix)]
+    let created = std::os::unix::fs::symlink(data, &link);
+    #[cfg(windows)]
+    let created = std::os::windows::fs::symlink_dir(data, &link);
+    created.map_err(|_| too_long())?;
+    Ok(link)
+}
+
 fn clauses(data: &Path, text: &str, voice: &str, tie: bool) -> Result<Vec<(String, i32)>, String> {
     let mut state = STATE.lock().map_err(|_| "pronunciation lock failed")?;
     if state.as_deref() != Some(data) {
-        let path = CString::new(data.to_string_lossy().as_bytes())
+        let usable = short_data_path(data, &link_root())?;
+        let path = CString::new(usable.to_string_lossy().as_bytes())
             .map_err(|_| "invalid pronunciation data path")?;
         if state.is_some() {
             unsafe {
@@ -232,5 +282,51 @@ mod tests {
         );
         assert_eq!(to_misaki("ʔˌn\u{329} ɚ ɾ ɜːɹ o^ʊ", false), "tn əɹ T ɜɹ O");
         assert_eq!(to_misaki("ə^ʊ iə", true), "Q ɪə");
+    }
+}
+
+#[cfg(all(test, unix))]
+mod path_tests {
+    use super::*;
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("smart-voices-espeak-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn short_paths_are_used_as_they_are() {
+        let path = Path::new("/models/kokoro");
+        assert_eq!(short_data_path(path, Path::new("/unused")).unwrap(), path);
+    }
+
+    #[test]
+    fn long_paths_get_a_short_link_to_the_same_folder() {
+        let root = temp_dir("long");
+        let data = root.join("d".repeat(100)).join("e".repeat(100));
+        std::fs::create_dir_all(data.join("espeak-ng-data")).unwrap();
+        let links = root.join("l");
+        let link = short_data_path(&data, &links).unwrap();
+        assert!(link.as_os_str().len() <= MAX_DATA_PATH_BYTES);
+        assert!(link.join("espeak-ng-data").is_dir());
+        // A second call reuses it, and a stale link is repointed.
+        assert_eq!(short_data_path(&data, &links).unwrap(), link);
+        let other = root.join("d".repeat(100)).join("f".repeat(100));
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::remove_file(&link).unwrap();
+        std::os::unix::fs::symlink(&other, &link).unwrap();
+        assert_eq!(short_data_path(&data, &links).unwrap(), link);
+        assert_eq!(std::fs::read_link(&link).unwrap(), data);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn long_path_with_a_long_link_root_names_the_setting_to_change() {
+        let data = PathBuf::from(format!("/{}", "d".repeat(200)));
+        let error = short_data_path(&data, &data).unwrap_err();
+        assert!(error.contains("SMART_VOICES_MODELS"), "{error}");
     }
 }
