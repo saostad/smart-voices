@@ -20,7 +20,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, windows-latest, macos-14]
+        os: [ubuntu-22.04, windows-latest, macos-15]
+    env:
+      # Keep the app running on macOS 14 even though it builds on 15.
+      MACOSX_DEPLOYMENT_TARGET: "14.0"
     steps:
       - uses: actions/checkout@v4
 
