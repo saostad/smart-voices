@@ -1,0 +1,16 @@
+diff --git a/servers/ggml/src/zonos3.h b/servers/ggml/src/zonos3.h
+index b2d5d59..fa9c16e 100644
+--- a/servers/ggml/src/zonos3.h
++++ b/servers/ggml/src/zonos3.h
+@@ -185,9 +185,9 @@ using zonos3_frame_cb = std::function<bool(int frame_idx, const int32_t * codes,
+ // recomputed over all of the slot's keys with the text keys outside the window at -inf (non-text keys are never
+ // masked). Both are explicit F32 attention, also on the F16-KV / FlashAttention profile.
+ struct zonos3_align_probe {
+-    struct head { int layer = 0, head = 0; };
++    struct probe_head { int layer = 0, head = 0; };  // not "head": a member named like its class is ill-formed (MSVC C2461)
+     struct window { int layer = 0, head = 0, lo = 0, hi = 0; };  // inclusive text indices (clipped like clip_window)
+-    std::vector<head> heads;       // probed heads (global layers only); empty = no probe
++    std::vector<probe_head> heads;       // probed heads (global layers only); empty = no probe
+     int text_start = -1;           // absolute prompt row of the text BOS
+     int text_len = 0;              // BOS..EOS rows inclusive; <= zonos3_batch_features::probe_max_text
+     std::vector<window> windows;   // masked heads; empty = unmasked
