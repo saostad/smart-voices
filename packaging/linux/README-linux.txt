@@ -3,9 +3,10 @@ Smart Voices for Linux
 
 Install
 -------
-1. Copy `smart-voices` and the `libonnxruntime.so*` files next to it into the same folder,
-   e.g. `~/.local/bin` (make sure it is on your PATH). Keep them together:
-   the app loads its voice runtime from those libraries.
+1. Copy `smart-voices`, `zonos3-server` and the `libonnxruntime.so*` files next to it
+   into the same folder, e.g. `~/.local/bin` (make sure it is on your PATH). Keep them
+   together: the app loads its voice runtime from those libraries, and starts
+   `zonos3-server` for the optional Zonos voice.
 2. Copy `smart-voices.desktop` to `~/.local/share/applications`.
 3. To start Smart Voices at login, also copy `smart-voices.desktop`
    to `~/.config/autostart`.

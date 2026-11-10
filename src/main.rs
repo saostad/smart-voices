@@ -17,7 +17,7 @@ use smart_voices::reader::render::{Frame, Painter, Theme};
 use smart_voices::sanitize::SanitizerOptions;
 use smart_voices::settings::{Settings, settings_path};
 
-const USAGE: &str = "Usage: smart-voices (starts the tray app)\n       smart-voices speak \"<text>\" [--voice <name>] [--speed <f>] [--model fast|small|phonon|paradee] [--persian-voice <id>] [--verbose] [--out PATH|-]\n       smart-voices synth [TEXT|-] --out PATH|- [--format wav|pcm|flac|mp3|ogg|opus] [--file PATH] [--SETTING VALUE]\n       smart-voices config list|get|set|reset|path\n       smart-voices voices [--model MODEL]\n       smart-voices download [--model fast|small|phonon|paradee] [--persian] [--persian-voice <id>]\n       smart-voices clean [<file>]\n       smart-voices watch [--auto-read]\n       smart-voices reader-preview <out.bmp> [--dark] [--width 440] [--height 300] [--scale 2]\nFull help: smart-voices --help";
+const USAGE: &str = "Usage: smart-voices (starts the tray app)\n       smart-voices speak \"<text>\" [--voice <name>] [--speed <f>] [--model fast|small|phonon|paradee|zonos] [--persian-voice <id>] [--verbose] [--out PATH|-]\n       smart-voices synth [TEXT|-] --out PATH|- [--format wav|pcm|flac|mp3|ogg|opus] [--file PATH] [--SETTING VALUE]\n       smart-voices config list|get|set|reset|path\n       smart-voices voices [--model MODEL]\n       smart-voices download [--model fast|small|phonon|paradee|zonos] [--persian] [--persian-voice <id>]\n       smart-voices clean [<file>]\n       smart-voices watch [--auto-read]\n       smart-voices reader-preview <out.bmp> [--dark] [--width 440] [--height 300] [--scale 2]\nFull help: smart-voices --help";
 
 fn main() {
     std::process::exit(run());
@@ -206,6 +206,31 @@ fn resolve_paradee_voice(query: &str) -> Option<&'static str> {
         .find(|name| name.eq_ignore_ascii_case(query))
 }
 
+/// Resolve a `speak --voice` value for Zonos: a voice id or name (any
+/// case), returning the voice id.
+fn resolve_zonos_voice(query: &str) -> Option<&'static str> {
+    smart_voices::zonos::find_voice(query).map(|voice| voice.id)
+}
+
+/// Zonos voice ids, comma-separated, for the unknown-voice error.
+fn zonos_voice_ids() -> String {
+    smart_voices::zonos::ZONOS_VOICES
+        .iter()
+        .map(|voice| voice.id)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// A saved Zonos voice, or the default with a loud warning when the saved
+/// id is unknown.
+fn checked_zonos_voice(saved: &str) -> String {
+    if smart_voices::zonos::is_zonos_voice(saved) {
+        return saved.to_string();
+    }
+    eprintln!("Warning: Unknown Zonos voice '{saved}' in settings; using the default Zonos voice.");
+    smart_voices::zonos::DEFAULT_ZONOS_VOICE.to_string()
+}
+
 /// All catalog voice display names, comma-separated, for the unknown-voice
 /// error.
 fn phonon_voice_names() -> String {
@@ -269,8 +294,10 @@ fn speak(args: &[String]) -> i32 {
         );
         paradee_voice = smart_voices::engine::DEFAULT_PARADEE_VOICE.to_string();
     }
+    let zonos_voice = checked_zonos_voice(&settings.zonos_voice);
     // With Phonon, `--voice` names a catalog voice (or `default`); with
-    // Paradee, one of its four voices; otherwise it names a Kokoro voice.
+    // Paradee, one of its four voices; with Zonos, one of its voices;
+    // otherwise it names a Kokoro voice.
     let voice = match (model, options.voice.as_deref()) {
         (ModelVariant::Phonon, Some(query)) => match resolve_phonon_voice(query) {
             Some(id) => id.to_string(),
@@ -294,6 +321,17 @@ fn speak(args: &[String]) -> i32 {
             }
         },
         (ModelVariant::Paradee, None) => paradee_voice.clone(),
+        (ModelVariant::Zonos, Some(query)) => match resolve_zonos_voice(query) {
+            Some(id) => id.to_string(),
+            None => {
+                eprintln!(
+                    "Error: Unknown Zonos voice '{query}'. Available voices: {}.",
+                    zonos_voice_ids()
+                );
+                return 2;
+            }
+        },
+        (ModelVariant::Zonos, None) => zonos_voice,
         (_, voice) => voice.map(str::to_string).unwrap_or(settings.voice),
     };
     // The Phonon voice id this reading needs (only used for Phonon).
@@ -679,6 +717,7 @@ struct LazyPlayer {
     voice: String,
     phonon_voice: String,
     paradee_voice: String,
+    zonos_voice: String,
     speed: f32,
     model: ModelVariant,
     persian_voice: PersianVoice,
@@ -710,6 +749,7 @@ impl LazyPlayer {
             voice: settings.voice.clone(),
             phonon_voice,
             paradee_voice,
+            zonos_voice: checked_zonos_voice(&settings.zonos_voice),
             speed: settings.speed,
             model: settings.model,
             persian_voice: settings.persian_voice,
@@ -770,6 +810,7 @@ impl LazyPlayer {
         let voice = match self.model {
             ModelVariant::Phonon => self.phonon_voice.clone(),
             ModelVariant::Paradee => self.paradee_voice.clone(),
+            ModelVariant::Zonos => self.zonos_voice.clone(),
             ModelVariant::Fast | ModelVariant::Small => self.voice.clone(),
         };
         let config = PlayerConfig {

@@ -432,7 +432,7 @@ impl ControlHost for HeadlessControl {
 pub fn download_set(variant: crate::engine::ModelVariant) -> Vec<ModelId> {
     use crate::engine::ModelVariant;
     let mut models = vec![ModelId::English(variant)];
-    if variant != ModelVariant::Phonon {
+    if variant.uses_misaki() {
         models.push(ModelId::Misaki);
     }
     if variant == ModelVariant::Paradee {

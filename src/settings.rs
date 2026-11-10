@@ -167,6 +167,10 @@ pub struct Settings {
     pub phonon_voice: String,
     /// Paradee voice name (see `engine::PARADEE_VOICES`).
     pub paradee_voice: String,
+    /// Zonos voice id (see `zonos::ZONOS_VOICES`).
+    pub zonos_voice: String,
+    /// Zonos runtime settings (`[zonos]` table).
+    pub zonos: crate::zonos::ZonosSettings,
     /// Speech speed multiplier.
     pub speed: f32,
     /// Pause duration multiplier, in 0.01..=10.
@@ -208,6 +212,18 @@ pub struct Settings {
 }
 
 impl Settings {
+    /// The English voice of the selected model (the value under
+    /// [`ModelVariant::voice_setting_key`]).
+    #[must_use]
+    pub fn english_voice(&self) -> &str {
+        match self.model {
+            ModelVariant::Fast | ModelVariant::Small => &self.voice,
+            ModelVariant::Phonon => &self.phonon_voice,
+            ModelVariant::Paradee => &self.paradee_voice,
+            ModelVariant::Zonos => &self.zonos_voice,
+        }
+    }
+
     /// The normalizer passes these settings turn on.
     #[must_use]
     pub fn normalize_options(&self) -> crate::normalize::NormalizeOptions {
@@ -226,6 +242,8 @@ impl Default for Settings {
             voice: DEFAULT_VOICE.to_string(),
             phonon_voice: DEFAULT_PHONON_VOICE.to_string(),
             paradee_voice: DEFAULT_PARADEE_VOICE.to_string(),
+            zonos_voice: crate::zonos::DEFAULT_ZONOS_VOICE.to_string(),
+            zonos: crate::zonos::ZonosSettings::default(),
             speed: 1.0,
             silence_scale: 0.2,
             pause_min_seconds: 0.2,
@@ -267,6 +285,9 @@ impl Settings {
         if !crate::engine::is_paradee_voice(&self.paradee_voice) {
             return Err("unknown paradee_voice; run smart-voices voices --model paradee".into());
         }
+        if !crate::zonos::is_zonos_voice(&self.zonos_voice) {
+            return Err("unknown zonos_voice; run smart-voices voices --model zonos".into());
+        }
         for binding in [
             &self.shortcuts.read_or_pause,
             &self.shortcuts.stop,
@@ -280,6 +301,7 @@ impl Settings {
 
     pub fn validate(&self) -> Result<(), String> {
         self.server.validate()?;
+        self.zonos.validate()?;
         if !self.silence_scale.is_finite() || !(0.01..=10.).contains(&self.silence_scale) {
             return Err("silence_scale must be between 0.01 and 10".into());
         }
@@ -437,6 +459,18 @@ mod tests {
             voice: "bm_lewis".to_string(),
             phonon_voice: "NbpkqMVS3CJeq2j8".to_string(),
             paradee_voice: "bm_fable".to_string(),
+            zonos_voice: "rupert".to_string(),
+            zonos: crate::zonos::ZonosSettings {
+                startup_timeout_secs: 30,
+                request_timeout_secs: 90,
+                use_gpu: true,
+                server_path: "/opt/zonos3/zonos3-server".to_string(),
+                batch_slots: 2,
+                decoder_lanes: 3,
+                rate_bytes_per_sec: 13.5,
+                chunk_overhead_secs: 0.4,
+                laci: false,
+            },
             speed: 1.25,
             silence_scale: 0.2,
             pause_min_seconds: 0.2,
@@ -482,6 +516,49 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
         assert!(err.is_none(), "unexpected error: {err:?}");
         assert_eq!(reloaded.model, ModelVariant::Phonon);
+    }
+
+    #[test]
+    fn zonos_model_voice_and_runtime_settings_round_trip() {
+        let dir = unique_temp_dir();
+        let path = dir.join("settings.toml");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            &path,
+            "model = \"zonos\"\nzonos_voice = \"wyatt\"\n[zonos]\nstartup_timeout_secs = 45\n",
+        )
+        .unwrap();
+        let (settings, err) = Settings::load(&path);
+        assert!(err.is_none(), "unexpected error: {err:?}");
+        assert_eq!(settings.model, ModelVariant::Zonos);
+        assert_eq!(settings.english_voice(), "wyatt");
+        assert_eq!(settings.zonos.startup_timeout_secs, 45);
+        // Unset keys keep their defaults.
+        assert_eq!(
+            settings.zonos.request_timeout_secs,
+            crate::zonos::ZonosSettings::default().request_timeout_secs
+        );
+        settings.save(&path).unwrap();
+        let (reloaded, err) = Settings::load(&path);
+        assert!(err.is_none(), "unexpected error: {err:?}");
+        assert_eq!(reloaded, settings);
+        // A zero timeout is rejected when the file loads, with a message
+        // naming the key.
+        std::fs::write(&path, "[zonos]\nrequest_timeout_secs = 0\n").unwrap();
+        let (_, err) = Settings::load(&path);
+        std::fs::remove_dir_all(&dir).unwrap();
+        let message = err.expect("invalid timeout is reported").to_string();
+        assert!(message.contains("zonos.request_timeout_secs"), "{message}");
+        let strict = Settings {
+            zonos_voice: "nobody".into(),
+            ..Settings::default()
+        };
+        assert!(
+            strict
+                .validate_strict()
+                .unwrap_err()
+                .contains("zonos_voice")
+        );
     }
 
     #[test]

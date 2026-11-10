@@ -1,0 +1,32 @@
+diff --git i/servers/ggml/src/server/main.cpp w/servers/ggml/src/server/main.cpp
+index 595d5b9..4bef25c 100644
+--- i/servers/ggml/src/server/main.cpp
++++ w/servers/ggml/src/server/main.cpp
+@@ -36,6 +36,7 @@
+ #include <cstdio>
+ #include <cstdlib>
+ #include <string>
++#include <thread>
+ #include <vector>
+ 
+ #ifndef _WIN32
+@@ -438,6 +439,19 @@ int zonos3_server_main(int argc, char ** argv, zonos3_server_ctl * ctl) {
+ 
+ #ifndef ZONOS3_APP_EMBED
+ int main(int argc, char ** argv) {
++    // Smart Voices: with ZONOS3_EXIT_ON_STDIN_EOF=1 the server exits as soon as its stdin closes, so it never
++    // outlives the app that started it (the app holds the pipe; a crash or kill closes it on every platform).
++    const char * exit_on_eof = getenv("ZONOS3_EXIT_ON_STDIN_EOF");
++    if (exit_on_eof && std::string(exit_on_eof) == "1") {
++        std::thread([] {
++            char buf[256];
++            while (fread(buf, 1, sizeof buf, stdin) > 0) {
++            }
++            fprintf(stderr, "zonos3-server: stdin closed, exiting\n");
++            fflush(stderr);
++            std::_Exit(0);
++        }).detach();
++    }
+     return zonos3_server_main(argc, argv, nullptr);
+ }
+ #endif

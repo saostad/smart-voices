@@ -48,6 +48,7 @@ use crate::reader::window::{PanelAction, ReaderWindow};
 use crate::sanitize::SanitizerOptions;
 use crate::settings::{Settings, settings_path};
 use crate::shortcuts::{ShortcutAction, format_binding, parse_binding};
+use crate::zonos::{ZONOS_VOICES, ZonosVoiceGroup};
 
 /// Events forwarded into the event loop from worker threads and the
 /// tray/menu global handlers.
@@ -352,6 +353,10 @@ struct App {
     voice_set_shown: ShownVoiceSet,
     /// Paradee voice checks (the four model voices, no group headers).
     paradee_voice_items: Vec<(&'static str, CheckMenuItem)>,
+    /// Zonos voice checks (`voice.id`, labeled `voice.label`).
+    zonos_voice_items: Vec<(&'static str, CheckMenuItem)>,
+    /// Disabled Zonos group headers in `ZonosVoiceGroup::ALL` order.
+    zonos_voice_headers: Vec<MenuItem>,
     persian_voice_items: Vec<(PersianVoice, CheckMenuItem)>,
     speed_items: Vec<(f32, CheckMenuItem)>,
     pause_items: Vec<(f32, CheckMenuItem)>,
@@ -409,6 +414,7 @@ enum ShownVoiceSet {
     Kokoro,
     Phonon,
     Paradee,
+    Zonos,
 }
 
 impl ShownVoiceSet {
@@ -416,6 +422,7 @@ impl ShownVoiceSet {
         match model {
             ModelVariant::Phonon => Self::Phonon,
             ModelVariant::Paradee => Self::Paradee,
+            ModelVariant::Zonos => Self::Zonos,
             ModelVariant::Fast | ModelVariant::Small => Self::Kokoro,
         }
     }
@@ -453,6 +460,17 @@ impl App {
                 startup_error = Some(message);
             }
             settings.paradee_voice = crate::engine::DEFAULT_PARADEE_VOICE.to_string();
+        }
+        if !crate::zonos::is_zonos_voice(&settings.zonos_voice) {
+            let message = format!(
+                "Unknown Zonos voice '{}' in settings; using the default Zonos voice.",
+                settings.zonos_voice
+            );
+            eprintln!("Warning: {message}");
+            if startup_error.is_none() {
+                startup_error = Some(message);
+            }
+            settings.zonos_voice = crate::zonos::DEFAULT_ZONOS_VOICE.to_string();
         }
         let model = settings.model;
         Self {
@@ -494,6 +512,8 @@ impl App {
             phonon_voice_headers: Vec::new(),
             voice_set_shown: ShownVoiceSet::Kokoro,
             paradee_voice_items: Vec::new(),
+            zonos_voice_items: Vec::new(),
+            zonos_voice_headers: Vec::new(),
             persian_voice_items: Vec::new(),
             speed_items: Vec::new(),
             pause_items: Vec::new(),
@@ -639,13 +659,8 @@ impl App {
         let quit_item = MenuItem::new("Quit Smart Voices", true, None);
 
         let model_menu = Submenu::new("Voice Model", true);
-        let mut model_items = Vec::with_capacity(4);
-        for variant in [
-            ModelVariant::Fast,
-            ModelVariant::Small,
-            ModelVariant::Paradee,
-            ModelVariant::Phonon,
-        ] {
+        let mut model_items = Vec::with_capacity(ModelVariant::ALL.len());
+        for variant in ModelVariant::ALL {
             let item = CheckMenuItem::new(variant.label(), true, variant == self.model, None);
             model_menu.append(&item).map_err(menu_build_error)?;
             model_items.push((variant, item));
@@ -696,12 +711,28 @@ impl App {
             let item = CheckMenuItem::new(name, true, id == self.settings.paradee_voice, None);
             paradee_voice_items.push((id, item));
         }
+        let mut zonos_voice_headers = Vec::with_capacity(ZonosVoiceGroup::ALL.len());
+        let mut zonos_voice_items: Vec<(&'static str, CheckMenuItem)> =
+            Vec::with_capacity(ZONOS_VOICES.len());
+        for group in ZonosVoiceGroup::ALL {
+            zonos_voice_headers.push(MenuItem::new(group.header(), false, None));
+            for voice in ZONOS_VOICES.iter().filter(|voice| voice.group == group) {
+                let item = CheckMenuItem::new(
+                    voice.label,
+                    true,
+                    voice.id == self.settings.zonos_voice,
+                    None,
+                );
+                zonos_voice_items.push((voice.id, item));
+            }
+        }
         let voice_set_shown = ShownVoiceSet::for_model(self.model);
         let active_entries = match voice_set_shown {
             ShownVoiceSet::Phonon => {
                 phonon_voice_entries(&phonon_voice_headers, &phonon_voice_items)
             }
             ShownVoiceSet::Paradee => paradee_voice_entries(&paradee_voice_items),
+            ShownVoiceSet::Zonos => zonos_voice_entries(&zonos_voice_headers, &zonos_voice_items),
             ShownVoiceSet::Kokoro => kokoro_voice_entries(&voice_headers, &voice_items),
         };
         for entry in active_entries {
@@ -915,6 +946,8 @@ impl App {
         self.phonon_voice_headers = phonon_voice_headers;
         self.voice_set_shown = voice_set_shown;
         self.paradee_voice_items = paradee_voice_items;
+        self.zonos_voice_items = zonos_voice_items;
+        self.zonos_voice_headers = zonos_voice_headers;
         self.persian_voice_items = persian_voice_items;
         self.speed_items = speed_items;
         self.pause_items = pause_items;
@@ -1229,11 +1262,7 @@ impl App {
         let sink = AudioSink::new().map_err(|err| err.to_string())?;
         let unload_after = unload_duration(self.settings.unload_after_minutes);
         let persian_voice = self.settings.persian_voice;
-        let voice = match self.model {
-            ModelVariant::Phonon => self.settings.phonon_voice.clone(),
-            ModelVariant::Paradee => self.settings.paradee_voice.clone(),
-            ModelVariant::Fast | ModelVariant::Small => self.settings.voice.clone(),
-        };
+        let voice = self.settings.english_voice().to_string();
         let config = PlayerConfig {
             voice,
             speed: self.settings.speed,
@@ -1582,6 +1611,15 @@ impl App {
         {
             self.on_paradee_voice_selected(id);
         }
+        if new.zonos_voice != self.settings.zonos_voice
+            && let Some(id) = self
+                .zonos_voice_items
+                .iter()
+                .map(|(id, _)| *id)
+                .find(|id| *id == new.zonos_voice)
+        {
+            self.on_zonos_voice_selected(id);
+        }
         if new.persian_voice != self.settings.persian_voice {
             self.on_persian_voice_selected(new.persian_voice);
         }
@@ -1804,6 +1842,13 @@ impl App {
         {
             self.on_paradee_voice_selected(id);
         } else if let Some(id) = self
+            .zonos_voice_items
+            .iter()
+            .find(|(_, item)| id == item.id())
+            .map(|(id, _)| *id)
+        {
+            self.on_zonos_voice_selected(id);
+        } else if let Some(id) = self
             .phonon_voice_items
             .iter()
             .find(|(_, item)| id == item.id())
@@ -1977,6 +2022,23 @@ impl App {
         }
     }
 
+    /// A Zonos voice item was clicked (muda already flipped its check;
+    /// re-sync all of them so exactly one stays checked).
+    fn on_zonos_voice_selected(&mut self, id: &'static str) {
+        self.settings.zonos_voice = id.to_string();
+        if let Some(player) = &self.player {
+            player.set_voice(id);
+        }
+        self.update_zonos_voice_checks();
+        self.save_settings();
+    }
+
+    fn update_zonos_voice_checks(&self) {
+        for (id, item) in &self.zonos_voice_items {
+            item.set_checked(*id == self.settings.zonos_voice);
+        }
+    }
+
     /// A Persian voice item was clicked (muda already flipped its check;
     /// re-sync all of them so exactly one stays checked). Applies from the
     /// next chunk; if its model isn't installed it downloads on the next
@@ -2059,6 +2121,9 @@ impl App {
                 phonon_voice_entries(&self.phonon_voice_headers, &self.phonon_voice_items)
             }
             ShownVoiceSet::Paradee => paradee_voice_entries(&self.paradee_voice_items),
+            ShownVoiceSet::Zonos => {
+                zonos_voice_entries(&self.zonos_voice_headers, &self.zonos_voice_items)
+            }
         }
     }
 
@@ -2507,6 +2572,26 @@ fn paradee_voice_entries<'a>(
         .collect()
 }
 
+/// Ordered "English Voice" submenu entries of the Zonos set: per group the
+/// disabled header and that group's voices.
+fn zonos_voice_entries<'a>(
+    headers: &'a [MenuItem],
+    items: &'a [(&'static str, CheckMenuItem)],
+) -> Vec<&'a dyn IsMenuItem> {
+    let mut entries: Vec<&dyn IsMenuItem> = Vec::with_capacity(headers.len() + items.len());
+    for (group, header) in ZonosVoiceGroup::ALL.into_iter().zip(headers.iter()) {
+        entries.push(header);
+        for voice in ZONOS_VOICES.iter().filter(|voice| voice.group == group) {
+            let (_, item) = items
+                .iter()
+                .find(|(id, _)| *id == voice.id)
+                .expect("a voice item is built for every Zonos voice");
+            entries.push(item);
+        }
+    }
+    entries
+}
+
 /// Swap the "English Voice" submenu's voice set: remove every entry of the
 /// old set, then insert the new set's entries at positions 0..n (the voices
 /// are the whole submenu).
@@ -2531,6 +2616,7 @@ fn download_label(model: ModelId) -> &'static str {
         ModelId::English(ModelVariant::Small) => "Downloading English voice (Small)",
         ModelId::English(ModelVariant::Phonon) => "Downloading Phonon",
         ModelId::English(ModelVariant::Paradee) => "Downloading Paradee",
+        ModelId::English(ModelVariant::Zonos) => "Downloading Zonos",
         ModelId::Persian(_) => "Downloading Persian voice",
         ModelId::PhononVoices => "Downloading Phonon voices",
         ModelId::Misaki => "Downloading English pronunciation data",
@@ -2573,6 +2659,7 @@ mod tests {
             ModelId::English(ModelVariant::Fast),
             ModelId::English(ModelVariant::Small),
             ModelId::English(ModelVariant::Phonon),
+            ModelId::English(ModelVariant::Zonos),
             ModelId::Persian(PersianVoice::PocketV2),
             ModelId::PhononVoices,
         ] {

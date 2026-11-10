@@ -127,11 +127,7 @@ pub fn render(
 pub fn voice_for_language(settings: &Settings, language: crate::lang::Lang) -> &str {
     match language {
         crate::lang::Lang::Persian => settings.persian_voice.id(),
-        crate::lang::Lang::English => match settings.model {
-            crate::engine::ModelVariant::Phonon => &settings.phonon_voice,
-            crate::engine::ModelVariant::Paradee => &settings.paradee_voice,
-            _ => &settings.voice,
-        },
+        crate::lang::Lang::English => settings.english_voice(),
     }
 }
 

@@ -214,11 +214,7 @@ fn request_settings(defaults: &Settings, request: &Speak) -> Result<Settings, Ap
         if let Some(persian) = crate::engine::PersianVoice::parse(voice) {
             settings.persian_voice = persian;
         } else {
-            let key = match settings.model {
-                ModelVariant::Phonon => "phonon_voice",
-                ModelVariant::Paradee => "paradee_voice",
-                _ => "voice",
-            };
+            let key = settings.model.voice_setting_key();
             crate::cli::set(&mut settings, key, voice)
         .map_err(|_| ApiError::bad("Unknown voice; see /v1/capabilities for valid Persian and configured English model voice ids"))?;
         }
@@ -509,7 +505,7 @@ fn default_missing(settings: &Settings, root: &Path) -> Vec<&'static str> {
 fn capabilities(settings: &Settings, root: &Path) -> Value {
     let mut models = Vec::new();
     let mut voices = serde_json::Map::new();
-    for id in ["fast", "small", "phonon", "paradee"] {
+    for id in ["fast", "small", "phonon", "paradee", "zonos"] {
         let variant = ModelVariant::parse(id).expect("catalog");
         let model = ModelId::English(variant);
         // Include required support data in installation readiness.
@@ -527,7 +523,13 @@ fn capabilities(settings: &Settings, root: &Path) -> Value {
                         .collect::<Vec<_>>()
                 ),
                 ModelVariant::Paradee => json!(crate::engine::PARADEE_VOICES),
-                _ => json!(crate::engine::VOICES.to_vec()),
+                ModelVariant::Zonos => json!(
+                    crate::zonos::ZONOS_VOICES
+                        .iter()
+                        .map(|v| v.id)
+                        .collect::<Vec<_>>()
+                ),
+                ModelVariant::Fast | ModelVariant::Small => json!(crate::engine::VOICES.to_vec()),
             },
         );
     }

@@ -154,7 +154,7 @@ pub fn models_for_chunks(
         .any(|chunk| chunk_language(&chunk.text) == Lang::English)
     {
         models.push(ModelId::English(variant));
-        if variant != ModelVariant::Phonon {
+        if variant.uses_misaki() {
             models.push(ModelId::Misaki);
         }
         if variant == ModelVariant::Paradee {

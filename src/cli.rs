@@ -46,7 +46,7 @@ pub const HELP: &str = r#"Usage:
   smart-voices config set KEY VALUE
   smart-voices config reset [KEY]
   smart-voices config path
-  smart-voices voices [--model fast|small|phonon|paradee]
+  smart-voices voices [--model fast|small|phonon|paradee|zonos]
   smart-voices download [--model MODEL] [--persian] [--persian-voice ID]
   smart-voices clean [FILE]
   smart-voices watch [--auto-read]
@@ -151,6 +151,12 @@ fn catalog(model: Option<&str>) -> Result<(), String> {
         println!("phonon: default");
         for voice in crate::phonon::PHONON_VOICES {
             println!("  {} ({})", voice.id, voice.name);
+        }
+    }
+    if model.is_none() || model == Some("zonos") {
+        println!("zonos:");
+        for voice in crate::zonos::ZONOS_VOICES {
+            println!("  {} — {}", voice.id, voice.label);
         }
     }
     if let Some(model) = model
@@ -548,11 +554,7 @@ fn synth(args: &[String], path: &Path) -> Result<(), String> {
     }
     for (key, value) in &options.overrides {
         if key == "__voice" {
-            let key = match settings.model {
-                crate::engine::ModelVariant::Phonon => "phonon_voice",
-                crate::engine::ModelVariant::Paradee => "paradee_voice",
-                _ => "voice",
-            };
+            let key = settings.model.voice_setting_key();
             set(&mut settings, key, value)?;
         }
     }
@@ -620,7 +622,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         return match &args[1..] {
             [] => catalog(None),
             [flag, model] if flag == "--model" => catalog(Some(model)),
-            _ => Err("usage: voices [--model fast|small|phonon|paradee]".into()),
+            _ => Err("usage: voices [--model fast|small|phonon|paradee|zonos]".into()),
         };
     }
     let path = crate::settings::settings_path().ok_or("couldn't resolve settings path")?;

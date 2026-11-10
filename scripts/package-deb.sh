@@ -17,6 +17,8 @@ mkdir -p "$PKG/DEBIAN" "$PKG/usr/bin" "$PKG/usr/lib/smart-voices" \
 # finds them via $ORIGIN); keep them together under /usr/lib/smart-voices.
 install -m 755 "$BIN" "$PKG/usr/lib/smart-voices/smart-voices"
 install -m 644 "$ROOT_DIR"/target/release/libonnxruntime.so* "$PKG/usr/lib/smart-voices/"
+# The Zonos voice runtime (scripts/build-zonos3.sh) runs as a helper process.
+install -m 755 "$ROOT_DIR/target/release/zonos3-server" "$PKG/usr/lib/smart-voices/zonos3-server"
 ln -sf ../lib/smart-voices/smart-voices "$PKG/usr/bin/smart-voices"
 sed 's/^Icon=.*/Icon=smart-voices/' "$ROOT_DIR/packaging/linux/smart-voices.desktop" \
   > "$PKG/usr/share/applications/smart-voices.desktop"
@@ -28,6 +30,7 @@ SHLIBS_DIR="$ROOT_DIR/target/deb/shlibs"
 mkdir -p "$SHLIBS_DIR/debian"
 echo "Source: smart-voices" > "$SHLIBS_DIR/debian/control"
 DEPENDS="$(cd "$SHLIBS_DIR" && dpkg-shlibdeps -O "$PKG/usr/lib/smart-voices/smart-voices" \
+  "$PKG/usr/lib/smart-voices/zonos3-server" \
   | sed -n 's/^shlibs:Depends=//p')"
 
 cat > "$PKG/DEBIAN/control" <<EOF

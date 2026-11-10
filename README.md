@@ -52,13 +52,14 @@ letting the download finish for next time.
 | English espeak-ng data (Paradee) | ~7 MB | First Paradee English reading |
 | Phonon (best-quality English) | ~103 MB | Only if you pick it in Settings |
 | Phonon voices (37 English voices) | ~9.5 MB | First reading with a Phonon voice other than Default |
+| Zonos (studio-quality English, for fast computers) | ~1.1 GB | Only if you pick it in Settings |
 | Persian voice (Pocket, best quality) | ~230 MB | First Persian reading (English-only use never downloads it) |
 | Persian voice (Piper, smaller) | ~67 MB | Only if you pick a Piper voice in Settings |
 
 You can also pre-download from a terminal:
 `smart-voices download`, `smart-voices download --model small`,
 `smart-voices download --model paradee`, `smart-voices download --model phonon`,
-or `smart-voices download --persian`.
+`smart-voices download --model zonos`, or `smart-voices download --persian`.
 These commands print download progress in the terminal too.
 
 ## The tray menu
@@ -83,12 +84,13 @@ permissions and Do Not Disturb settings.
 
 The `Settings` submenu holds everything customizable:
 
-- `Voice Model` — Fast, Small, Paradee or Phonon; switching reloads the voice
-  and changes which voices `English Voice` lists.
+- `Voice Model` — Fast, Small, Paradee, Phonon or Zonos; switching reloads
+  the voice and changes which voices `English Voice` lists.
 - `English Voice` — the selected model's voices: 28 Kokoro voices grouped by
-  accent and gender for Fast/Small, 4 distilled Kokoro voices for Paradee, or
+  accent and gender for Fast/Small, 4 distilled Kokoro voices for Paradee,
   Default plus 37 catalog voices in American, British and Characters groups
-  for Phonon.
+  for Phonon, or 10 voices in American, British · Irish and Characters
+  groups for Zonos.
 - `Persian Voice` — `Pocket v2 (best quality — recommended)` is the default
   and sounds the most natural; `Pocket v1` below it. The Piper voices (Amir,
   Gyro, Reza Ibrahim, Ganji, Ganji Adabi) are smaller downloads and start
@@ -203,9 +205,10 @@ and `shortcuts.*`, which need a restart. Set `SMART_VOICES_URL` and
 These commands need nothing running (handy for scripts and testing):
 
 - `smart-voices speak "<text>"` — read text aloud (`--voice`, `--speed`,
-  `--model fast|small|phonon|paradee`, `--persian-voice pocket|amir|gyro|reza_ibrahim|ganji|ganji_adabi`, `--verbose`).
+  `--model fast|small|phonon|paradee|zonos`, `--persian-voice pocket|amir|gyro|reza_ibrahim|ganji|ganji_adabi`, `--verbose`).
   With `--model phonon`, `--voice` takes a catalog voice name (e.g. `Zoey`) or `default`;
-  with `--model paradee`, it takes one of its four voice names.
+  with `--model paradee`, it takes one of its four voice names; with
+  `--model zonos`, one of its voice names (e.g. `Savannah`).
 - `smart-voices clean [<file>]` — print how text would be cleaned for speech,
   one chunk per line (reads stdin without a file).
 - `smart-voices download` — fetch voice models up front (`--model`,
@@ -228,6 +231,45 @@ and numeric words use the same statically linked espeak-ng as Persian Piper.
 Paradee (Apache-2.0, distilled from Kokoro) additionally downloads the
 standalone espeak-ng data bundle (~7 MB) because its own files contain no
 `espeak-ng-data` directory.
+
+### Zonos (studio quality, for fast computers)
+
+Zonos is [ZONOS3-Mini](https://huggingface.co/Zyphra/ZONOS3-Mini) by Zyphra
+(Apache-2.0): the most natural English voice here, with a ~1.1 GB download
+and about 1.4 GB of memory while loaded. It runs in `zonos3-server`, Zyphra's
+native runtime, which ships next to the app (about 6 MB; built from a pinned
+commit by `scripts/build-zonos3.sh`) and only starts when Zonos is the
+selected model. The app starts it on a free localhost port, and it stops when
+the voice unloads or the app quits. On Linux and Windows it runs on the CPU
+and needs AVX2 (most CPUs from 2013 on); on Apple Silicon it uses the GPU.
+Persian text still uses the Persian voice.
+
+On a 2015 quad-core laptop CPU (i7-6700HQ) it synthesizes a paragraph in
+about 0.6–0.7× its playback time, and the runtime takes about 2 seconds to
+start; newer machines are much faster.
+
+`settings.toml` takes a `[zonos]` table:
+
+| Key | Default | Meaning |
+|---|---|---|
+| `startup_timeout_secs` | 120 | Seconds to wait for the runtime to load the model (1–3600) |
+| `request_timeout_secs` | 600 | Seconds to wait for one sentence's audio (1–3600) |
+| `use_gpu` | `true` on macOS, else `false` | Run on the GPU (Metal); CPU-only builds ignore it |
+| `server_path` | empty | A `zonos3-server` to use instead of the bundled one, e.g. your own CUDA or Vulkan build |
+| `batch_slots` | 1 | Generation slots the runtime reserves (1–64); one reader needs one, more slow startup and reading |
+| `decoder_lanes` | 1 | Parallel waveform decoders (1–16); more compete with generation for the CPU |
+| `rate_bytes_per_sec` | 15 | Speaking rate asked of the model for long text, in UTF-8 bytes per second (5–30) |
+| `chunk_overhead_secs` | 0.25 | Extra seconds each sentence gets, so one-word sentences aren't rushed (0–2) |
+| `laci` | `true` | Zyphra's LACI guard, which redoes skipped text and invented audio |
+
+Without a speaking rate the model guesses how long a short sentence lasts and
+often keeps talking after it ("Sure!" came out as two seconds of made-up
+words), so the app always asks for one. Reading Speed is applied after
+synthesis, like Phonon: asking the model to speak faster than its natural
+rate makes it drop words.
+
+`SMART_VOICES_ZONOS3_SERVER` also points at another runtime when
+`server_path` is empty. The voice is `zonos_voice` (default `savannah`).
 
 `settings.toml` accepts `silence_scale = 0.2` (0.01–10, also available as
 Pause Length in the tray), `pause_min_seconds = 0.2` (positive finite seconds),
@@ -400,7 +442,7 @@ and MP3 require ffmpeg with libopus/libmp3lame.
 | input | markdown (default sanitizer), plain (whitespace cleanup only) |
 | maxChars | Optional positive limit no greater than the service limit |
 | timings | false (default) returns audio; true returns JSON with base64 audio |
-| model | English model for this request: fast, small, phonon or paradee; never persisted |
+| model | English model for this request: fast, small, phonon, paradee or zonos; never persisted |
 | normalizeText | Read numbers and symbols naturally; overrides the setting for this request |
 | respellNames | Respell hard names and foreign words; overrides the setting for this request |
 | dateOrder | month_first or day_first; overrides the setting for this request |

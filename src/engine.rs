@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 /// Downloadable English model variant: full-precision Kokoro (fast), int8
-/// Kokoro (small), Phonon (best quality), or Paradee (tiny, fastest).
+/// Kokoro (small), Phonon, Paradee (tiny, fastest), or Zonos (studio
+/// quality, for fast machines).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ModelVariant {
@@ -20,18 +21,59 @@ pub enum ModelVariant {
     /// Paradee-8M English (distilled from Kokoro): tiny download, fastest
     /// synthesis, four voices.
     Paradee,
+    /// ZONOS3-Mini English (Zyphra): studio quality, a large download, run
+    /// by the bundled `zonos3-server` runtime. Meant for fast machines.
+    Zonos,
 }
 
 impl ModelVariant {
-    /// Parse a CLI value (`"fast"`, `"small"`, `"phonon"` or `"paradee"`).
+    /// Every variant, in Voice Model menu order.
+    pub const ALL: [Self; 5] = [
+        Self::Fast,
+        Self::Small,
+        Self::Paradee,
+        Self::Phonon,
+        Self::Zonos,
+    ];
+
+    /// Parse a CLI value (`"fast"`, `"small"`, `"phonon"`, `"paradee"` or
+    /// `"zonos"`).
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "fast" => Some(Self::Fast),
             "small" => Some(Self::Small),
             "phonon" => Some(Self::Phonon),
             "paradee" => Some(Self::Paradee),
+            "zonos" => Some(Self::Zonos),
             _ => None,
         }
+    }
+
+    /// CLI and settings id (the inverse of [`parse`](Self::parse)).
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Fast => "fast",
+            Self::Small => "small",
+            Self::Phonon => "phonon",
+            Self::Paradee => "paradee",
+            Self::Zonos => "zonos",
+        }
+    }
+
+    /// The settings key holding this model's English voice.
+    pub fn voice_setting_key(self) -> &'static str {
+        match self {
+            Self::Fast | Self::Small => "voice",
+            Self::Phonon => "phonon_voice",
+            Self::Paradee => "paradee_voice",
+            Self::Zonos => "zonos_voice",
+        }
+    }
+
+    /// Whether this model reads English through the shared misaki
+    /// pronunciation data (the Kokoro family and Paradee).
+    pub fn uses_misaki(self) -> bool {
+        matches!(self, Self::Fast | Self::Small | Self::Paradee)
     }
 
     /// Directory name under the models root.
@@ -41,6 +83,7 @@ impl ModelVariant {
             Self::Small => "kokoro-int8-multi-lang-v1_0",
             Self::Phonon => "phonon-31m-en",
             Self::Paradee => "paradee-8m-en",
+            Self::Zonos => crate::zonos::MODEL_DIR,
         }
     }
 
@@ -51,6 +94,7 @@ impl ModelVariant {
             Self::Small => "model.int8.onnx",
             Self::Phonon => "model.safetensors",
             Self::Paradee => "paradee_int8.onnx",
+            Self::Zonos => crate::zonos::BACKBONE_FILE,
         }
     }
 
@@ -67,6 +111,7 @@ impl ModelVariant {
             }
             Self::Phonon => "https://huggingface.co/gradium/phonon-31m-en",
             Self::Paradee => "https://huggingface.co/sahilmahendrakar/Paradee-8M-v1.2",
+            Self::Zonos => "https://huggingface.co/Zyphra/ZONOS3-Mini",
         }
     }
 
@@ -77,6 +122,7 @@ impl ModelVariant {
             Self::Small => "Small (slower, ~130 MB)",
             Self::Phonon => "Phonon (best quality, ~103 MB)",
             Self::Paradee => "Paradee (tiny, fastest, ~9 MB)",
+            Self::Zonos => "Zonos (studio quality, fast computers, ~1.1 GB)",
         }
     }
 
@@ -97,6 +143,7 @@ impl ModelVariant {
                 crate::phonon::DEFAULT_VOICE_FILE,
             ],
             Self::Paradee => &["paradee_int8.onnx", "config.json"],
+            Self::Zonos => &crate::zonos::REQUIRED_FILES,
         }
     }
 
@@ -105,6 +152,7 @@ impl ModelVariant {
     pub fn download_files(self) -> &'static [DownloadFile] {
         match self {
             Self::Fast | Self::Small => &[],
+            Self::Zonos => &crate::zonos::MODEL_FILES,
             Self::Paradee => &[
                 DownloadFile {
                     name: "paradee_int8.onnx",
@@ -585,6 +633,17 @@ pub enum EngineError {
     UnknownVoice(String),
     /// The requested voice name is not in [`PARADEE_VOICES`].
     UnknownParadeeVoice(String),
+    /// The requested voice name is not in `zonos::ZONOS_VOICES`.
+    UnknownZonosVoice(String),
+    /// The Zonos runtime (`zonos3-server`) couldn't be found or started
+    /// (path and the real error kept).
+    ZonosRuntimeMissing(PathBuf, String),
+    /// This CPU lacks the instructions the bundled Zonos runtime needs.
+    ZonosUnsupportedCpu,
+    /// The Zonos runtime started but didn't come up (real reason kept).
+    ZonosStartFailed(String),
+    /// Zonos synthesis failed (the real error is kept).
+    ZonosFailed(String),
     /// Synthesis returned no audio samples.
     NoAudio(String),
 }
@@ -650,6 +709,30 @@ impl fmt::Display for EngineError {
                     PARADEE_VOICES.join(", ")
                 )
             }
+            EngineError::UnknownZonosVoice(name) => {
+                write!(
+                    f,
+                    "Unknown Zonos voice '{name}'. Available voices: {}.",
+                    crate::zonos::ZONOS_VOICES
+                        .iter()
+                        .map(|voice| voice.id)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }
+            EngineError::ZonosRuntimeMissing(path, message) => write!(
+                f,
+                "Couldn't start the Zonos voice runtime {}: {message}. Reinstall Smart Voices, or set zonos.server_path to a zonos3-server build.",
+                path.display()
+            ),
+            EngineError::ZonosUnsupportedCpu => write!(
+                f,
+                "The Zonos voice needs a CPU with AVX2 (most computers from 2013 on). Pick another Voice Model in Settings."
+            ),
+            EngineError::ZonosStartFailed(message) => {
+                write!(f, "The Zonos voice runtime didn't start: {message}")
+            }
+            EngineError::ZonosFailed(message) => write!(f, "The Zonos voice failed: {message}"),
             EngineError::NoAudio(text) => {
                 let preview: String = text.chars().take(60).collect();
                 if text.chars().count() > 60 {

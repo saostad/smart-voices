@@ -25,6 +25,7 @@ use crate::pipeline::{prepare, spoken_text};
 use crate::pocket::PocketEngine;
 use crate::pronounce::Pronunciations;
 use crate::sanitize::SanitizerOptions;
+use crate::zonos::ZonosEngine;
 
 /// How many chunks may be synthesized ahead of the one playing.
 const LOOKAHEAD_CHUNKS: usize = 2;
@@ -127,6 +128,22 @@ impl Synth for PhononEngine {
     }
 }
 
+impl Synth for ZonosEngine {
+    fn synthesize(
+        &mut self,
+        text: &str,
+        voice: &str,
+        speed: f32,
+    ) -> Result<SynthesizedAudio, String> {
+        let samples =
+            ZonosEngine::synthesize(self, text, voice, speed).map_err(|err| err.to_string())?;
+        Ok(SynthesizedAudio {
+            samples,
+            sample_rate: checked_rate(ZonosEngine::sample_rate(self))?,
+        })
+    }
+}
+
 /// Load the Persian engine for `voice`: Pocket for the Pocket voices,
 /// Piper for the rest. A Pocket failure is returned verbatim — never a
 /// Piper fallback.
@@ -149,8 +166,8 @@ pub fn load_persian_engine(
 }
 
 /// Load the English engine for `variant`: Phonon for Phonon, Paradee for
-/// Paradee, Kokoro for the Kokoro variants. Errors come back via
-/// `to_string()`.
+/// Paradee, Zonos for Zonos, Kokoro for the Kokoro variants. Errors come
+/// back via `to_string()`.
 pub fn load_english_engine(
     models_root: &std::path::Path,
     variant: ModelVariant,
@@ -161,6 +178,10 @@ pub fn load_english_engine(
             Err(err) => Err(err.to_string()),
         },
         ModelVariant::Paradee => match ParadeeEngine::load(models_root) {
+            Ok(engine) => Ok(Box::new(engine) as Box<dyn Synth>),
+            Err(err) => Err(err.to_string()),
+        },
+        ModelVariant::Zonos => match ZonosEngine::load(models_root) {
             Ok(engine) => Ok(Box::new(engine) as Box<dyn Synth>),
             Err(err) => Err(err.to_string()),
         },

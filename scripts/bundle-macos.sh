@@ -14,6 +14,9 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$ROOT_DIR/target/release/smart-voices" "$APP/Contents/MacOS/smart-voices"
 # The voice runtime ships as dylibs next to the binary (@loader_path).
 cp "$ROOT_DIR"/target/release/libonnxruntime*.dylib "$APP/Contents/MacOS/"
+# The Zonos voice runtime (scripts/build-zonos3.sh) runs as a helper process.
+cp "$ROOT_DIR/target/release/zonos3-server" "$APP/Contents/MacOS/zonos3-server"
+codesign -s - --force "$APP/Contents/MacOS/zonos3-server"
 cp "$ROOT_DIR/packaging/macos/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 cat > "$APP/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>

@@ -1591,13 +1591,18 @@ fn norm_tokens(t: &str) -> String {
         t = tpl(re!(r"(?<=[\w)])\s+[-–]\s+(?=[\w(])"), &t, " minus ");
         t = tpl(re!(r"\b(\d+)([a-fi-jn-rt-z])\b"), &t, r"\1 \2");
     }
+    // Multipliers: 3x faster, about 3x what it cost, grew 3x. → three times.
     t = tpl(
         re!(
-            r"\b(\d+(?:\.\d+)?)x(?=\s+(?:faster|slower|more|less|larger|smaller|bigger|higher|lower|cheaper|better|worse|longer|shorter|the|as|over|speed|zoom)\b)"
+            r"\b(\d+(?:\.\d+)?)[xX](?=\s+(?:faster|slower|more|less|larger|smaller|bigger|higher|lower|cheaper|better|worse|longer|shorter|the|as|over|speed|zoom|what|that|this|these|those|its?|their|his|her|our|your|my|an?|in|on|per|than|from|since|normal|usual|before|compared)\b|[.,;:!?)]+(?:\s|$)|$)"
         ),
         &t,
         r"\1 times",
     );
+    // Sizes: 4x4, 1920x1080 → four by four (0x1F stays hex).
+    t = tpl(re!(r"\b([1-9]\d{0,4})[xX](\d{1,5})\b"), &t, r"\1 by \2");
+    // Any other 10x before a word is said "ten x" (a 10x engineer).
+    t = tpl(re!(r"\b(\d+(?:\.\d+)?)[xX](?=\s+[A-Za-z])"), &t, r"\1 x");
     t = tpl(
         re!(r"(\d)\s+[x×*]\s+(\d+(?:\.\d+)?)(?=\s*=)"),
         &t,
@@ -2656,6 +2661,47 @@ mod tests {
             ..all()
         };
         assert_eq!(normalize("Bhagavad Gita.", names), "Buguhvud Geetah.");
+    }
+
+    #[test]
+    fn multipliers_and_sizes_are_said_in_words() {
+        let cases = [
+            (
+                "It cost about 3x what it did in 2019.",
+                "It cost about three times what it did in twenty nineteen.",
+            ),
+            ("Sales grew 3x.", "Sales grew three times."),
+            (
+                "Sales grew 3x, then fell.",
+                "Sales grew three times, then fell.",
+            ),
+            (
+                "Prices rose 3X in a year.",
+                "Prices rose three times in a year.",
+            ),
+            ("It's 3X cheaper.", "It's three times cheaper."),
+            (
+                "That is 2.5x the price.",
+                "That is two point five times the price.",
+            ),
+            ("He is a 10x engineer.", "He is a ten x engineer."),
+            ("We saw a 3x improvement.", "We saw a three x improvement."),
+            ("Get the 4x4 truck.", "Get the four by four truck."),
+            (
+                "Set it to 800x600.",
+                "Set it to eight hundred by six hundred.",
+            ),
+            // Hex, file names and codes keep their own rules.
+            ("The flag is 0x1F.", "The flag is zero X one F."),
+            (
+                "The image is logo@2x.png.",
+                "The image is logo at 2x dot png.",
+            ),
+            ("Code 7X-19.", "Code seven X nineteen."),
+        ];
+        for (written, spoken) in cases {
+            assert_eq!(normalize(written, all()), spoken, "input: {written}");
+        }
     }
 
     #[test]

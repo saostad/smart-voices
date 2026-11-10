@@ -23,6 +23,7 @@ pub mod sanitize;
 pub mod settings;
 pub mod shortcuts;
 pub mod word_timing;
+pub mod zonos;
 
 mod misaki;
 
