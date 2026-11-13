@@ -31,8 +31,30 @@ fn word_list() -> &'static HashMap<String, String> {
             if line.is_empty() || line.starts_with('#') {
                 continue;
             }
-            if let Some((written, persian)) = line.split_once('\t') {
+            let mut columns = line.split('\t');
+            if let (Some(written), Some(persian)) = (columns.next(), columns.next()) {
                 map.insert(written.to_string(), persian.to_string());
+            }
+        }
+        map
+    })
+}
+
+/// Map from the Persian spelling (second TSV column) to its exact
+/// phonemes (third column), in the v2 model's alphabet.
+pub(crate) fn phoneme_overrides() -> &'static HashMap<String, String> {
+    static LIST: OnceLock<HashMap<String, String>> = OnceLock::new();
+    LIST.get_or_init(|| {
+        let mut map = HashMap::new();
+        for line in include_str!("../assets/latin_fa.tsv").lines() {
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let mut columns = line.split('\t');
+            if let (Some(_written), Some(persian), Some(phonemes)) =
+                (columns.next(), columns.next(), columns.next())
+            {
+                map.insert(persian.to_string(), phonemes.to_string());
             }
         }
         map
@@ -451,15 +473,28 @@ mod tests {
     }
 
     #[test]
+    fn phoneme_overrides_map_persian_to_phonemes() {
+        let overrides = phoneme_overrides();
+        assert_eq!(overrides.get("اکسل").map(String::as_str), Some("?eksel"));
+        assert_eq!(overrides.get("گوگل").map(String::as_str), Some("gugel"));
+        assert_eq!(overrides.get("فرم‌ور").map(String::as_str), Some("fermver"));
+    }
+
+    #[test]
     fn word_list_table_is_well_formed() {
         let mut keys: Vec<&str> = Vec::new();
         for (line_no, line) in include_str!("../assets/latin_fa.tsv").lines().enumerate() {
             if line.is_empty() || line.starts_with('#') {
                 continue;
             }
-            let (written, persian) = line
-                .split_once('\t')
-                .unwrap_or_else(|| panic!("line {} has no tab: {line}", line_no + 1));
+            let columns: Vec<&str> = line.split('\t').collect();
+            assert_eq!(
+                columns.len(),
+                3,
+                "line {} must have three columns: {line}",
+                line_no + 1
+            );
+            let (written, persian, phonemes) = (columns[0], columns[1], columns[2]);
             assert!(
                 !written.is_empty()
                     && written
@@ -476,7 +511,30 @@ mod tests {
                 "line {} value has a char outside Persian letters, ZWNJ and spaces: {persian}",
                 line_no + 1
             );
+            assert!(
+                !phonemes.is_empty()
+                    && phonemes.chars().all(|c| matches!(
+                        c,
+                        'a' | 'e' | 'o' | 'A' | 'i' | 'u' | 'b' | 'p' | 't' | 's' | 'j' | 'C'
+                            | 'h' | 'x' | 'd' | 'z' | 'r' | 'S' | 'q' | 'f' | 'k' | 'g' | 'l' | 'm'
+                            | 'n' | 'v' | 'y' | '?' | ';'
+                    )),
+                "line {} phonemes use a char outside the v2 alphabet: {phonemes}",
+                line_no + 1
+            );
             keys.push(written);
+        }
+        // Two rows with the same Persian spelling have the same phonemes.
+        let mut by_persian: std::collections::HashMap<&str, &str> =
+            std::collections::HashMap::new();
+        for line in include_str!("../assets/latin_fa.tsv").lines() {
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let columns: Vec<&str> = line.split('\t').collect();
+            if let Some(previous) = by_persian.insert(columns[1], columns[2]) {
+                assert_eq!(previous, columns[2], "duplicate Persian spelling");
+            }
         }
         let mut sorted = keys.clone();
         sorted.sort_unstable();
@@ -484,7 +542,7 @@ mod tests {
         sorted.dedup();
         assert_eq!(keys.len(), sorted.len(), "word list has duplicate keys");
         assert!(
-            (250..=350).contains(&keys.len()),
+            (250..=400).contains(&keys.len()),
             "word list should have about 300 entries, has {}",
             keys.len()
         );

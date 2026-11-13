@@ -1382,31 +1382,8 @@ fn replace_word_except(value: &str, target: &str, replacement: &str, skip_exact:
 }
 
 fn replace_word(value: &str, target: &str, replacement: &str) -> String {
-    if value.is_empty() || target.is_empty() {
-        return value.to_string();
-    }
-    // Targets are ASCII, so ASCII case-folding matches Swift's lowering here.
-    let target: Vec<char> = target.chars().collect();
-    let chars: Vec<char> = value.chars().collect();
-    let mut result = String::with_capacity(value.len());
-    let mut index = 0;
-    while index < chars.len() {
-        if chars.len() - index >= target.len()
-            && chars[index..index + target.len()]
-                .iter()
-                .zip(target.iter())
-                .all(|(&c, &t)| c.eq_ignore_ascii_case(&t))
-            && is_word_boundary_before(&chars, index)
-            && is_word_boundary_after(&chars, index + target.len())
-        {
-            result.push_str(replacement);
-            index += target.len();
-        } else {
-            result.push(chars[index]);
-            index += 1;
-        }
-    }
-    result
+    // No match text is empty, so an empty `skip_exact` skips nothing.
+    replace_word_except(value, target, replacement, "")
 }
 
 fn is_word_boundary_before(chars: &[char], index: usize) -> bool {

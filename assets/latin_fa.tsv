@@ -1,301 +1,364 @@
-# Latin words and their usual Persian spelling: written<TAB>persian.
+# Latin words and their usual Persian spelling: written<TAB>persian<TAB>phonemes.
 # Keys are lower-case ASCII letters, sorted, no duplicates.
-account	اکانت
-admin	ادمین
-adobe	ادوبی
-ai	ای‌آی
-algorithm	الگوریتم
-amazon	آمازون
-amd	ای‌ام‌دی
-android	اندروید
-api	ای‌پی‌آی
-app	اپ
-apple	اپل
-application	اپلیکیشن
-audio	آدیو
-azure	آژور
-backup	بک‌آپ
-banner	بنر
-barcode	بارکد
-battery	باتری
-beta	بتا
-bitcoin	بیت‌کوین
-blog	بلاگ
-bluetooth	بلوتوث
-browser	براوزر
-business	بیزینس
-button	باتن
-cable	کابل
-cache	کش
-calendar	کلندر
-camera	کمرا
-cancel	کنسل
-canva	کانوا
-captcha	کپچا
-channel	چنل
-chatbot	چت‌بات
-chatgpt	چت‌جی‌پی‌تی
-chrome	کروم
-claude	کلود
-cloud	کلود
-cm	سانتی‌متر
-code	کد
-coin	کوین
-comment	کامنت
-company	کمپانی
-computer	کامپیوتر
-conference	کنفرانس
-content	کانتنت
-cookie	کوکی
-copilot	کوپایلوت
-copy	کپی
-crypto	کریپتو
-cursor	کرسر
-data	دیتا
-database	دیتابیس
-debug	دیباگ
-deepseek	دیپ‌سیک
-default	دیفالت
-delete	دیلیت
-design	دیزاین
-desktop	دسکتاپ
-developer	دولوپر
-device	دیوایس
-digital	دیجیتال
-direct	دایرکت
-discord	دیسکورد
-disk	دیسک
-disney	دیزنی
-display	دیسپلی
-docker	داکر
-domain	دومین
-download	دانلود
-drive	درایو
-dropbox	دراپ‌باکس
-edit	ادیت
-email	ایمیل
-emoji	ایموجی
-excel	اکسل
-export	اکسپورت
-facebook	فیس‌بوک
-feedback	فیدبک
-file	فایل
-filter	فیلتر
-firefox	فایرفاکس
-firmware	فریم‌ور
-flash	فلش
-flutter	فلاتر
-folder	فولدر
-font	فونت
-framework	فریم‌ورک
-function	فانکشن
-galaxy	گلکسی
-game	گیم
-gemini	جمینای
-github	گیت‌هاب
-gitlab	گیت‌لب
-gmail	جی‌میل
-gps	جی‌پی‌اس
-graphic	گرافیک
-grok	گراک
-hacker	هکر
-hardware	هاردور
-hashtag	هشتگ
-hd	اچ‌دی
-headline	هدلاین
-host	هاست
-hosting	هاستینگ
-hp	اچ‌پی
-html	اچ‌تی‌ام‌ال
-huawei	هواوی
-ibm	آی‌بی‌ام
-icon	آیکون
-imdb	آی‌ام‌دی‌بی
-import	ایمپورت
-inbox	اینباکس
-instagram	اینستاگرام
-intel	اینتل
-internet	اینترنت
-ios	آی‌او‌اس
-ip	آی‌پی
-ipad	آیپد
-iphone	آیفون
-it	آی‌تی
-javascript	جاوااسکریپت
-jetbrains	جت‌برینز
-json	جیسون
-keyboard	کیبورد
-kg	کیلوگرم
-km	کیلومتر
-kubernetes	کوبرنتیز
-laptop	لپ‌تاپ
-launch	لانچ
-lg	ال‌جی
-license	لایسنس
-like	لایک
-line	لاین
-linkedin	لینکدین
-linux	لینوکس
-live	لایو
-loading	لودینگ
-login	لاگین
-logo	لوگو
-mac	مک
-macbook	مک‌بوک
-macos	مک‌او‌اس
-manager	منیجر
-market	مارکت
-marketing	مارکتینگ
-mastercard	مسترکارت
-media	مدیا
-meeting	میتینگ
-memory	مموری
-menu	منو
-message	مسیج
-messenger	مسنجر
-meta	متا
-microsoft	مایکروسافت
-mm	میلی‌متر
-mobile	موبایل
-model	مدل
-modem	مودم
-monitor	مانیتور
-mouse	ماوس
-mozilla	موزیلا
-nasa	ناسا
-netflix	نتفلیکس
-network	نتورک
-nokia	نوکیا
-notification	نوتیفیکیشن
-notion	نوشن
-nvidia	انویدیا
-office	آفیس
-offline	آفلاین
-ok	اوکی
-online	آنلاین
-openai	اوپن‌ای‌آی
-option	آپشن
-oracle	اوراکل
-outlook	اوت‌لوک
-package	پکیج
-panel	پنل
-password	پسورد
-paypal	پی‌پال
-pdf	پی‌دی‌اف
-performance	پرفورمنس
-php	پی‌اچ‌پی
-pinterest	پینترست
-pixel	پیکسل
-platform	پلتفرم
-playlist	پلی‌لیست
-plugin	پلاگین
-podcast	پادکست
-portal	پورتال
-post	پست
-premium	پریمیوم
-printer	پرینتر
-product	پروداکت
-profile	پروفایل
-program	پروگرام
-project	پروژه
-promo	پرومو
-prompt	پرامپت
-protocol	پروتکل
-proxy	پراکسی
-python	پایتون
-qr	کیو‌آر
-ram	رم
-react	ری‌اکت
-reaction	ری‌اکشن
-reddit	ردیت
-remote	ریموت
-report	ریپورت
-router	روتر
-rust	راست
-safari	سافاری
-samsung	سامسونگ
-scanner	اسکنر
-screen	اسکرین
-script	اسکریپت
-security	سکیوریتی
-service	سرویس
-session	سشن
-settings	ستینگ
-shopify	شاپیفای
-shortcut	شورتکات
-site	سایت
-skype	اسکایپ
-slack	اسلک
-sms	اس‌ام‌اس
-snapchat	اسنپ‌چت
-software	سافت‌ور
-sony	سونی
-spam	اسپم
-speaker	اسپیکر
-spotify	اسپاتیفای
-sql	اس‌کیو‌ال
-stackoverflow	استک‌اورفلو
-startup	استارتاپ
-steam	استیم
-sticker	استیکر
-storage	استوریج
-store	استور
-story	استوری
-streaming	استریمینگ
-stripe	استرایپ
-studio	استودیو
-style	استایل
-subscribe	سابسکرایب
-support	ساپورت
-surface	سرفیس
-switch	سوییچ
-system	سیستم
-tablet	تبلت
-telegram	تلگرام
-tencent	تنسنت
-tesla	تسلا
-text	تکست
-theme	تم
-tiktok	تیک‌تاک
-token	توکن
-toshiba	توشیبا
-toyota	تویوتا
-trade	ترید
-traffic	ترافیک
-trend	ترند
-twitch	توییچ
-twitter	توییتر
-typescript	تایپ‌اسکریپت
-uber	اوبر
-ui	یو‌آی
-unicode	یونیکد
-unity	یونیتی
-unreal	آنریل
-update	آپدیت
-upgrade	آپگرید
-upload	آپلود
-url	یو‌آر‌ال
-usb	یو‌اس‌بی
-user	یوزر
-ux	یو‌ایکس
-viber	وایبر
-video	ویدیو
-vimeo	ویمیو
-virtual	ویرچوال
-visa	ویزا
-visual	ویژوال
-volkswagen	فولکس‌واگن
-vpn	وی‌پی‌ان
-vs	وی‌اس
-walmart	والمارت
-webinar	وبینار
-website	وب‌سایت
-whatsapp	واتس‌اپ
-wifi	وای‌فای
-wikipedia	ویکی‌پدیا
-windows	ویندوز
-wordpress	وردپرس
-workspace	ورک‌اسپیس
-xiaomi	شیائومی
-youtube	یوتیوب
-zoom	زوم
+account	اکانت	?akAnt
+admin	ادمین	?admin
+adobe	ادوبی	?adobi
+ai	ای‌آی	?ey?Ay
+air	ایر	?eyr
+algorithm	الگوریتم	?algoritm
+amazon	آمازون	?AmAzon
+amd	ای‌ام‌دی	?ey?emdi
+android	اندروید	?androyd
+api	ای‌پی‌آی	?eypi?Ay
+app	اپ	?ap
+apple	اپل	?apel
+application	اپلیکیشن	?aplikeySen
+audio	آدیو	?Adio
+azure	آژور	?A;ur
+backup	بک‌آپ	bek?Ap
+banner	بنر	baner
+barcode	بارکد	bArkod
+battery	باتری	bAtri
+beta	بتا	betA
+bitcoin	بیت‌کوین	bitkoyn
+blog	بلاگ	belAg
+bluetooth	بلوتوث	blutuS
+book	بوک	buk
+browser	براوزر	brAvzer
+bug	باگ	bAg
+business	بیزینس	biznes
+button	باتن	bAten
+cable	کابل	keybel
+cache	کش	keS
+calendar	کلندر	kalender
+camera	کمرا	kamerA
+cancel	کنسل	kansel
+canva	کانوا	kanvA
+captcha	کپچا	kapCA
+ceo	سی‌ای‌او	si?i?o
+channel	چنل	Canel
+chat	چت	Cat
+chatbot	چت‌بات	CatbAt
+chatgpt	چت‌جی‌پی‌تی	Catjipiti
+chrome	کروم	krom
+claude	کلود	klod
+click	کلیک	klik
+cloud	کلود	klod
+cm	سانتی‌متر	sAntimetr
+code	کد	kod
+coin	کوین	koyn
+com	کام	kAm
+comment	کامنت	kAment
+company	کمپانی	kampani
+computer	کامپیوتر	kAmpiyuter
+conference	کنفرانس	konferAns
+content	کانتنت	kAntent
+cookie	کوکی	kuki
+copilot	کوپایلوت	kopAylot
+copy	کپی	kopi
+cpu	سی‌پی‌یو	sipiyu
+crypto	کریپتو	kripto
+css	سی‌اس‌اس	si?es?es
+cursor	کرسر	kersor
+data	دیتا	deytA
+database	دیتابیس	deytAbeys
+debug	دیباگ	dibAg
+deepseek	دیپ‌سیک	dipsik
+default	دیفالت	difAlt
+delete	دیلیت	dilit
+design	دیزاین	dizAyn
+desktop	دسکتاپ	desktAp
+developer	دولوپر	doloper
+device	دیوایس	divAys
+digikala	دیجی‌کالا	dijikAlA
+digital	دیجیتال	dijitAl
+direct	دایرکت	dAyrekt
+discord	دیسکورد	diskord
+disk	دیسک	disk
+disney	دیزنی	dizni
+display	دیسپلی	displey
+docker	داکر	dAker
+domain	دومین	domeyn
+download	دانلود	dAnlod
+drive	درایو	drAyv
+dropbox	دراپ‌باکس	drApbAks
+edit	ادیت	?edit
+email	ایمیل	?imeyl
+emoji	ایموجی	?imoji
+error	ارور	?eror
+excel	اکسل	?eksel
+export	اکسپورت	?eksport
+facebook	فیس‌بوک	feysbuk
+faq	اف‌ای‌کیو	?ef?eykiyu
+feedback	فیدبک	fidbak
+figma	فیگما	figmA
+file	فایل	fAyl
+filter	فیلتر	filter
+firefox	فایرفاکس	fAyerfAks
+firmware	فرم‌ور	fermver
+flash	فلش	flaS
+flutter	فلاتر	flAter
+folder	فولدر	folder
+font	فونت	font
+framework	فریم‌ورک	freymvork
+function	فانکشن	fAnkSen
+galaxy	گلکسی	galaksi
+game	گیم	geym
+gemini	جمینای	jeminAy
+git	گیت	git
+github	گیت‌هاب	githAb
+gitlab	گیت‌لب	gitlab
+gmail	جی‌میل	jimeyl
+go	گو	go
+google	گوگل	gugel
+gps	جی‌پی‌اس	jipi?es
+gpt	جی‌پی‌تی	jipiti
+gpu	جی‌پی‌یو	jipiyu
+graphic	گرافیک	grAfik
+grok	گراک	grAk
+hacker	هکر	haker
+hardware	هاردور	hArdver
+hashtag	هشتگ	haStag
+hd	اچ‌دی	?eCdi
+headline	هدلاین	hedlAyn
+home	هوم	hom
+host	هاست	hAst
+hosting	هاستینگ	hAsting
+hp	اچ‌پی	?eCpi
+html	اچ‌تی‌ام‌ال	?eCti?em?el
+http	اچ‌تی‌تی‌پی	?eCtitipi
+https	اچ‌تی‌تی‌پی‌اس	?eCtitipi?es
+huawei	هواوی	huAvi
+ibm	آی‌بی‌ام	?Aybi?em
+icon	آیکون	?Aykon
+id	آی‌دی	?Aydi
+imdb	آی‌ام‌دی‌بی	?Ay?emdibi
+import	ایمپورت	?import
+inbox	اینباکس	?inbAks
+instagram	اینستاگرام	?instAgerAm
+intel	اینتل	?intel
+internet	اینترنت	?internet
+ios	آی‌او‌اس	?Ay?o?es
+ip	آی‌پی	?Aypi
+ipad	آیپد	?Aypad
+iphone	آیفون	?Ayfon
+it	آی‌تی	?Ayti
+java	جاوا	jAvA
+javascript	جاوااسکریپت	jAvA?eskript
+jetbrains	جت‌برینز	jetbreynz
+json	جیسون	jeyson
+keyboard	کیبورد	kibord
+kg	کیلوگرم	kilugeram
+km	کیلومتر	kilometr
+kotlin	کاتلین	kAtlin
+kubernetes	کوبرنتیز	kubernetiz
+laptop	لپ‌تاپ	laptAp
+launch	لانچ	lAnC
+led	ال‌ای‌دی	?el?idi
+lg	ال‌جی	?elji
+license	لایسنس	lAysens
+like	لایک	lAyk
+line	لاین	lAyn
+link	لینک	link
+linkedin	لینکدین	linkdin
+linux	لینوکس	linuks
+live	لایو	lAyv
+llm	ال‌ال‌ام	?el?el?em
+loading	لودینگ	loding
+login	لاگین	lAgin
+logo	لوگو	logo
+mac	مک	mak
+macbook	مک‌بوک	makbuk
+macos	مک‌او‌اس	mak?o?es
+manager	منیجر	manijer
+market	مارکت	mArket
+marketing	مارکتینگ	mArketing
+mastercard	مسترکارت	masterkArd
+max	مکس	maks
+media	مدیا	mediA
+meeting	میتینگ	miting
+memory	مموری	memori
+menu	منو	menu
+message	مسیج	mesij
+messenger	مسنجر	mesenjer
+meta	متا	metA
+microsoft	مایکروسافت	mAykrosAft
+mini	مینی	mini
+mm	میلی‌متر	milimetr
+mobile	موبایل	mobAyl
+model	مدل	model
+modem	مودم	modem
+monitor	مانیتور	mAnitor
+mouse	ماوس	mAus
+mozilla	موزیلا	mozilA
+nasa	ناسا	nAsA
+net	نت	net
+netflix	نتفلیکس	netfliks
+network	نتورک	netvork
+node	نود	nod
+nokia	نوکیا	nokiA
+note	نوت	not
+notification	نوتیفیکیشن	notifikeySen
+notion	نوشن	noSen
+nvidia	انویدیا	?envidiA
+office	آفیس	?Afis
+offline	آفلاین	?AflAyn
+ok	اوکی	?okey
+online	آنلاین	?AnlAyn
+open	اوپن	?open
+openai	اوپن‌ای‌آی	?open?ey?Ay
+option	آپشن	?ApSen
+oracle	اوراکل	?orAkel
+org	ارگ	?org
+os	او‌اس	?o?es
+outlook	اوت‌لوک	?Autluk
+package	پکیج	pakej
+page	پیج	peyj
+panel	پنل	panel
+password	پسورد	pasvord
+paypal	پی‌پال	peypAl
+pc	پی‌سی	pisi
+pdf	پی‌دی‌اف	pidi?ef
+performance	پرفورمنس	performAns
+phone	فون	fon
+photoshop	فتوشاپ	fotoSAp
+php	پی‌اچ‌پی	pi?eCpi
+pinterest	پینترست	pinterest
+pixel	پیکسل	piksel
+platform	پلتفرم	platform
+play	پلی	pley
+playlist	پلی‌لیست	pleylist
+plugin	پلاگین	plAgin
+plus	پلاس	pelAs
+podcast	پادکست	pAdkast
+portal	پورتال	portAl
+post	پست	post
+powerpoint	پاورپوینت	pAverpoynt
+premium	پریمیوم	perimiyom
+print	پرینت	perint
+printer	پرینتر	perinter
+pro	پرو	pro
+product	پروداکت	perodAkt
+profile	پروفایل	profAyl
+program	پروگرام	porogrAm
+project	پروژه	pro;e
+promo	پرومو	promo
+prompt	پرامپت	perAmpt
+protocol	پروتکل	protokol
+proxy	پراکسی	prAksi
+python	پایتون	pAyton
+qr	کیو‌آر	kiyu?Ar
+ram	رم	ram
+react	ری‌اکت	ri?akt
+reaction	ری‌اکشن	ri?akSen
+reddit	ردیت	redit
+remote	ریموت	rimot
+report	ریپورت	riport
+router	روتر	ruter
+ruby	روبی	rubi
+rust	راست	rAst
+safari	سافاری	sAfAri
+samsung	سامسونگ	sAmsong
+save	سیو	seyv
+scanner	اسکنر	?eskaner
+screen	اسکرین	?eskrin
+script	اسکریپت	?eskript
+search	سرچ	serC
+security	سکیوریتی	sekiyuriti
+seo	سئو	se?o
+server	سرور	server
+service	سرویس	servis
+session	سشن	seSen
+settings	ستینگ	seting
+share	شیر	Ser
+shopify	شاپیفای	SApifAy
+shortcut	شورتکات	SortkAt
+site	سایت	sAyt
+skype	اسکایپ	?eskAyp
+slack	اسلک	?eslak
+smart	اسمارت	?esmArt
+sms	اس‌ام‌اس	?es?em?es
+snapchat	اسنپ‌چت	?esnapCat
+snapp	اسنپ	?esnap
+software	سافت‌ور	sAftver
+sony	سونی	soni
+spam	اسپم	?espam
+speaker	اسپیکر	?espiker
+spotify	اسپاتیفای	?espAtifAy
+sql	اس‌کیو‌ال	?eskiyu?el
+stackoverflow	استک‌اورفلو	?estakoverflo
+start	استارت	?estArt
+startup	استارتاپ	?estArt?Ap
+steam	استیم	?estim
+sticker	استیکر	?estiker
+storage	استوریج	?estorej
+store	استور	?estor
+story	استوری	?estori
+streaming	استریمینگ	?estriming
+stripe	استرایپ	?estrAyp
+studio	استودیو	?estudio
+style	استایل	?estAyl
+subscribe	سابسکرایب	sAbskrAyb
+support	ساپورت	saport
+surface	سرفیس	serfeys
+swift	سوئیفت	suift
+switch	سوییچ	suiC
+system	سیستم	sistem
+tablet	تبلت	tablet
+team	تیم	tim
+telegram	تلگرام	telegrAm
+tencent	تنسنت	tensent
+tesla	تسلا	teslA
+test	تست	test
+text	تکست	tekst
+theme	تم	tem
+tiktok	تیک‌تاک	tiktAk
+token	توکن	token
+toshiba	توشیبا	toSibA
+toyota	تویوتا	toyotA
+trade	ترید	treyd
+traffic	ترافیک	trAfik
+trend	ترند	trend
+tv	تی‌وی	tivi
+twitch	توییچ	tuiC
+twitter	توییتر	tuiter
+typescript	تایپ‌اسکریپت	tAyp?eskript
+uber	اوبر	?uber
+ui	یو‌آی	yu?Ay
+ultra	اولترا	?oltrA
+unicode	یونیکد	yunikod
+unity	یونیتی	yuniti
+unreal	آنریل	?AnriAl
+update	آپدیت	?Apdeyt
+upgrade	آپگرید	?Apgreyd
+upload	آپلود	?Aplod
+url	یو‌آر‌ال	yu?Ar?el
+usb	یو‌اس‌بی	yu?esbi
+user	یوزر	yuzer
+ux	یو‌ایکس	yu?eks
+viber	وایبر	vAyber
+video	ویدیو	vidio
+vimeo	ویمیو	vimio
+virtual	ویرچوال	virCuAl
+visa	ویزا	vizA
+visual	ویژوال	vi;uAl
+volkswagen	فولکس‌واگن	folksvAgen
+vpn	وی‌پی‌ان	vipi?en
+vs	وی‌اس	vi?es
+vscode	وی‌اس‌کد	vi?eskod
+walmart	والمارت	vAlmArt
+watch	واچ	vAC
+web	وب	veb
+webinar	وبینار	vebinAr
+website	وب‌سایت	vebsAyt
+whatsapp	واتس‌اپ	vAts?ap
+wifi	وای‌فای	vAyfAy
+wikipedia	ویکی‌پدیا	vikipediA
+windows	ویندوز	vindoz
+word	ورد	vord
+wordpress	وردپرس	vordpres
+workspace	ورک‌اسپیس	vorkspeys
+www	دابلیو‌دابلیو‌دابلیو	dAbelyudAbelyudAbelyu
+xiaomi	شیائومی	SiAomi
+youtube	یوتیوب	yutub
+zoom	زوم	zum
