@@ -150,6 +150,20 @@ impl Pronunciations {
     /// Apply the rules to `text`. Output is never reprocessed.
     #[must_use]
     pub fn apply(&self, text: &str) -> String {
+        self.apply_matching(text, false)
+    }
+
+    /// Apply only the rules whose spoken form contains an Arabic-script
+    /// letter, for text the Persian voice will read. The seeded defaults
+    /// are English respellings for the English voice, so in a Persian
+    /// chunk they must not turn `API` into separate letters or `SQL`
+    /// into `sequel`.
+    #[must_use]
+    pub fn apply_persian(&self, text: &str) -> String {
+        self.apply_matching(text, true)
+    }
+
+    fn apply_matching(&self, text: &str, persian_only: bool) -> String {
         if self.rules.is_empty() {
             return text.to_string();
         }
@@ -159,6 +173,9 @@ impl Pronunciations {
         while index < chars.len() {
             let mut matched: Option<&Rule> = None;
             for rule in &self.rules {
+                if persian_only && !rule.spoken.chars().any(crate::lang::is_arabic_script) {
+                    continue;
+                }
                 if rule_matches(rule, &chars, index) {
                     matched = Some(rule);
                     break;
@@ -309,6 +326,18 @@ mod tests {
             dictionary.apply("SQL, TTS and APIs."),
             "sequel, TTS and APIs."
         );
+    }
+
+    #[test]
+    fn apply_persian_keeps_only_arabic_script_rules() {
+        let mut entries = PronunciationEntry::defaults();
+        entries.push(PronunciationEntry::new("GitHub", "گیت هاب"));
+        let dictionary = Pronunciations::new(entries);
+        // The default API → "A P I" rule is an English respelling and is
+        // skipped for Persian; the user's Persian GitHub rule wins over
+        // the default English one.
+        assert_eq!(dictionary.apply_persian("API و GitHub"), "API و گیت هاب");
+        assert_eq!(dictionary.apply("API و GitHub"), "A P I و git hub");
     }
 
     #[test]

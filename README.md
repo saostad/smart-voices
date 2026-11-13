@@ -95,6 +95,9 @@ The `Settings` submenu holds everything customizable:
   and sounds the most natural; `Pocket v1` below it. The Piper voices (Amir,
   Gyro, Reza Ibrahim, Ganji, Ganji Adabi) are smaller downloads and start
   faster, with lower quality.
+  English words inside Persian text are read with Persian pronunciation.
+  Unknown words are approximated, and a notice says so.
+  To fix a word, open `Edit Pronunciations…` and add it with its Persian spelling.
 - `Reading Speed` — 0.75× to 2×.
 - `Launch at Login` — start with your computer (reflects the real system
   state).

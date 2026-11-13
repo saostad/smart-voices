@@ -5,8 +5,11 @@
 //! argument names the dictionary the caller must apply per chunk at synthesis
 //! time (the next round's playback controller will own that step).
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use crate::chunk::{SpeechChunk, SpeechChunker};
 use crate::lang::Lang;
+use crate::latin_fa::{Persianized, persianize};
 use crate::normalize::{NormalizeOptions, normalize};
 use crate::pronounce::Pronunciations;
 use crate::sanitize::{SanitizerOptions, sanitize};
@@ -22,9 +25,42 @@ pub fn prepare(
     SpeechChunker::new().chunks(&segments)
 }
 
+/// Tell the user how a Persian reading handled Latin words: log every
+/// time (never the words themselves, which are the user's text), and
+/// show each desktop notice once per process, each with its own flag.
+fn report_persian_reading(result: &Persianized, notify: &dyn Fn(&str, &str)) {
+    if !result.approximated.is_empty() {
+        eprintln!(
+            "warn: fallback: true, attempted=english_word_list, reason=word_not_listed, taken=approximate_persian_spelling, count={}",
+            result.approximated.len()
+        );
+        static APPROX_NOTICE_SHOWN: AtomicBool = AtomicBool::new(false);
+        if !APPROX_NOTICE_SHOWN.swap(true, Ordering::SeqCst) {
+            notify(
+                "Persian voice",
+                "Some English words were read with an approximate pronunciation. To fix a word, open Edit Pronunciations\u{2026} and add it with its Persian spelling.",
+            );
+        }
+    }
+    if result.skipped {
+        eprintln!(
+            "warn: fallback: true, attempted=persian_voice, reason=unsupported_script, taken=skipped_text"
+        );
+        static SKIPPED_NOTICE_SHOWN: AtomicBool = AtomicBool::new(false);
+        if !SKIPPED_NOTICE_SHOWN.swap(true, Ordering::SeqCst) {
+            notify(
+                "Persian voice",
+                "Some text was skipped: the Persian voice can only read Persian and English letters.",
+            );
+        }
+    }
+}
+
 /// The text a voice reads for a chunk: the user's pronunciation rules first,
-/// so they win, then the English normalizer. Persian text has its own front
-/// end in the Pocket engine and only gets the pronunciation rules.
+/// so they win, then the English normalizer. Persian chunks get only the
+/// user's Persian pronunciation rules, then Latin words are converted to
+/// Persian spelling so the Persian engine reads them instead of dropping
+/// them.
 #[must_use]
 pub fn spoken_text(
     chunk_text: &str,
@@ -32,10 +68,13 @@ pub fn spoken_text(
     pronunciations: &Pronunciations,
     options: NormalizeOptions,
 ) -> String {
-    let spoken = pronunciations.apply(chunk_text);
     match language {
-        Lang::English => normalize(&spoken, options),
-        Lang::Persian => spoken,
+        Lang::English => normalize(&pronunciations.apply(chunk_text), options),
+        Lang::Persian => {
+            let result = persianize(&pronunciations.apply_persian(chunk_text));
+            report_persian_reading(&result, &crate::notification::show);
+            result.text
+        }
     }
 }
 
@@ -66,7 +105,71 @@ mod tests {
         );
         assert_eq!(
             spoken_text("سلام 5 kg.", Lang::Persian, &rules, options),
-            "سلام 5 kg."
+            "سلام 5 کیلوگرم."
+        );
+    }
+
+    #[test]
+    fn spoken_text_persian_rules_win_and_latin_words_are_read() {
+        let options = NormalizeOptions::default();
+        let rules = Pronunciations::new(vec![crate::pronounce::PronunciationEntry::new(
+            "GitHub",
+            "گیت هاب",
+        )]);
+        assert_eq!(
+            spoken_text("از GitHub استفاده کن", Lang::Persian, &rules, options),
+            "از گیت هاب استفاده کن"
+        );
+        assert_eq!(
+            spoken_text(
+                "از API استفاده کن",
+                Lang::Persian,
+                &Pronunciations::with_defaults(),
+                options
+            ),
+            "از ای‌پی‌آی استفاده کن"
+        );
+    }
+
+    #[test]
+    fn report_persian_reading_notifies_once_per_kind() {
+        use std::cell::RefCell;
+        let notices: RefCell<Vec<(String, String)>> = RefCell::new(Vec::new());
+        let notify = |title: &str, body: &str| {
+            notices
+                .borrow_mut()
+                .push((title.to_string(), body.to_string()));
+        };
+        let approximated = Persianized {
+            text: String::new(),
+            approximated: vec!["cluster".to_string()],
+            skipped: false,
+        };
+        report_persian_reading(&approximated, &notify);
+        report_persian_reading(&approximated, &notify);
+        let skipped = Persianized {
+            text: String::new(),
+            approximated: Vec::new(),
+            skipped: true,
+        };
+        report_persian_reading(&skipped, &notify);
+        let notices = notices.borrow();
+        assert_eq!(notices.len(), 2, "{notices:?}");
+        assert_eq!(
+            notices[0],
+            (
+                "Persian voice".to_string(),
+                "Some English words were read with an approximate pronunciation. To fix a word, open Edit Pronunciations\u{2026} and add it with its Persian spelling."
+                    .to_string()
+            )
+        );
+        assert_eq!(
+            notices[1],
+            (
+                "Persian voice".to_string(),
+                "Some text was skipped: the Persian voice can only read Persian and English letters."
+                    .to_string()
+            )
         );
     }
 
