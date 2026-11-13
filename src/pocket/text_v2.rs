@@ -23,6 +23,148 @@ pub(crate) const MIN_TOKENS: usize = 8;
 /// Homo-GE2PE marks the ezafe with a trailing "1" (reference `synthesize`).
 const EZAFE_MARK: char = '1';
 
+/// Phoneme spellings (ezafe stripped, exact and case-sensitive) after
+/// which a word cut is never allowed: conjunctions, prepositions,
+/// determiners and similar words that bind to what follows.
+const NO_CUT_AFTER: &[&str] = &[
+    "va", "?o", "ke", "dar", "be", "?az", "bA", "tA", "bar", "barAye", "yA", "?in", "?An", "yek",
+    "har",
+];
+
+/// Phoneme spellings (ezafe stripped, exact and case-sensitive) before
+/// which a word cut is never allowed: words that bind to what precedes.
+const NO_CUT_BEFORE: &[&str] = &["rA", "ro", "?ast"];
+
+/// Phoneme spellings (ezafe stripped, exact and case-sensitive) before
+/// which a word cut is preferred when a cut is needed: conjunctions and
+/// clause openers.
+const PREFER_CUT_BEFORE: &[&str] = &[
+    "va", "ke", "?ammA", "vali", "yA", "tA", "Cun", "?agar", "zirA", "pas", "sepas",
+];
+
+/// True when a cut between `prev` and `next` is allowed: `prev` carries
+/// no ezafe mark, its stripped spelling is not in [`NO_CUT_AFTER`], and
+/// `next`'s stripped spelling is not in [`NO_CUT_BEFORE`].
+fn is_allowed_cut(prev: &str, next: &str) -> bool {
+    !prev.ends_with(EZAFE_MARK)
+        && !NO_CUT_AFTER.contains(&strip_ezafe(prev).as_str())
+        && !NO_CUT_BEFORE.contains(&strip_ezafe(next).as_str())
+}
+
+/// True when the cut before `words[at]` is allowed.
+fn cut_allowed(words: &[&str], at: usize) -> bool {
+    at > 0 && at < words.len() && is_allowed_cut(words[at - 1], words[at])
+}
+
+/// True when the cut before `words[at]` lands before a preferred word.
+fn prefers_cut(words: &[&str], at: usize) -> bool {
+    at < words.len() && PREFER_CUT_BEFORE.contains(&strip_ezafe(words[at]).as_str())
+}
+
+/// Best word segmentation of `words` into pieces within `max_tokens`
+/// using only allowed cuts, or `None` when no such segmentation exists.
+/// Best is, in order: fewest segments, fewest segments under
+/// `min_tokens`, most cuts before a [`PREFER_CUT_BEFORE`] word, smallest
+/// sum of squared (segment tokens − total/segments), then earliest cuts.
+/// Token counts grow with segment length, so a segment is not extended
+/// once it passes `max_tokens`.
+fn search_word_segments(
+    words: &[&str],
+    count_tokens: &dyn Fn(&str) -> usize,
+    max_tokens: usize,
+    min_tokens: usize,
+) -> Option<Vec<String>> {
+    let n = words.len();
+    if n == 0 {
+        return Some(Vec::new());
+    }
+    // seg[i][j] = tokens in words[i..j], `None` once over the budget.
+    let mut seg: Vec<Vec<Option<usize>>> = vec![vec![None; n + 1]; n];
+    for i in 0..n {
+        for j in (i + 1)..=n {
+            let tokens = count_tokens(&words[i..j].join(" "));
+            if tokens > max_tokens {
+                break;
+            }
+            seg[i][j] = Some(tokens);
+        }
+    }
+    const INF: usize = usize::MAX / 4;
+    let mut dp_min = vec![INF; n + 1];
+    dp_min[n] = 0;
+    for i in (0..n).rev() {
+        for j in (i + 1)..=n {
+            if seg[i][j].is_none() || (j < n && !cut_allowed(words, j)) || dp_min[j] == INF {
+                continue;
+            }
+            dp_min[i] = dp_min[i].min(1 + dp_min[j]);
+        }
+    }
+    if dp_min[0] == INF {
+        return None;
+    }
+    let total = count_tokens(&words.join(" ")) as f64;
+    let average = total / dp_min[0] as f64;
+    // Best suffix from each position among fewest-segment segmentations.
+    #[derive(Clone)]
+    struct Best {
+        under: usize,
+        prefer: usize,
+        squared: f64,
+        next: usize,
+    }
+    let mut best: Vec<Option<Best>> = vec![None; n + 1];
+    best[n] = Some(Best {
+        under: 0,
+        prefer: 0,
+        squared: 0.0,
+        next: n,
+    });
+    for i in (0..n).rev() {
+        let mut chosen: Option<Best> = None;
+        for j in (i + 1)..=n {
+            let Some(tokens) = seg[i][j] else { continue };
+            if j < n && !cut_allowed(words, j) {
+                continue;
+            }
+            if dp_min[j] == INF || 1 + dp_min[j] != dp_min[i] {
+                continue;
+            }
+            let Some(suffix) = best[j].clone() else {
+                continue;
+            };
+            let candidate = Best {
+                under: usize::from(tokens < min_tokens) + suffix.under,
+                prefer: usize::from(j < n && prefers_cut(words, j)) + suffix.prefer,
+                squared: (tokens as f64 - average).powi(2) + suffix.squared,
+                next: j,
+            };
+            let better = match &chosen {
+                None => true,
+                Some(cur) => {
+                    candidate.under < cur.under
+                        || (candidate.under == cur.under && candidate.prefer > cur.prefer)
+                        || (candidate.under == cur.under
+                            && candidate.prefer == cur.prefer
+                            && candidate.squared < cur.squared - 1e-9)
+                }
+            };
+            if better {
+                chosen = Some(candidate);
+            }
+        }
+        best[i] = chosen;
+    }
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < n {
+        let next = best[i].as_ref()?.next;
+        out.push(words[i..next].join(" "));
+        i = next;
+    }
+    Some(out)
+}
+
 const HARD_BREAKS: [char; 3] = ['.', '!', '؟'];
 const SOFT_BREAKS: [char; 3] = ['،', '؛', ':'];
 const BREAK_CHARS: [char; 6] = ['.', '!', '؟', '،', '؛', ':'];
@@ -204,8 +346,9 @@ pub(crate) fn strip_ezafe(text: &str) -> String {
 
 /// Split phoneme `text` (ezafe marks kept) into chunks of at most
 /// `max_tokens` tokens: sentence boundaries first, then clause punctuation,
-/// then evenly packed words — a port of `split_text` in `synthesize.py`
-/// with `keep_punct_boundaries=false` (the `_synth_unit` call).
+/// then words cut at sensible boundaries — a port of `split_text` in
+/// `synthesize.py` with `keep_punct_boundaries=false` (the `_synth_unit`
+/// call).
 /// `count_tokens` sees the same text the model will (callers strip the
 /// ezafe marks); a chunk boundary never lands between a word and the
 /// complement its ezafe binds it to, and no chunk stays under `min_tokens`
@@ -220,7 +363,7 @@ pub(crate) fn split_chunks(
     if clean.is_empty() {
         return Vec::new();
     }
-    let parts = split_recurse(&clean, count_tokens, max_tokens);
+    let parts = split_recurse(&clean, count_tokens, max_tokens, min_tokens);
     let mut merged: Vec<String> = Vec::new();
     for chunk in parts {
         if let Some(last) = merged.last() {
@@ -252,6 +395,10 @@ pub(crate) fn split_chunks(
                 break;
             }
             let moved = prev_words[prev_words.len() - 1].clone();
+            // The new boundary sits before `moved`; it must be allowed.
+            if !is_allowed_cut(&prev_words[prev_words.len() - 2], &moved) {
+                break;
+            }
             merged[i - 1] = rest;
             let grown = format!("{moved} {}", merged[i]);
             merged[i] = grown;
@@ -264,6 +411,7 @@ fn split_recurse(
     piece: &str,
     count_tokens: &dyn Fn(&str) -> usize,
     max_tokens: usize,
+    min_tokens: usize,
 ) -> Vec<String> {
     if count_tokens(piece) <= max_tokens {
         return vec![piece.to_string()];
@@ -273,11 +421,14 @@ fn split_recurse(
         if parts.len() > 1 {
             return parts
                 .iter()
-                .flat_map(|part| split_recurse(part, count_tokens, max_tokens))
+                .flat_map(|part| split_recurse(part, count_tokens, max_tokens, min_tokens))
                 .collect();
         }
     }
     let words = split_words(piece);
+    if let Some(segments) = search_word_segments(&words, count_tokens, max_tokens, min_tokens) {
+        return segments;
+    }
     let total = count_tokens(piece);
     let mut chunks = total.div_ceil(max_tokens).max(1);
     let mut packed: Vec<String> = Vec::new();
@@ -409,7 +560,7 @@ mod tests {
     #[test]
     fn plan_pieces_three_clauses_end_clause_clause_sentence_end() {
         let counter = |s: &str| s.split_whitespace().count();
-        let clause = |word: &str| vec![word; 10].join(" ");
+        let clause = |word: &str| [word; 10].join(" ");
         let clauses = vec![clause("a"), clause("b"), clause("c")];
         let pieces = plan_pieces(&clauses, &counter, 18, 8, PieceEnd::Sentence);
         assert_eq!(pieces.len(), 3, "{pieces:?}");
@@ -425,7 +576,7 @@ mod tests {
     #[test]
     fn plan_pieces_long_clause_between_short_ones() {
         let counter = |s: &str| s.split_whitespace().count();
-        let long = vec!["w"; 30].join(" ");
+        let long = ["w"; 30].join(" ");
         let clauses = vec!["a b".to_string(), long, "c d".to_string()];
         let pieces = plan_pieces(&clauses, &counter, 18, 8, PieceEnd::Sentence);
         let ends: Vec<PieceEnd> = pieces.iter().map(|p| p.1).collect();
@@ -461,13 +612,48 @@ mod tests {
     }
 
     #[test]
+    fn sensible_cut_prefers_before_va() {
+        let counter = |s: &str| s.split_whitespace().count();
+        assert_eq!(
+            split_chunks("a b c va d e f", &counter, 4, 2),
+            vec!["a b c", "va d e f"]
+        );
+    }
+
+    #[test]
+    fn sensible_cut_never_after_dar_or_before_ra() {
+        let counter = |s: &str| s.split_whitespace().count();
+        let chunks = split_chunks("a dar b c d e f g", &counter, 3, 2);
+        for chunk in &chunks[..chunks.len() - 1] {
+            assert_ne!(chunk.split_whitespace().last(), Some("dar"), "{chunks:?}");
+        }
+        let chunks = split_chunks("a b rA c d e f g", &counter, 3, 2);
+        for chunk in &chunks[1..] {
+            assert_ne!(chunk.split_whitespace().next(), Some("rA"), "{chunks:?}");
+        }
+    }
+
+    #[test]
+    fn sensible_cut_fifty_words_within_budget_and_minimum() {
+        let counter = |s: &str| s.split_whitespace().count();
+        let text = ["word"; 50].join(" ");
+        let chunks = split_chunks(&text, &counter, 18, 8);
+        assert!(chunks.len() >= 3, "{chunks:?}");
+        for chunk in &chunks {
+            let count = counter(chunk);
+            assert!(count <= 18, "{chunk}");
+            assert!(count >= 8, "{chunk}");
+        }
+    }
+
+    #[test]
     fn short_tail_moves_words_back_unless_after_a_break() {
         let counter = |s: &str| s.split_whitespace().count();
-        // The ezafe chain packs unevenly ("a1 b1 c" | "d", unmergeable), so
-        // the short tail pulls "c" back.
+        // Moving "c" back would cut after "b1", which carries an ezafe
+        // mark, so that cut is not allowed and the short tail stays put.
         assert_eq!(
             split_chunks("a1 b1 c d", &counter, 3, 2),
-            vec!["a1 b1", "c d"]
+            vec!["a1 b1 c", "d"]
         );
         // After a real break the short tail stays put.
         assert_eq!(
