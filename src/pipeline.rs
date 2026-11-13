@@ -8,6 +8,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::chunk::{SpeechChunk, SpeechChunker};
+use crate::fa_text::expand;
 use crate::lang::Lang;
 use crate::latin_fa::{Persianized, persianize};
 use crate::normalize::{NormalizeOptions, normalize};
@@ -71,7 +72,7 @@ pub fn spoken_text(
     match language {
         Lang::English => normalize(&pronunciations.apply(chunk_text), options),
         Lang::Persian => {
-            let result = persianize(&pronunciations.apply_persian(chunk_text));
+            let result = persianize(&expand(&pronunciations.apply_persian(chunk_text)));
             report_persian_reading(&result, &crate::notification::show);
             result.text
         }
@@ -128,6 +129,19 @@ mod tests {
                 options
             ),
             "از ای‌پی‌آی استفاده کن"
+        );
+    }
+
+    #[test]
+    fn spoken_text_persian_expands_time() {
+        assert_eq!(
+            spoken_text(
+                "جلسه ساعت ۸:۳۰ است.",
+                Lang::Persian,
+                &Pronunciations::with_defaults(),
+                NormalizeOptions::default()
+            ),
+            "جلسه ساعت 8 و 30 دقیقه است."
         );
     }
 
