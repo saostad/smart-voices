@@ -22,8 +22,7 @@ const EZAFE_MARK: char = '1';
 /// determiners and similar words that bind to what follows.
 const NO_CUT_AFTER: &[&str] = &[
     "va", "?o", "ke", "dar", "be", "?az", "bA", "tA", "bar", "barAye", "yA", "?in", "?An", "yek",
-    "har", "bAyad", "nabAyad", "SAyad", "xeyli", "besyAr", "qadr", "?inqadr", "?enqadr",
-    "?Anqadr",
+    "har", "bAyad", "nabAyad", "SAyad", "xeyli", "besyAr", "qadr", "?inqadr", "?enqadr", "?Anqadr",
 ];
 
 /// Phoneme spellings (ezafe stripped, exact and case-sensitive) before
@@ -43,14 +42,80 @@ const PREFER_CUT_BEFORE: &[&str] = &[
 /// Phoneme spellings (ezafe stripped, exact and case-sensitive) that are
 /// finite verb forms on their own.
 const FINITE_VERB_FORMS: &[&str] = &[
-    "?ast", "nist", "hast", "hastam", "hasti", "hastim", "hastid", "hastand", "nistam",
-    "nistand", "bud", "budam", "budi", "budim", "budid", "budand", "Sod", "Sodam", "Sodi",
-    "Sodim", "Sodid", "Sodand", "Sode", "Savad", "Savam", "Savim", "Savid", "Savand", "kon",
-    "konam", "koni", "konad", "konim", "konid", "konand", "kard", "kardam", "kardi", "kardim",
-    "kardid", "kardand", "karde", "dAd", "dAdam", "dAdand", "dAram", "dAri", "dArad", "dArim",
-    "dArid", "dArand", "dASt", "dAStam", "dAStand", "zad", "zadam", "zadand", "gereft",
-    "gereftam", "gereftand", "goft", "goftam", "goftand", "raft", "raftam", "raftand", "?Amad",
-    "?Amadam", "?Amadand", "bASad", "bASam", "bASim", "bASid", "bASand",
+    "?ast",
+    "nist",
+    "hast",
+    "hastam",
+    "hasti",
+    "hastim",
+    "hastid",
+    "hastand",
+    "nistam",
+    "nistand",
+    "bud",
+    "budam",
+    "budi",
+    "budim",
+    "budid",
+    "budand",
+    "Sod",
+    "Sodam",
+    "Sodi",
+    "Sodim",
+    "Sodid",
+    "Sodand",
+    "Sode",
+    "Savad",
+    "Savam",
+    "Savim",
+    "Savid",
+    "Savand",
+    "kon",
+    "konam",
+    "koni",
+    "konad",
+    "konim",
+    "konid",
+    "konand",
+    "kard",
+    "kardam",
+    "kardi",
+    "kardim",
+    "kardid",
+    "kardand",
+    "karde",
+    "dAd",
+    "dAdam",
+    "dAdand",
+    "dAram",
+    "dAri",
+    "dArad",
+    "dArim",
+    "dArid",
+    "dArand",
+    "dASt",
+    "dAStam",
+    "dAStand",
+    "zad",
+    "zadam",
+    "zadand",
+    "gereft",
+    "gereftam",
+    "gereftand",
+    "goft",
+    "goftam",
+    "goftand",
+    "raft",
+    "raftam",
+    "raftand",
+    "?Amad",
+    "?Amadam",
+    "?Amadand",
+    "bASad",
+    "bASam",
+    "bASim",
+    "bASid",
+    "bASand",
 ];
 
 /// True when `word` (ezafe stripped) looks like a finite verb: it starts
@@ -321,6 +386,134 @@ pub fn split_sentences(normalized: &str) -> Vec<String> {
 /// on the clause it ends (reference `SOFT_BREAK` split).
 pub fn split_clauses(sentence: &str) -> Vec<String> {
     split_keep_all(sentence, &SOFT_BREAKS)
+}
+
+/// Clause-opening words: a window cut right before one is strong (see
+/// [`g2p_windows`]).
+const G2P_STRONG_AFTER: &[&str] = &["که", "تا", "اما", "ولی", "چون", "اگر", "زیرا"];
+
+/// Split `sentence` into pronunciation windows of at most
+/// `window_chars` chars. A sentence that fits is one window. Otherwise
+/// its clauses are halved repeatedly (see [`halve_window_part`]) until
+/// each part fits — a part with no space stays whole — and neighbouring
+/// parts are then joined greedily, in order, while the joined text
+/// (with one space) still fits. Joining all windows with single spaces
+/// gives back the sentence's words in order.
+pub(crate) fn g2p_windows(sentence: &str, window_chars: usize) -> Vec<String> {
+    if sentence.chars().count() <= window_chars {
+        return if sentence.is_empty() {
+            Vec::new()
+        } else {
+            vec![sentence.to_string()]
+        };
+    }
+    let mut parts = split_clauses(sentence);
+    if parts.is_empty() {
+        return Vec::new();
+    }
+    while let Some(at) = parts
+        .iter()
+        .position(|part| part.chars().count() > window_chars && part.contains(' '))
+    {
+        let part = parts.remove(at);
+        let (left, right) = halve_window_part(&part);
+        parts.insert(at, right);
+        parts.insert(at, left);
+    }
+    let mut windows: Vec<String> = Vec::new();
+    for part in parts {
+        if let Some(current) = windows.last_mut() {
+            let trial = format!("{current} {part}");
+            if trial.chars().count() <= window_chars {
+                *current = trial;
+                continue;
+            }
+        }
+        windows.push(part);
+    }
+    windows
+}
+
+/// Halve one over-long part at its best space: candidates are the spaces
+/// in the middle half of the part (a quarter to three quarters of its
+/// chars), or every space when none lies there. A candidate is strong
+/// when the word after it is in [`G2P_STRONG_AFTER`], or is `و` / `یا`
+/// and the word before it (trailing punctuation ignored) starts with
+/// `می` or `نمی` or ends with `د` or `ست`. A strong candidate wins over
+/// any other; among the winners the one nearest the middle wins, with
+/// ties going to the earlier one. The caller guarantees a space exists.
+fn halve_window_part(part: &str) -> (String, String) {
+    let chars: Vec<char> = part.chars().collect();
+    let len = chars.len();
+    let spaces: Vec<usize> = chars
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| **c == ' ')
+        .map(|(index, _)| index)
+        .collect();
+    let middle: Vec<usize> = spaces
+        .iter()
+        .copied()
+        .filter(|&index| index * 4 >= len && index * 4 <= len * 3)
+        .collect();
+    let candidates = if middle.is_empty() { &spaces } else { &middle };
+    let word_after = |index: usize| -> String {
+        chars[index + 1..]
+            .iter()
+            .collect::<String>()
+            .split_whitespace()
+            .next()
+            .unwrap_or("")
+            .to_string()
+    };
+    let word_before = |index: usize| -> String {
+        let before: String = chars[..index].iter().collect();
+        let word = before.split_whitespace().next_back().unwrap_or("");
+        word.trim_end_matches(|c: char| !c.is_alphanumeric())
+            .to_string()
+    };
+    let is_strong = |index: usize| -> bool {
+        let after = word_after(index);
+        if G2P_STRONG_AFTER.contains(&after.as_str()) {
+            return true;
+        }
+        if after == "و" || after == "یا" {
+            let before = word_before(index);
+            return before.starts_with("می")
+                || before.starts_with("نمی")
+                || before.ends_with('د')
+                || before.ends_with("ست");
+        }
+        false
+    };
+    let strong: Vec<usize> = candidates
+        .iter()
+        .copied()
+        .filter(|&index| is_strong(index))
+        .collect();
+    let pool = if strong.is_empty() {
+        candidates
+    } else {
+        &strong
+    };
+    let middle_at = len as f64 / 2.0;
+    let mut best: Option<usize> = None;
+    for &index in pool {
+        let better = match best {
+            None => true,
+            Some(seen) => (index as f64 - middle_at).abs() < (seen as f64 - middle_at).abs() - 1e-9,
+        };
+        if better {
+            best = Some(index);
+        }
+    }
+    let at = best.expect("a space exists");
+    let left: String = chars[..at].iter().collect();
+    let right: String = chars[at + 1..].iter().collect();
+    (
+        left.trim().to_string(),
+        right.trim_start_matches(' ').to_string(),
+    )
 }
 
 /// ZWNJ (U+200C), inside Persian words such as «این‌قدر».
@@ -788,6 +981,42 @@ mod tests {
             vec!["سلام،", "دنیا؛", "خداحافظ:", "رفت"]
         );
         assert_eq!(split_clauses("سلام دنیا"), vec!["سلام دنیا"]);
+    }
+
+    #[test]
+    fn g2p_windows_short_sentence_is_one_window() {
+        let sentence = "ک".repeat(100);
+        assert_eq!(sentence.chars().count(), 100);
+        assert_eq!(g2p_windows(&sentence, 120), vec![sentence]);
+    }
+
+    #[test]
+    fn g2p_windows_long_clause_splits_before_va_ranandegan() {
+        let sentence = "سازمان هواشناسی اعلام کرد که از اواخر هفته\u{200c} جاری بارش باران و برف در بیشتر استان\u{200c}های شمالی و غربی کشور آغاز می\u{200c}شود و رانندگان باید در جاده\u{200c}های کوهستانی با احتیاط بیشتری رانندگی کنند.";
+        // The sentence above uses هفتهٔ / استان‌های / می‌شود / جاده‌های with
+        // ZWNJ; rebuild it exactly as given so the char count matches.
+        let sentence = sentence.replace("هفته\u{200c} جاری", "هفته\u{654} جاری");
+        assert_eq!(sentence.chars().count(), 182, "{sentence}");
+        let windows = g2p_windows(&sentence, 120);
+        assert_eq!(windows.len(), 2, "{windows:?}");
+        for window in &windows {
+            assert!(window.chars().count() <= 120, "{window}");
+        }
+        assert!(windows[1].starts_with("و رانندگان"), "{}", windows[1]);
+        let joined: Vec<&str> = windows
+            .iter()
+            .flat_map(|window| window.split_whitespace())
+            .collect();
+        assert_eq!(joined, sentence.split_whitespace().collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn g2p_windows_groups_clauses_greedily() {
+        let sentence = "الف ب، ج د، ه و، ز ح";
+        assert_eq!(
+            g2p_windows(sentence, 12),
+            vec!["الف ب، ج د،".to_string(), "ه و، ز ح".to_string()]
+        );
     }
 
     #[test]

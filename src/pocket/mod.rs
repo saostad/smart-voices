@@ -50,8 +50,8 @@ use self::settings::PocketSettings;
 use self::text::{PieceEnd, classify_piece_end, prepare_text_prompt, split_text};
 use self::text_v2::{
     align_words, apply_overrides, clauses_from_counts, clean_sentence_for_g2p, dedupe_repeats,
-    fa_words, normalize_for_model, plan_pieces, split_clauses, split_sentences, strip_ezafe,
-    translate_phonemes,
+    fa_words, g2p_windows, normalize_for_model, plan_pieces, split_clauses, split_sentences,
+    strip_ezafe, translate_phonemes,
 };
 
 const SPLIT_SEAM: Duration = Duration::from_millis(50);
@@ -613,6 +613,7 @@ impl PocketEngine {
 
     /// Latent step with sampled noise (split out so `run_step` stays the
     /// zero-noise prefill path).
+    #[allow(clippy::too_many_arguments)]
     fn run_step_with_noise(
         &mut self,
         latent: &[f32],
@@ -766,7 +767,11 @@ impl PocketEngine {
         let seam = vec![0.0; (SPLIT_SEAM.as_secs_f64() * sample_rate) as usize];
         let mut out = self.generate_chunk(&words[..half].join(" "), depth + 1, settings)?;
         out.extend_from_slice(&seam);
-        out.extend_from_slice(&self.generate_chunk(&words[half..].join(" "), depth + 1, settings)?);
+        out.extend_from_slice(&self.generate_chunk(
+            &words[half..].join(" "),
+            depth + 1,
+            settings,
+        )?);
         Ok(out)
     }
 
@@ -816,8 +821,9 @@ impl PocketEngine {
     }
 
     /// v2 chunk list: normalize, split into sentences, pronounce each
-    /// whole sentence once, recover its clauses by aligning the phoneme
-    /// words to the Persian words, and plan the phoneme clauses into
+    /// sentence in [`g2p_windows`] windows, recover its clauses by
+    /// aligning each window's phoneme words to its Persian words, and
+    /// plan the phoneme clauses into
     /// token-budgeted pieces with [`plan_pieces`] (ezafe marks guide the
     /// split and are stripped before the model). A boundary at a clause
     /// edge ends a clause; cuts inside an over-long clause are
@@ -846,33 +852,49 @@ impl PocketEngine {
                 PieceEnd::Sentence
             };
             let clauses_fa = split_clauses(sentence);
-            let clean = clean_sentence_for_g2p(sentence);
-            let g2p = self
-                .g2p
-                .as_mut()
-                .expect("v2 engine without a pronunciation model");
-            let phonemes = g2p.phonemise(&clean)?;
-            if phonemes.trim().is_empty() {
-                eprintln!("Pocket TTS: no phonemes for a sentence");
-                continue;
+            let windows = g2p_windows(sentence, settings.g2p_window_chars);
+            let mut ph_words: Vec<String> = Vec::new();
+            let mut counts: Vec<usize> = Vec::new();
+            let mut aligned = true;
+            for window in &windows {
+                let clean = clean_sentence_for_g2p(window);
+                let phonemes = {
+                    let g2p = self
+                        .g2p
+                        .as_mut()
+                        .expect("v2 engine without a pronunciation model");
+                    g2p.phonemise(&clean)?
+                };
+                if phonemes.trim().is_empty() {
+                    eprintln!("Pocket TTS: no phonemes for a sentence");
+                }
+                let translated = translate_phonemes(&phonemes);
+                let window_ph: Vec<String> =
+                    translated.split_whitespace().map(str::to_string).collect();
+                let fa = fa_words(window);
+                let window_ph = dedupe_repeats(&fa, window_ph);
+                match align_words(&fa, &window_ph) {
+                    Some(window_counts) => {
+                        let lookup =
+                            |word: &str| crate::latin_fa::phoneme_overrides().get(word).cloned();
+                        let (window_ph, window_counts) =
+                            apply_overrides(&fa, &window_ph, &window_counts, &lookup);
+                        ph_words.extend(window_ph);
+                        counts.extend(window_counts);
+                    }
+                    None => {
+                        aligned = false;
+                        ph_words.extend(window_ph);
+                    }
+                }
             }
-            let translated = translate_phonemes(&phonemes);
-            let ph_words: Vec<String> = translated.split_whitespace().map(str::to_string).collect();
-            let fa = fa_words(sentence);
-            let ph_words = dedupe_repeats(&fa, ph_words);
-            let phoneme_clauses = match align_words(&fa, &ph_words) {
-                Some(counts) => {
-                    let lookup =
-                        |word: &str| crate::latin_fa::phoneme_overrides().get(word).cloned();
-                    let (ph_words, counts) = apply_overrides(&fa, &ph_words, &counts, &lookup);
-                    clauses_from_counts(&clauses_fa, &ph_words, &counts)
-                }
-                None => {
-                    eprintln!(
-                        "warn: fallback: true, attempted=clause_alignment, reason=word_count_mismatch, taken=whole_sentence_cuts"
-                    );
-                    vec![ph_words.join(" ")]
-                }
+            let phoneme_clauses = if aligned {
+                clauses_from_counts(&clauses_fa, &ph_words, &counts)
+            } else {
+                eprintln!(
+                    "warn: fallback: true, attempted=clause_alignment, reason=word_count_mismatch, taken=whole_sentence_cuts"
+                );
+                vec![ph_words.join(" ")]
             };
             if phoneme_clauses.is_empty() {
                 continue;
