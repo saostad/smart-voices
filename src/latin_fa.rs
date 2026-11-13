@@ -55,10 +55,9 @@ pub(crate) fn phoneme_overrides() -> &'static HashMap<String, String> {
             let mut columns = line.split('\t');
             if let (Some(_written), Some(persian), Some(phonemes)) =
                 (columns.next(), columns.next(), columns.next())
+                && !phonemes.is_empty()
             {
-                if !phonemes.is_empty() {
-                    map.insert(persian.to_string(), phonemes.to_string());
-                }
+                map.insert(persian.to_string(), phonemes.to_string());
             }
         }
         map
@@ -485,8 +484,23 @@ mod tests {
         // Spellings that are ordinary Persian words have an empty
         // phonemes column, so they get no override.
         for persian in [
-            "نود", "شیر", "منو", "دومین", "گو", "نت", "ارگ", "ورد", "سرور", "پست", "رم", "کابل",
-            "گیت", "پرو", "پلی", "کش", "راست",
+            "نود",
+            "شیر",
+            "منو",
+            "دومین",
+            "گو",
+            "نت",
+            "ارگ",
+            "ورد",
+            "سرور",
+            "پست",
+            "رم",
+            "کابل",
+            "گیت",
+            "پرو",
+            "پلی",
+            "کش",
+            "راست",
         ] {
             assert!(
                 !overrides.contains_key(persian),

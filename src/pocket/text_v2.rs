@@ -64,10 +64,22 @@ fn looks_like_finite_verb(word: &str) -> bool {
 
 /// True when a cut between `prev` and `next` is allowed: `prev` carries
 /// no ezafe mark, its stripped spelling is not in [`NO_CUT_AFTER`], and
-/// `next`'s stripped spelling is not in [`NO_CUT_BEFORE`].
+/// `next`'s stripped spelling is not in [`NO_CUT_BEFORE`]. A cut is also
+/// not allowed after a word whose stripped spelling ends in a vowel
+/// followed by `ye` (`?ostAnhAye`, `hameye`, `sedAye`, `buye`): the model
+/// often leaves the ezafe mark off such words, but the `ye` still binds
+/// the word to what follows.
 fn is_allowed_cut(prev: &str, next: &str) -> bool {
+    let stripped = strip_ezafe(prev);
+    let ends_vowel_ye = stripped.len() >= 3
+        && stripped.ends_with("ye")
+        && matches!(
+            stripped[..stripped.len() - 2].chars().last(),
+            Some('a' | 'e' | 'o' | 'A' | 'i' | 'u')
+        );
     !prev.ends_with(EZAFE_MARK)
-        && !NO_CUT_AFTER.contains(&strip_ezafe(prev).as_str())
+        && !ends_vowel_ye
+        && !NO_CUT_AFTER.contains(&stripped.as_str())
         && !NO_CUT_BEFORE.contains(&strip_ezafe(next).as_str())
 }
 
@@ -983,6 +995,24 @@ mod tests {
         let chunks = split_chunks("a b rA c d e f g", &counter, 3, 2);
         for chunk in &chunks[1..] {
             assert_ne!(chunk.split_whitespace().next(), Some("rA"), "{chunks:?}");
+        }
+    }
+
+    #[test]
+    fn sensible_cut_never_after_vowel_ye() {
+        let counter = |s: &str| s.split_whitespace().count();
+        // `?ostAnhAye` carries no ezafe mark, but its vowel + `ye` ending
+        // still binds it to `SomAli`, so no piece may end with it.
+        for word in ["?ostAnhAye", "hameye", "sedAye", "buye"] {
+            assert!(!is_allowed_cut(word, "SomAli"), "{word}");
+        }
+        let chunks = split_chunks("a b ?ostAnhAye SomAli c d e f", &counter, 4, 2);
+        for chunk in &chunks[..chunks.len() - 1] {
+            assert_ne!(
+                chunk.split_whitespace().last(),
+                Some("?ostAnhAye"),
+                "{chunks:?}"
+            );
         }
     }
 
