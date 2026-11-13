@@ -85,13 +85,30 @@ jobs:
       - name: Build release
         run: cargo build --release
 
+      - name: Verify Windows executable icon
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Add-Type @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class AppIconCheck {
+              [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+              public static extern uint ExtractIconEx(string file, int index, IntPtr large, IntPtr small, uint count);
+          }
+          '@
+          $binary = (Resolve-Path target/release/smart-voices.exe).Path
+          $count = [AppIconCheck]::ExtractIconEx($binary, -1, [IntPtr]::Zero, [IntPtr]::Zero, 0)
+          if ($count -lt 1) { throw "smart-voices.exe has no embedded application icon" }
+          Write-Host "Verified $count embedded application icon(s) in smart-voices.exe"
+
       - name: Package (Linux)
         if: runner.os == 'Linux'
         run: |
           scripts/package-deb.sh
           mkdir -p dist tarball
           cp target/smart-voices-linux-amd64.deb dist/
-          cp target/release/smart-voices target/release/libonnxruntime.so* target/release/zonos3-server packaging/linux/smart-voices.desktop packaging/linux/README-linux.txt tarball/
+          cp target/release/smart-voices target/release/libonnxruntime.so* target/release/zonos3-server packaging/linux/smart-voices.desktop packaging/linux/smart-voices.png packaging/linux/README-linux.txt tarball/
           tar -czf dist/smart-voices-linux-x86_64.tar.gz -C tarball .
 
       - name: Package (Windows)

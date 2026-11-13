@@ -8,7 +8,10 @@ Install
    together: the app loads its voice runtime from those libraries, and starts
    `zonos3-server` for the optional Zonos voice.
 2. Copy `smart-voices.desktop` to `~/.local/share/applications`.
-3. To start Smart Voices at login, also copy `smart-voices.desktop`
+3. Copy `smart-voices.png` to
+   `~/.local/share/icons/hicolor/256x256/apps/smart-voices.png`
+   (create the folders if needed). This supplies the launcher icon.
+4. To start Smart Voices at login, also copy `smart-voices.desktop`
    to `~/.config/autostart`.
 
 Notes

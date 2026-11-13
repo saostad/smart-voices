@@ -20,8 +20,8 @@ install -m 644 "$ROOT_DIR"/target/release/libonnxruntime.so* "$PKG/usr/lib/smart
 # The Zonos voice runtime (scripts/build-zonos3.sh) runs as a helper process.
 install -m 755 "$ROOT_DIR/target/release/zonos3-server" "$PKG/usr/lib/smart-voices/zonos3-server"
 ln -sf ../lib/smart-voices/smart-voices "$PKG/usr/bin/smart-voices"
-sed 's/^Icon=.*/Icon=smart-voices/' "$ROOT_DIR/packaging/linux/smart-voices.desktop" \
-  > "$PKG/usr/share/applications/smart-voices.desktop"
+install -m 644 "$ROOT_DIR/packaging/linux/smart-voices.desktop" \
+  "$PKG/usr/share/applications/smart-voices.desktop"
 install -m 644 "$ROOT_DIR/packaging/linux/smart-voices.png" \
   "$PKG/usr/share/icons/hicolor/256x256/apps/smart-voices.png"
 

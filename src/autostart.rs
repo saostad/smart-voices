@@ -204,7 +204,7 @@ pub fn desktop_file_text(exe: &Path) -> String {
          Name=Smart Voices\n\
          Comment=Read copied text aloud\n\
          Exec={exec}\n\
-         Icon=audio-volume-high\n\
+         Icon=smart-voices\n\
          Categories=Utility;Accessibility;\n\
          Terminal=false\n\
          X-GNOME-Autostart-enabled=true\n"
@@ -417,7 +417,7 @@ mod tests {
              Name=Smart Voices\n\
              Comment=Read copied text aloud\n\
              Exec=/home/ann/.local/bin/smart-voices\n\
-             Icon=audio-volume-high\n\
+             Icon=smart-voices\n\
              Categories=Utility;Accessibility;\n\
              Terminal=false\n\
              X-GNOME-Autostart-enabled=true\n"
