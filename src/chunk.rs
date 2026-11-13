@@ -91,6 +91,7 @@ impl SpeechChunker {
 
     /// Split one sentence into limit-sized parts.
     fn split_sentence(&self, sentence: &str, chunk_index: &mut usize) -> Vec<String> {
+        let persian = crate::lang::chunk_language(sentence) == crate::lang::Lang::Persian;
         let mut remaining = sentence.trim().to_string();
         if remaining.is_empty() {
             return Vec::new();
@@ -101,10 +102,27 @@ impl SpeechChunker {
             if remaining.is_empty() {
                 break;
             }
-            let limit = match *chunk_index {
-                0 => self.first_chunk_max_characters,
-                1 => self.second_chunk_max_characters,
-                _ => self.max_characters,
+            // Persian sentences use the full limit at every index so they
+            // stay whole; only chunk 1 may take a natural break first.
+            if persian
+                && *chunk_index == 0
+                && self.natural_first
+                && remaining.chars().count() > self.first_chunk_max_characters
+                && let Some((first, rest)) = split_first_chunk_natural(&remaining)
+            {
+                parts.push(first.trim().to_string());
+                *chunk_index += 1;
+                remaining = rest;
+                continue;
+            }
+            let limit = if persian {
+                self.max_characters
+            } else {
+                match *chunk_index {
+                    0 => self.first_chunk_max_characters,
+                    1 => self.second_chunk_max_characters,
+                    _ => self.max_characters,
+                }
             };
             if remaining.chars().count() <= limit {
                 parts.push(remaining);
@@ -112,7 +130,8 @@ impl SpeechChunker {
                 break;
             }
             // Chunk 1 prefers a natural break in 12..=80 chars, even past 50.
-            if *chunk_index == 0
+            if !persian
+                && *chunk_index == 0
                 && self.natural_first
                 && let Some((first, rest)) = split_first_chunk_natural(&remaining)
             {
@@ -140,15 +159,16 @@ impl SpeechChunker {
     }
 }
 
-/// Split at the last `"; "`, `", "` or `" "` within the first `limit` chars.
-/// Keeps `;`/`,` in the first part; the space is dropped either way.
+/// Split at the last `"; "`, `"؛ "`, `", "`, `"، "` or `" "` within the
+/// first `limit` chars. Keeps the clause mark in the first part; the space
+/// is dropped either way.
 fn split_before_limit(text: &str, limit: usize) -> Option<(String, String)> {
     let chars: Vec<char> = text.chars().collect();
     if limit == 0 || chars.len() <= limit {
         return None;
     }
     let prefix = &chars[..limit];
-    for separator in ["; ", ", ", " "] {
+    for separator in ["; ", "؛ ", ", ", "، ", " "] {
         let needle: Vec<char> = separator.chars().collect();
         if let Some(at) = rfind_seq(prefix, &needle) {
             let (first, rest) = split_at(&chars, at, &needle);
@@ -160,14 +180,15 @@ fn split_before_limit(text: &str, limit: usize) -> Option<(String, String)> {
     None
 }
 
-/// Split at the first `"; "`, `", "` or `" "` at or after `limit` chars.
+/// Split at the first `"; "`, `"؛ "`, `", "`, `"، "` or `" "` at or after
+/// `limit` chars.
 fn split_after_limit(text: &str, limit: usize) -> Option<(String, String)> {
     let chars: Vec<char> = text.chars().collect();
     if chars.len() <= limit {
         return None;
     }
     let suffix = &chars[limit..];
-    for separator in ["; ", ", ", " "] {
+    for separator in ["; ", "؛ ", ", ", "، ", " "] {
         let needle: Vec<char> = separator.chars().collect();
         if let Some(found) = find_seq(suffix, &needle) {
             return Some(split_at(&chars, limit + found, &needle));
@@ -186,7 +207,7 @@ fn split_first_chunk_natural(text: &str) -> Option<(String, String)> {
     let chars: Vec<char> = text.chars().collect();
     let mut best_under: Option<(usize, usize, usize)> = None;
     let mut best_over: Option<(usize, usize, usize)> = None;
-    for separator in [", ", "; ", ": ", " — "] {
+    for separator in [", ", "; ", ": ", " — ", "، ", "؛ "] {
         let needle: Vec<char> = separator.chars().collect();
         let mut from = 0;
         while from + needle.len() <= chars.len() {
@@ -547,6 +568,56 @@ mod tests {
             "chunk 2 is {} chars",
             result[1].text.chars().count()
         );
+    }
+
+    #[test]
+    fn persian_long_sentence_splits_after_first_clause() {
+        let chunker = SpeechChunker::new();
+        let text = "به گزارش خبرگزاری‌ها، سازمان هواشناسی اعلام کرد که از اواخر هفتهٔ جاری بارش باران و برف در بیشتر استان‌های شمالی و غربی کشور آغاز می‌شود و رانندگان باید در جاده‌های کوهستانی با احتیاط بیشتری رانندگی کنند.";
+        let result = chunker.chunks(&[seg(text, SpeechPause::Medium)]);
+        assert_eq!(result.len(), 2, "{result:?}");
+        assert_eq!(result[0].text, "به گزارش خبرگزاری‌ها،");
+        assert!(result[1].text.starts_with("سازمان هواشناسی"));
+    }
+
+    #[test]
+    fn persian_142_char_sentence_without_commas_stays_one_chunk() {
+        let chunker = SpeechChunker::new();
+        let text = format!("{}خ.", "سلام ".repeat(28));
+        assert_eq!(text.chars().count(), 142);
+        assert!(!text.contains('،'));
+        let result = chunker.chunks(&[seg(&text, SpeechPause::Medium)]);
+        assert_eq!(result.len(), 1, "{result:?}");
+        assert_eq!(result[0].text, text);
+    }
+
+    #[test]
+    fn persian_over_300_splits_at_clause_not_space() {
+        let chunker = SpeechChunker::new();
+        let first = format!("{}سلام،", "سلام ".repeat(39));
+        assert_eq!(first.chars().count(), 200);
+        let text = format!("{first} {}.", "دنیا ".repeat(30).trim_end());
+        assert!(text.chars().count() > 300, "{}", text.chars().count());
+        let result = chunker.chunks(&[seg(&text, SpeechPause::Medium)]);
+        assert_eq!(result.len(), 2, "{result:?}");
+        assert!(result[0].text.ends_with('،'), "{}", result[0].text);
+        assert_eq!(result[0].text, first);
+    }
+
+    #[test]
+    fn english_same_shapes_still_follow_schedule() {
+        let chunker = SpeechChunker::new();
+        // Same shape as the Persian clause test: a comma early in a long
+        // sentence still gives a short natural first chunk, and a long
+        // comma-free paragraph still starts within 80 chars.
+        let text = format!("{}, {}.", "a".repeat(46), "b".repeat(150));
+        let result = chunker.chunks(&[seg(&text, SpeechPause::Medium)]);
+        assert_eq!(result[0].text, format!("{},", "a".repeat(46)));
+        assert!(result.len() >= 2, "{result:?}");
+        let paragraph = format!("{}.", "word ".repeat(80).trim_end());
+        let result = chunker.chunks(&[seg(&paragraph, SpeechPause::Medium)]);
+        assert!(result[0].text.chars().count() <= 80);
+        assert!(result[1].text.chars().count() <= 150);
     }
 
     #[test]
