@@ -25,7 +25,7 @@ pub struct PocketSettings {
 impl Default for PocketSettings {
     fn default() -> Self {
         Self {
-            max_tokens: 18,
+            max_tokens: 50,
             min_tokens: 8,
             temperature: 0.3,
             decode_steps: 0,
@@ -93,9 +93,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn defaults_equal_the_old_constants() {
+    fn defaults_validate_with_longer_chunks() {
         let settings = PocketSettings::default();
-        assert_eq!(settings.max_tokens, 18);
+        assert_eq!(settings.max_tokens, 50);
         assert_eq!(settings.min_tokens, 8);
         assert_eq!(settings.temperature, 0.3);
         assert_eq!(settings.decode_steps, 0);

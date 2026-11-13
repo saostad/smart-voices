@@ -278,7 +278,7 @@ rate makes it drop words.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `max_tokens` | 18 | Longest chunk sent to the model, in tokens (8–50); higher means fewer, longer pieces |
+| `max_tokens` | 50 | Longest chunk sent to the model, in tokens (8–50); higher means fewer, longer pieces |
 | `min_tokens` | 8 | Shortest chunk the planner aims for, in tokens (1–`max_tokens`); higher means fewer tiny pieces |
 | `temperature` | 0.3 | Sampling randomness (0–1.5); higher means more varied, less predictable speech |
 | `decode_steps` | 0 | Sampler decode steps (0–4); higher may improve quality at more cost, and 0 uses the model's own value |
