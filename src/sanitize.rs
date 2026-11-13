@@ -1708,10 +1708,7 @@ fn is_footnote_definition(line: &str) -> bool {
         return false;
     }
     index += 1;
-    if index >= chars.len() || chars[index] != ':' {
-        return false;
-    }
-    true
+    index < chars.len() && chars[index] == ':'
 }
 
 #[cfg(test)]

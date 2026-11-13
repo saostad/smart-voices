@@ -163,10 +163,7 @@ pub(crate) const LINUX_PASSWORD_HINT_SECRET: &str = "secret";
 /// when the owner offers the hint.
 #[cfg(any(test, target_os = "linux"))]
 pub(crate) fn linux_should_notify(targets: &[&str], hint_value: Option<&str>) -> bool {
-    if targets.contains(&LINUX_PASSWORD_HINT) && hint_value == Some(LINUX_PASSWORD_HINT_SECRET) {
-        return false;
-    }
-    true
+    !(targets.contains(&LINUX_PASSWORD_HINT) && hint_value == Some(LINUX_PASSWORD_HINT_SECRET))
 }
 
 #[cfg(test)]
