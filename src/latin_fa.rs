@@ -534,6 +534,24 @@ mod tests {
                 "line {} phonemes use a char outside the v2 alphabet: {phonemes}",
                 line_no + 1
             );
+            // No syllable starts with two consonants (except `pro`/`br`,
+            // which the model knows) and no four consonants in a row.
+            let is_consonant = |c: char| !matches!(c, 'a' | 'e' | 'o' | 'A' | 'i' | 'u');
+            let chars: Vec<char> = phonemes.chars().collect();
+            assert!(
+                chars.len() < 2
+                    || !is_consonant(chars[0])
+                    || !is_consonant(chars[1])
+                    || phonemes.starts_with("pro")
+                    || phonemes.starts_with("br"),
+                "line {} phonemes start with two consonants: {phonemes}",
+                line_no + 1
+            );
+            assert!(
+                !chars.windows(4).any(|w| w.iter().all(|&c| is_consonant(c))),
+                "line {} phonemes have four consonants in a row: {phonemes}",
+                line_no + 1
+            );
             keys.push(written);
         }
         // Two rows with the same Persian spelling have the same phonemes.
