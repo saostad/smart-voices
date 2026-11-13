@@ -25,6 +25,18 @@ const NO_CUT_AFTER: &[&str] = &[
     "har", "bAyad", "nabAyad", "SAyad", "xeyli", "besyAr", "qadr", "?inqadr", "?enqadr", "?Anqadr",
 ];
 
+/// Phoneme spellings (ezafe stripped, exact and case-sensitive) of
+/// number words after which a word cut is never allowed: a number binds
+/// to its unit or to the next part of a compound number that follows
+/// (`haSt ?o si daqiqe`, `se momayyeze panj dahom`).
+const NO_CUT_AFTER_NUMBER: &[&str] = &[
+    "sefr", "yek", "do", "se", "CahAr", "panj", "SeS", "haft", "haSt", "noh", "dah", "yAzdah",
+    "davAzdah", "sizdah", "CahArdah", "pAnzdah", "SAnzdah", "hefdah", "hejdah", "nuzdah", "bist",
+    "si", "Cehel", "panjAh", "Sast", "haftAd", "haStAd", "navad", "sad", "devist", "sisad",
+    "CahArsad", "pAnsad", "SeSsad", "haftsad", "haStsad", "nohsad", "hezAr", "milyun", "milyArd",
+    "momayyez",
+];
+
 /// Phoneme spellings (ezafe stripped, exact and case-sensitive) before
 /// which a word cut is never allowed: words that bind to what precedes.
 /// (`?ast` is covered by [`looks_like_finite_verb`].)
@@ -140,7 +152,8 @@ fn looks_like_finite_verb(word: &str) -> bool {
 }
 
 /// True when a cut between `prev` and `next` is allowed: `prev` carries
-/// no ezafe mark, its stripped spelling is not in [`NO_CUT_AFTER`],
+/// no ezafe mark, its stripped spelling is not in [`NO_CUT_AFTER`] or
+/// [`NO_CUT_AFTER_NUMBER`],
 /// `next`'s stripped spelling is not in [`NO_CUT_BEFORE`], and `next`
 /// does not look like a finite verb (Persian puts the verb last, so a
 /// cut right before it would strand it). A cut is also
@@ -159,6 +172,7 @@ fn is_allowed_cut(prev: &str, next: &str) -> bool {
     !prev.ends_with(EZAFE_MARK)
         && !ends_vowel_ye
         && !NO_CUT_AFTER.contains(&stripped.as_str())
+        && !NO_CUT_AFTER_NUMBER.contains(&stripped.as_str())
         && !NO_CUT_BEFORE.contains(&strip_ezafe(next).as_str())
         && !looks_like_finite_verb(next)
 }
@@ -1258,6 +1272,32 @@ mod tests {
                 "{chunks:?}"
             );
         }
+    }
+
+    #[test]
+    fn sensible_cut_never_after_a_number_word() {
+        let counter = |s: &str| s.split_whitespace().count();
+        let chunks = split_chunks(
+            "jalase sA?ate haSt ?o si daqiqe sobh bargozAr miSavad",
+            &counter,
+            5,
+            2,
+        );
+        for chunk in &chunks[..chunks.len() - 1] {
+            let last = chunk.split_whitespace().last();
+            assert_ne!(last, Some("si"), "{chunks:?}");
+            assert_ne!(last, Some("haSt"), "{chunks:?}");
+            assert_ne!(last, Some("?o"), "{chunks:?}");
+        }
+        // No allowed cut exists inside a run of number words, so the
+        // `pack` fallback must still return every word once, in order.
+        let text = "yek do se CahAr panj SeS haft haSt noh dah";
+        let chunks = split_chunks(text, &counter, 4, 2);
+        let words: Vec<&str> = chunks
+            .iter()
+            .flat_map(|chunk| chunk.split_whitespace())
+            .collect();
+        assert_eq!(words, text.split_whitespace().collect::<Vec<_>>());
     }
 
     #[test]
