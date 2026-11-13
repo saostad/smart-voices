@@ -14,12 +14,6 @@ use std::fmt;
 use super::normalize_fa::{is_persian_letter, normalize};
 use super::text::PieceEnd;
 
-/// Highest token budget per v2 chunk (reference `_synth_unit`).
-pub(crate) const MAX_TOKENS: usize = 18;
-
-/// Lowest token budget per v2 chunk (reference `_synth_unit`).
-pub(crate) const MIN_TOKENS: usize = 8;
-
 /// Homo-GE2PE marks the ezafe with a trailing "1" (reference `synthesize`).
 const EZAFE_MARK: char = '1';
 

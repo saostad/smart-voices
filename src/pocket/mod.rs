@@ -26,6 +26,7 @@ mod mastering;
 pub mod normalize_fa;
 pub(crate) mod runtime;
 pub mod sentencepiece;
+pub mod settings;
 mod text;
 pub mod text_v2;
 
@@ -45,18 +46,14 @@ use self::runtime::{
     decode_f16_base64, extract_f32, ort_environment, tensor_f32, tensor_i64, thread_count,
 };
 use self::sentencepiece::SentencePiece;
+use self::settings::PocketSettings;
 use self::text::{PieceEnd, classify_piece_end, prepare_text_prompt, split_text};
 use self::text_v2::{
-    MAX_TOKENS as V2_MAX_TOKENS, MIN_TOKENS as V2_MIN_TOKENS, align_words, apply_overrides,
-    clauses_from_counts, clean_sentence_for_g2p, dedupe_repeats, fa_words, normalize_for_model,
-    plan_pieces, split_clauses, split_sentences, strip_ezafe, translate_phonemes,
+    align_words, apply_overrides, clauses_from_counts, clean_sentence_for_g2p, dedupe_repeats,
+    fa_words, normalize_for_model, plan_pieces, split_clauses, split_sentences, strip_ezafe,
+    translate_phonemes,
 };
 
-/// Farsi-verified generation settings (model card + blind-test harness).
-const TEMPERATURE: f32 = 0.3;
-const EOS_THRESHOLD: f32 = -2.0;
-const FRAMES_AFTER_EOS: usize = 0;
-const MAX_TOKENS_PER_CHUNK: usize = 18;
 const SPLIT_SEAM: Duration = Duration::from_millis(50);
 /// A generation longer than this share of its length cap never said EOS.
 const RUNAWAY_RATIO: f64 = 0.97;
@@ -373,6 +370,7 @@ impl PocketEngine {
         let flow = {
             let mut flow_cache = Cache::new(engine.config.flow_stride(), voice_len + 1);
             let mut mimi_cache = Cache::new(engine.config.mimi_stride(), engine.config.mimi_kv_len);
+            let decode_steps = engine.config.sampler_decode_steps;
             let out = engine.run_step(
                 &voice_cond,
                 voice_len,
@@ -383,6 +381,7 @@ impl PocketEngine {
                 0,
                 &vec![0.0; engine.config.conv_state_size],
                 None,
+                decode_steps,
             )?;
             out.flow_kv_new
         };
@@ -411,6 +410,7 @@ impl PocketEngine {
         mimi_offset: i64,
         mimi_conv: &[f32],
         latent_and_bos: Option<(&[f32], f32)>,
+        decode_steps: f32,
     ) -> Result<StepOutput, EngineError> {
         let cfg = &self.config;
         let zero_latent = vec![0.0; seq * cfg.latent_dim];
@@ -503,7 +503,7 @@ impl PocketEngine {
             ),
             (
                 Cow::Borrowed("decode_steps"),
-                tensor_f32(vec![], vec![cfg.sampler_decode_steps])?.into(),
+                tensor_f32(vec![], vec![decode_steps])?.into(),
             ),
         ];
         let outputs = self
@@ -531,7 +531,11 @@ impl PocketEngine {
     }
 
     /// Generate one chunk in a single attempt (no runaway recovery).
-    fn generate_once(&mut self, chunk: &str) -> Result<Vec<f32>, EngineError> {
+    fn generate_once(
+        &mut self,
+        chunk: &str,
+        settings: &PocketSettings,
+    ) -> Result<Vec<f32>, EngineError> {
         let prepared = prepare_text_prompt(
             chunk,
             self.config.capitalize_first_letter,
@@ -555,6 +559,11 @@ impl PocketEngine {
         let mut mimi_conv = vec![0.0; self.config.conv_state_size];
         let mut mimi_offset: i64 = 0;
 
+        let decode_steps = if settings.decode_steps == 0 {
+            self.config.sampler_decode_steps
+        } else {
+            settings.decode_steps as f32
+        };
         // Text prefill: keep the flow cache, drop the audio.
         let text_out = self.run_step(
             &[],
@@ -566,6 +575,7 @@ impl PocketEngine {
             mimi_offset,
             &mimi_conv,
             None,
+            decode_steps,
         )?;
         flow_cache.append(&text_out.flow_kv_new);
 
@@ -580,17 +590,19 @@ impl PocketEngine {
                 &mut mimi_cache,
                 mimi_offset,
                 &mimi_conv,
+                settings.temperature,
+                decode_steps,
             )?;
             flow_cache.append(&out.flow_kv_new);
             mimi_cache.append(&out.mimi_kv_new);
             mimi_conv = out.mimi_conv_out;
             mimi_offset = out.mimi_offset_out;
             latent = out.next_latent;
-            if eos_frame.is_none() && out.eos_logit > EOS_THRESHOLD {
+            if eos_frame.is_none() && out.eos_logit > settings.eos_threshold {
                 eos_frame = Some(frame);
             }
             if let Some(eos) = eos_frame
-                && frame >= eos + FRAMES_AFTER_EOS
+                && frame >= eos + settings.frames_after_eos
             {
                 break;
             }
@@ -609,8 +621,10 @@ impl PocketEngine {
         mimi_cache: &mut Cache,
         mimi_offset: i64,
         mimi_conv: &[f32],
+        temperature: f32,
+        decode_steps: f32,
     ) -> Result<StepOutput, EngineError> {
-        let noise = self.rng.noise(self.config.latent_dim, TEMPERATURE);
+        let noise = self.rng.noise(self.config.latent_dim, temperature);
         let cfg = &self.config;
         let flow_window = flow_cache.window().to_vec();
         let flow_past = flow_cache.length;
@@ -684,7 +698,7 @@ impl PocketEngine {
             ),
             (
                 Cow::Borrowed("decode_steps"),
-                tensor_f32(vec![], vec![cfg.sampler_decode_steps])?.into(),
+                tensor_f32(vec![], vec![decode_steps])?.into(),
             ),
         ];
         let outputs = self
@@ -712,7 +726,12 @@ impl PocketEngine {
     }
 
     /// Generate a chunk with runaway recovery: retry once, then split.
-    fn generate_chunk(&mut self, text: &str, depth: usize) -> Result<Vec<f32>, EngineError> {
+    fn generate_chunk(
+        &mut self,
+        text: &str,
+        depth: usize,
+        settings: &PocketSettings,
+    ) -> Result<Vec<f32>, EngineError> {
         let tokens = self.tokenizer.encode(text).len();
         let cap_seconds = ((tokens as f64 / self.config.tokens_per_second_estimate
             + self.config.gen_seconds_padding)
@@ -723,7 +742,7 @@ impl PocketEngine {
         let sample_rate = f64::from(self.config.sample_rate);
         let mut shortest: Option<Vec<f32>> = None;
         for _ in 0..=1 {
-            let audio = self.generate_once(text)?;
+            let audio = self.generate_once(text, settings)?;
             if audio.len() as f64 / sample_rate <= limit {
                 return Ok(audio);
             }
@@ -745,9 +764,9 @@ impl PocketEngine {
         );
         let half = words.len() / 2;
         let seam = vec![0.0; (SPLIT_SEAM.as_secs_f64() * sample_rate) as usize];
-        let mut out = self.generate_chunk(&words[..half].join(" "), depth + 1)?;
+        let mut out = self.generate_chunk(&words[..half].join(" "), depth + 1, settings)?;
         out.extend_from_slice(&seam);
-        out.extend_from_slice(&self.generate_chunk(&words[half..].join(" "), depth + 1)?);
+        out.extend_from_slice(&self.generate_chunk(&words[half..].join(" "), depth + 1, settings)?);
         Ok(out)
     }
 
@@ -757,15 +776,16 @@ impl PocketEngine {
     /// applied as a resample, so pitch moves with speed.
     pub fn synthesize(&mut self, text: &str, speed: f32) -> Result<Vec<f32>, EngineError> {
         let text = text.replace('\0', "");
+        let pocket_settings = settings::current_settings();
         let chunks = if self.config.is_v2() {
-            self.v2_chunks(&text)?
+            self.v2_chunks(&text, &pocket_settings)?
         } else {
             let normalized = normalize(&text);
             if normalized.is_empty() {
                 return Err(EngineError::NoAudio(text));
             }
             let counter = |s: &str| self.tokenizer.encode(s).len();
-            let chunks = split_text(&normalized, &counter, MAX_TOKENS_PER_CHUNK);
+            let chunks = split_text(&normalized, &counter, pocket_settings.max_tokens);
             if chunks.is_empty() {
                 return Err(EngineError::NoAudio(text));
             }
@@ -785,7 +805,7 @@ impl PocketEngine {
         };
         let mut pieces = Vec::with_capacity(chunks.len());
         for (chunk, end) in &chunks {
-            let audio = self.generate_chunk(chunk, 0)?;
+            let audio = self.generate_chunk(chunk, 0, &pocket_settings)?;
             pieces.push(RawPiece { audio, end: *end });
         }
         let audio = finish_speech(&pieces, sample_rate, speed, None);
@@ -798,7 +818,7 @@ impl PocketEngine {
     /// v2 chunk list: normalize, split into sentences, pronounce each
     /// whole sentence once, recover its clauses by aligning the phoneme
     /// words to the Persian words, and plan the phoneme clauses into
-    /// 18/8-token pieces with [`plan_pieces`] (ezafe marks guide the
+    /// token-budgeted pieces with [`plan_pieces`] (ezafe marks guide the
     /// split and are stripped before the model). A boundary at a clause
     /// edge ends a clause; cuts inside an over-long clause are
     /// mid-sentence. The last piece of a sentence ends
@@ -807,7 +827,11 @@ impl PocketEngine {
     /// ends a clause and text ending in a letter ends mid-sentence. Never
     /// classified by the phonemes' last character: the phoneme alphabet's
     /// `?` is a phone, not a question mark.
-    fn v2_chunks(&mut self, text: &str) -> Result<Vec<(String, PieceEnd)>, EngineError> {
+    fn v2_chunks(
+        &mut self,
+        text: &str,
+        settings: &PocketSettings,
+    ) -> Result<Vec<(String, PieceEnd)>, EngineError> {
         let normalized =
             normalize_for_model(text).map_err(|_| EngineError::NoAudio(text.to_string()))?;
         let sentences = split_sentences(&normalized);
@@ -857,8 +881,8 @@ impl PocketEngine {
             let units = plan_pieces(
                 &phoneme_clauses,
                 &counter,
-                V2_MAX_TOKENS,
-                V2_MIN_TOKENS,
+                settings.max_tokens,
+                settings.min_tokens,
                 sentence_end,
             );
             for (unit, end) in units {

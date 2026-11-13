@@ -171,6 +171,8 @@ pub struct Settings {
     pub zonos_voice: String,
     /// Zonos runtime settings (`[zonos]` table).
     pub zonos: crate::zonos::ZonosSettings,
+    /// Pocket runtime settings (`[pocket]` table).
+    pub pocket: crate::pocket::settings::PocketSettings,
     /// Speech speed multiplier.
     pub speed: f32,
     /// Pause duration multiplier, in 0.01..=10.
@@ -244,6 +246,7 @@ impl Default for Settings {
             paradee_voice: DEFAULT_PARADEE_VOICE.to_string(),
             zonos_voice: crate::zonos::DEFAULT_ZONOS_VOICE.to_string(),
             zonos: crate::zonos::ZonosSettings::default(),
+            pocket: crate::pocket::settings::PocketSettings::default(),
             speed: 1.0,
             silence_scale: 0.2,
             pause_min_seconds: 0.2,
@@ -302,6 +305,7 @@ impl Settings {
     pub fn validate(&self) -> Result<(), String> {
         self.server.validate()?;
         self.zonos.validate()?;
+        self.pocket.validate()?;
         if !self.silence_scale.is_finite() || !(0.01..=10.).contains(&self.silence_scale) {
             return Err("silence_scale must be between 0.01 and 10".into());
         }
@@ -471,6 +475,7 @@ mod tests {
                 chunk_overhead_secs: 0.4,
                 laci: false,
             },
+            pocket: crate::pocket::settings::PocketSettings::default(),
             speed: 1.25,
             silence_scale: 0.2,
             pause_min_seconds: 0.2,
@@ -559,6 +564,33 @@ mod tests {
                 .unwrap_err()
                 .contains("zonos_voice")
         );
+    }
+
+    #[test]
+    fn pocket_runtime_settings_round_trip() {
+        let dir = unique_temp_dir();
+        let path = dir.join("settings.toml");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&path, "[pocket]\nmax_tokens = 30\n").unwrap();
+        let (settings, err) = Settings::load(&path);
+        assert!(err.is_none(), "unexpected error: {err:?}");
+        assert_eq!(settings.pocket.max_tokens, 30);
+        // Unset keys keep their defaults.
+        assert_eq!(
+            settings.pocket.min_tokens,
+            crate::pocket::settings::PocketSettings::default().min_tokens
+        );
+        settings.save(&path).unwrap();
+        let (reloaded, err) = Settings::load(&path);
+        assert!(err.is_none(), "unexpected error: {err:?}");
+        assert_eq!(reloaded, settings);
+        // An out-of-range value is rejected when the file loads, with a
+        // message naming the key.
+        std::fs::write(&path, "[pocket]\nmax_tokens = 51\n").unwrap();
+        let (_, err) = Settings::load(&path);
+        std::fs::remove_dir_all(&dir).unwrap();
+        let message = err.expect("invalid max_tokens is reported").to_string();
+        assert!(message.contains("pocket.max_tokens"), "{message}");
     }
 
     #[test]

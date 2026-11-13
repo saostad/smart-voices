@@ -274,6 +274,20 @@ rate makes it drop words.
 `SMART_VOICES_ZONOS3_SERVER` also points at another runtime when
 `server_path` is empty. The voice is `zonos_voice` (default `savannah`).
 
+`settings.toml` takes a `[pocket]` table for the Persian Pocket voices:
+
+| Key | Default | Meaning |
+|---|---|---|
+| `max_tokens` | 18 | Longest chunk sent to the model, in tokens (8–50); higher means fewer, longer pieces |
+| `min_tokens` | 8 | Shortest chunk the planner aims for, in tokens (1–`max_tokens`); higher means fewer tiny pieces |
+| `temperature` | 0.3 | Sampling randomness (0–1.5); higher means more varied, less predictable speech |
+| `decode_steps` | 0 | Sampler decode steps (0–4); higher may improve quality at more cost, and 0 uses the model's own value |
+| `eos_threshold` | -2 | End-of-speech logit threshold (-10–10); higher means the model stops sooner |
+| `frames_after_eos` | 0 | Frames generated after the end-of-speech signal (0–10); higher means a longer tail |
+| `g2p_window_chars` | 120 | Characters per pronunciation window for long sentences (40–1000); higher means fewer, longer windows |
+
+`smart-voices synth … --set pocket.max_tokens 30` tries a value for one run without saving it.
+
 `settings.toml` accepts `silence_scale = 0.2` (0.01–10, also available as
 Pause Length in the tray), `pause_min_seconds = 0.2` (positive finite seconds),
 and `pause_amplitude = 0.01` (0–1). The latter two control pause detection.
