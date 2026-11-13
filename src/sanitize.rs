@@ -8,6 +8,8 @@ use std::mem::discriminant;
 
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
+use crate::lang::{Lang, chunk_language};
+
 /// Pause after a spoken segment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpeechPause {
@@ -543,8 +545,16 @@ fn collect_inline_until(
             Event::End(TagEnd::Link) => {
                 *pos += 1;
                 if let (Some(inner), Some(dest)) = (buffers.pop(), destinations.pop()) {
+                    // An autolink whose preceding text is not Persian
+                    // stays as its URL here: `clean_fragment` rewrites it
+                    // once the whole paragraph is known, so the Persian
+                    // decision sees the full line it sits in.
                     let spoken = if inner == dest && is_http_url(&dest) {
-                        bare_url_spoken_string(&dest, options)
+                        if chunk_language(&buffers.concat()) == Lang::Persian {
+                            bare_url_spoken_string(&dest, options, true)
+                        } else {
+                            dest.clone()
+                        }
                     } else {
                         inner
                     };
@@ -1171,11 +1181,17 @@ fn is_http_url(value: &str) -> bool {
     lower.starts_with("http://") || lower.starts_with("https://")
 }
 
-fn bare_url_spoken_string(url: &str, options: &SanitizerOptions) -> String {
+fn bare_url_spoken_string(url: &str, options: &SanitizerOptions, persian: bool) -> String {
     match options.bare_urls {
         BareUrls::Skip => String::new(),
         BareUrls::DomainOnly => match host_for_url(url) {
-            Some(host) if !host.is_empty() => format!("link to {host}"),
+            Some(host) if !host.is_empty() => {
+                if persian {
+                    format!("پیوند به {host}")
+                } else {
+                    format!("link to {host}")
+                }
+            }
             _ => String::new(),
         },
     }
@@ -1216,6 +1232,8 @@ fn strip_www(host: &str) -> String {
 }
 
 fn replace_bare_urls(value: &str, options: &SanitizerOptions) -> String {
+    // `value` is the paragraph (fragment) the link sits in.
+    let persian = chunk_language(value) == Lang::Persian;
     let chars: Vec<char> = value.chars().collect();
     let mut result = String::with_capacity(value.len());
     let mut index = 0;
@@ -1255,7 +1273,7 @@ fn replace_bare_urls(value: &str, options: &SanitizerOptions) -> String {
             let url_string: String = url.iter().collect();
             // Photo links (`pic.x.com/…`) carry no meaning when spoken.
             if start == UrlStart::Url {
-                result.push_str(&bare_url_spoken_string(&url_string, options));
+                result.push_str(&bare_url_spoken_string(&url_string, options, persian));
             }
             result.push_str(&trailing);
             index = end;
@@ -1314,26 +1332,39 @@ fn is_url_terminator(c: char) -> bool {
 // MARK: Word replacements
 
 fn apply_word_replacements(value: &str) -> String {
+    if chunk_language(value) == Lang::Persian {
+        let mut result = replace_word(value, "e.g.", "برای مثال");
+        result = replace_word(&result, "i.e.", "یعنی");
+        result = replace_word(&result, "etc.", "و غیره");
+        result = replace_word_except(&result, "vs.", "در برابر", "VS.");
+        result = replace_word_except(&result, "vs", "در برابر", "VS");
+        result = replace_word(&result, "w/", "با");
+        result = replace_tilde_before_digit(&result, "حدود ");
+        result = result.replace("->", " به ");
+        result = result.replace('→', " به ");
+        result = result.replace('&', " و ");
+        return result;
+    }
     let mut result = replace_word(value, "e.g.", "for example");
     result = replace_word(&result, "i.e.", "that is");
     result = replace_word(&result, "etc.", "et cetera");
     result = replace_word_except(&result, "vs.", "versus", "VS.");
     result = replace_word_except(&result, "vs", "versus", "VS");
     result = replace_word(&result, "w/", "with");
-    result = replace_tilde_before_digit(&result);
+    result = replace_tilde_before_digit(&result, "about ");
     result = result.replace("->", " to ");
     result = result.replace('→', " to ");
     result = result.replace('&', " and ");
     result
 }
 
-fn replace_tilde_before_digit(value: &str) -> String {
+fn replace_tilde_before_digit(value: &str, replacement: &str) -> String {
     let chars: Vec<char> = value.chars().collect();
     let mut result = String::with_capacity(value.len());
     let mut index = 0;
     while index < chars.len() {
         if chars[index] == '~' && index + 1 < chars.len() && chars[index + 1].is_numeric() {
-            result.push_str("about ");
+            result.push_str(replacement);
             index += 1;
             continue;
         }
@@ -2177,6 +2208,16 @@ mod tests {
         assert_eq!(sanitize_default("A -> B.")[0].text, "A to B.");
         assert_eq!(sanitize_default("Fish & chips.")[0].text, "Fish and chips.");
         assert_eq!(sanitize_default("Tea w/ sugar.")[0].text, "Tea with sugar.");
+    }
+
+    #[test]
+    fn persian_word_replacements_and_url() {
+        assert_eq!(sanitize_default("وزن ~۵ کیلو")[0].text, "وزن حدود ۵ کیلو.");
+        assert_eq!(sanitize_default("من & تو")[0].text, "من و تو.");
+        assert_eq!(
+            sanitize_default("این یک متن فارسی طولانی است و https://example.com/x را ببین")[0].text,
+            "این یک متن فارسی طولانی است و پیوند به example.com را ببین."
+        );
     }
 
     #[test]
