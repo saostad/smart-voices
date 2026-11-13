@@ -265,8 +265,14 @@ fn try_time(chars: &[char], start: usize) -> Option<(String, usize)> {
 }
 
 /// Try a range at `start` (`A-B`, `-`/`–`/`—`, optional spaces around it,
-/// both sides 1–4 digits with no leading zero).
+/// both sides 1–4 digits with no leading zero). A dashed number such as
+/// `0912-345-6789` or `978-3-16` is not a range: the first number must
+/// not be preceded by `-`, `–`, `—` or `/`, and the second must not be
+/// followed by one of those and then a digit.
 fn try_range(chars: &[char], start: usize) -> Option<(String, usize)> {
+    if start > 0 && matches!(chars[start - 1], '-' | '–' | '—' | '/') {
+        return None;
+    }
     let first = digit_run(chars, start)?;
     if first.end - start > 4 || first.leading_zero {
         return None;
@@ -284,6 +290,11 @@ fn try_range(chars: &[char], start: usize) -> Option<(String, usize)> {
     }
     let second = digit_run(chars, second_start)?;
     if second.end - second_start > 4 || second.leading_zero {
+        return None;
+    }
+    if matches!(chars.get(second.end), Some('-' | '–' | '—' | '/'))
+        && chars.get(second.end + 1).is_some_and(|&c| is_digit(c))
+    {
         return None;
     }
     Some((format!("{} تا {}", first.value, second.value), second.end))
@@ -510,6 +521,9 @@ mod tests {
 
     #[test]
     fn ranges_signs_and_decimals() {
+        assert_eq!(expand("0912-345-6789"), "0912-345-6789");
+        assert_eq!(expand("978-3-16"), "978-3-16");
+        assert_eq!(expand("۱۴۰۴–۱۴۰۵"), "1404 تا 1405");
         assert_eq!(expand("۵-۱۰ نفر"), "5 تا 10 نفر");
         assert_eq!(expand("021-88776655"), "021-88776655");
         assert_eq!(expand("دما -۵ درجه"), "دما منفی 5 درجه");
