@@ -8,8 +8,8 @@ use smart_voices::pocket::text_v2::{
 };
 
 /// Point ORT at the profile dir's `libonnxruntime` when running under
-/// cargo: test binaries live in `target/<profile>/deps/`, while the sherpa
-/// build puts the dylib in `target/<profile>/`. Leaves an explicit
+/// cargo: test binaries can live in `deps/` or a nested build output
+/// directory, while the runtime is in `target/<profile>/`. Leaves an explicit
 /// `ORT_DYLIB_PATH` alone.
 fn point_ort_at_profile_dylib() {
     if std::env::var("ORT_DYLIB_PATH").is_ok_and(|value| !value.is_empty()) {
@@ -22,18 +22,17 @@ fn point_ort_at_profile_dylib() {
     } else {
         "libonnxruntime.so"
     };
-    if let Ok(exe) = std::env::current_exe()
-        && let Some(deps) = exe.parent()
-        && let Some(profile) = deps.parent()
-    {
-        let dylib = profile.join(file);
-        if dylib.exists() {
-            // SAFETY: the golden test is the only ORT user in this process
-            // and runs alone here.
-            unsafe {
-                std::env::set_var("ORT_DYLIB_PATH", &dylib);
-            }
-        }
+    let exe = std::env::current_exe().expect("locate the Pocket golden test executable");
+    let dylib = exe
+        .ancestors()
+        .skip(1)
+        .map(|dir| dir.join(file))
+        .find(|path| path.is_file())
+        .expect("ONNX Runtime missing: run scripts/fetch-onnxruntime.sh or set ORT_DYLIB_PATH");
+    // SAFETY: the golden test is the only ORT user in this process
+    // and runs alone here.
+    unsafe {
+        std::env::set_var("ORT_DYLIB_PATH", &dylib);
     }
 }
 
