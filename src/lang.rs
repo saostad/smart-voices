@@ -10,7 +10,7 @@ pub enum Lang {
 
 /// True for chars in the Arabic-script blocks (Arabic, supplements, and the
 /// presentation forms).
-fn is_arabic_script(c: char) -> bool {
+pub(crate) fn is_arabic_script(c: char) -> bool {
     matches!(
         c,
         '\u{0600}'..='\u{06FF}'

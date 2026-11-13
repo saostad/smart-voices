@@ -10,6 +10,7 @@ pub mod download;
 pub mod engine;
 pub mod icon;
 pub mod lang;
+pub mod latin_fa;
 pub mod models;
 pub mod normalize;
 mod notification;
