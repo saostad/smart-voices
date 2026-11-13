@@ -28,12 +28,14 @@ const EZAFE_MARK: char = '1';
 /// determiners and similar words that bind to what follows.
 const NO_CUT_AFTER: &[&str] = &[
     "va", "?o", "ke", "dar", "be", "?az", "bA", "tA", "bar", "barAye", "yA", "?in", "?An", "yek",
-    "har",
+    "har", "bAyad", "nabAyad", "SAyad", "xeyli", "besyAr", "qadr", "?inqadr", "?enqadr",
+    "?Anqadr",
 ];
 
 /// Phoneme spellings (ezafe stripped, exact and case-sensitive) before
 /// which a word cut is never allowed: words that bind to what precedes.
-const NO_CUT_BEFORE: &[&str] = &["rA", "ro", "?ast"];
+/// (`?ast` is covered by [`looks_like_finite_verb`].)
+const NO_CUT_BEFORE: &[&str] = &["rA", "ro"];
 
 /// Phoneme spellings (ezafe stripped, exact and case-sensitive) before
 /// which a word cut is preferred when a cut is needed: conjunctions and
@@ -47,24 +49,42 @@ const PREFER_CUT_BEFORE: &[&str] = &[
 /// Phoneme spellings (ezafe stripped, exact and case-sensitive) that are
 /// finite verb forms on their own.
 const FINITE_VERB_FORMS: &[&str] = &[
-    "?ast", "nist", "hast", "bud", "Sod", "kard", "dAd", "goft", "raft", "?Amad",
+    "?ast", "nist", "hast", "hastam", "hasti", "hastim", "hastid", "hastand", "nistam",
+    "nistand", "bud", "budam", "budi", "budim", "budid", "budand", "Sod", "Sodam", "Sodi",
+    "Sodim", "Sodid", "Sodand", "Sode", "Savad", "Savam", "Savim", "Savid", "Savand", "kon",
+    "konam", "koni", "konad", "konim", "konid", "konand", "kard", "kardam", "kardi", "kardim",
+    "kardid", "kardand", "karde", "dAd", "dAdam", "dAdand", "dAram", "dAri", "dArad", "dArim",
+    "dArid", "dArand", "dASt", "dAStam", "dAStand", "zad", "zadam", "zadand", "gereft",
+    "gereftam", "gereftand", "goft", "goftam", "goftand", "raft", "raftam", "raftand", "?Amad",
+    "?Amadam", "?Amadand", "bASad", "bASam", "bASim", "bASid", "bASand",
 ];
 
 /// True when `word` (ezafe stripped) looks like a finite verb: it starts
-/// with `mi` or `nemi`, ends with `ad` or `and`, or is one of
-/// [`FINITE_VERB_FORMS`].
+/// with `mi` or `nemi` and has more than 3 chars, ends with `ad` or `and`
+/// and has more than 3 chars, has at least 5 chars and starts with `be`,
+/// `bo` or `na` while ending with `am`, `i`, `ad`, `im`, `id` or `and`,
+/// or is one of [`FINITE_VERB_FORMS`].
 fn looks_like_finite_verb(word: &str) -> bool {
     let word = strip_ezafe(word);
-    word.starts_with("mi")
-        || word.starts_with("nemi")
-        || word.ends_with("ad")
-        || word.ends_with("and")
+    let len = word.chars().count();
+    (len > 3
+        && (word.starts_with("mi")
+            || word.starts_with("nemi")
+            || word.ends_with("ad")
+            || word.ends_with("and")))
+        || (len >= 5
+            && (word.starts_with("be") || word.starts_with("bo") || word.starts_with("na"))
+            && ["am", "i", "ad", "im", "id", "and"]
+                .iter()
+                .any(|ending| word.ends_with(ending)))
         || FINITE_VERB_FORMS.contains(&word.as_str())
 }
 
 /// True when a cut between `prev` and `next` is allowed: `prev` carries
-/// no ezafe mark, its stripped spelling is not in [`NO_CUT_AFTER`], and
-/// `next`'s stripped spelling is not in [`NO_CUT_BEFORE`]. A cut is also
+/// no ezafe mark, its stripped spelling is not in [`NO_CUT_AFTER`],
+/// `next`'s stripped spelling is not in [`NO_CUT_BEFORE`], and `next`
+/// does not look like a finite verb (Persian puts the verb last, so a
+/// cut right before it would strand it). A cut is also
 /// not allowed after a word whose stripped spelling ends in a vowel
 /// followed by `ye` (`?ostAnhAye`, `hameye`, `sedAye`, `buye`): the model
 /// often leaves the ezafe mark off such words, but the `ye` still binds
@@ -81,6 +101,7 @@ fn is_allowed_cut(prev: &str, next: &str) -> bool {
         && !ends_vowel_ye
         && !NO_CUT_AFTER.contains(&stripped.as_str())
         && !NO_CUT_BEFORE.contains(&strip_ezafe(next).as_str())
+        && !looks_like_finite_verb(next)
 }
 
 /// True when the cut before `words[at]` is allowed.
@@ -1013,6 +1034,38 @@ mod tests {
                 Some("?ostAnhAye"),
                 "{chunks:?}"
             );
+        }
+    }
+
+    #[test]
+    fn sensible_cut_never_before_a_verb_or_after_bayad() {
+        let counter = |s: &str| s.split_whitespace().count();
+        assert_eq!(
+            split_chunks(
+                "fAyle ?eksel rA ?eksport kon va dar gugel derAyv ?Aplod kon",
+                &counter,
+                6,
+                2
+            ),
+            vec![
+                "fAyle ?eksel rA ?eksport kon",
+                "va dar gugel derAyv ?Aplod kon"
+            ]
+        );
+        let chunks = split_chunks(
+            "lotfan fAyl rA be ?imeyle1 man beferestid va ?az ?estefAde konid",
+            &counter,
+            8,
+            2,
+        );
+        for chunk in &chunks[1..] {
+            let first = chunk.split_whitespace().next();
+            assert_ne!(first, Some("beferestid"), "{chunks:?}");
+            assert_ne!(first, Some("konid"), "{chunks:?}");
+        }
+        let chunks = split_chunks("a b bAyad c d e f g", &counter, 4, 2);
+        for chunk in &chunks[..chunks.len() - 1] {
+            assert_ne!(chunk.split_whitespace().last(), Some("bAyad"), "{chunks:?}");
         }
     }
 
