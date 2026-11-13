@@ -12,6 +12,7 @@
 use std::fmt;
 
 use super::normalize_fa::{is_persian_letter, normalize};
+use super::text::PieceEnd;
 
 /// Highest token budget per v2 chunk (reference `_synth_unit`).
 pub(crate) const MAX_TOKENS: usize = 18;
@@ -115,6 +116,66 @@ pub fn normalize_for_model(text: &str) -> Result<String, EmptyAfterNormalize> {
 /// dropped (reference `synth_one` v2 branch).
 pub fn split_sentences(normalized: &str) -> Vec<String> {
     split_keep_all(normalized, &HARD_BREAKS)
+}
+
+/// Split one sentence into clauses on the soft breaks, keeping the mark
+/// on the clause it ends (reference `SOFT_BREAK` split).
+pub fn split_clauses(sentence: &str) -> Vec<String> {
+    split_keep_all(sentence, &SOFT_BREAKS)
+}
+
+/// Plan one sentence's phoneme clauses into pieces: whole clauses merge
+/// while they fit `max_tokens`; a clause over the budget is split with
+/// [`split_chunks`] and never merges with its neighbours. A boundary at a
+/// clause edge ends [`PieceEnd::Clause`], a boundary inside a split clause
+/// ends [`PieceEnd::Mid`], and the last piece ends `sentence_end`. The
+/// returned text keeps the ezafe marks.
+pub(crate) fn plan_pieces(
+    clauses: &[String],
+    count_tokens: &dyn Fn(&str) -> usize,
+    max_tokens: usize,
+    min_tokens: usize,
+    sentence_end: PieceEnd,
+) -> Vec<(String, PieceEnd)> {
+    let mut pieces: Vec<(String, PieceEnd)> = Vec::new();
+    let mut current: Option<String> = None;
+    for clause in clauses {
+        if clause.trim().is_empty() {
+            continue;
+        }
+        if count_tokens(clause) <= max_tokens {
+            if let Some(cur) = current.as_ref() {
+                let trial = format!("{cur} {clause}");
+                if count_tokens(&trial) <= max_tokens {
+                    current = Some(trial);
+                    continue;
+                }
+                pieces.push((current.take().expect("just checked"), PieceEnd::Clause));
+            }
+            current = Some(clause.clone());
+        } else {
+            if let Some(cur) = current.take() {
+                pieces.push((cur, PieceEnd::Clause));
+            }
+            let subs = split_chunks(clause, count_tokens, max_tokens, min_tokens);
+            let last_sub = subs.len().saturating_sub(1);
+            for (index, sub) in subs.into_iter().enumerate() {
+                let end = if index == last_sub {
+                    PieceEnd::Clause
+                } else {
+                    PieceEnd::Mid
+                };
+                pieces.push((sub, end));
+            }
+        }
+    }
+    if let Some(cur) = current.take() {
+        pieces.push((cur, PieceEnd::Clause));
+    }
+    if let Some(last) = pieces.last_mut() {
+        last.1 = sentence_end;
+    }
+    pieces
 }
 
 /// Strip question marks the G2P model was not trained on.
@@ -324,6 +385,70 @@ mod tests {
         assert_eq!(split_sentences("کی آمد؟"), vec!["کی آمد؟"]);
         assert!(split_sentences("").is_empty());
         assert!(split_sentences("   ").is_empty());
+    }
+
+    #[test]
+    fn split_clauses_keeps_soft_break_marks() {
+        assert_eq!(
+            split_clauses("سلام، دنیا؛ خداحافظ: رفت"),
+            vec!["سلام،", "دنیا؛", "خداحافظ:", "رفت"]
+        );
+        assert_eq!(split_clauses("سلام دنیا"), vec!["سلام دنیا"]);
+    }
+
+    #[test]
+    fn plan_pieces_merges_two_short_clauses() {
+        let counter = |s: &str| s.split_whitespace().count();
+        let clauses = vec!["a b".to_string(), "c d".to_string()];
+        assert_eq!(
+            plan_pieces(&clauses, &counter, 18, 8, PieceEnd::Sentence),
+            vec![("a b c d".to_string(), PieceEnd::Sentence)]
+        );
+    }
+
+    #[test]
+    fn plan_pieces_three_clauses_end_clause_clause_sentence_end() {
+        let counter = |s: &str| s.split_whitespace().count();
+        let clause = |word: &str| vec![word; 10].join(" ");
+        let clauses = vec![clause("a"), clause("b"), clause("c")];
+        let pieces = plan_pieces(&clauses, &counter, 18, 8, PieceEnd::Sentence);
+        assert_eq!(pieces.len(), 3, "{pieces:?}");
+        assert_eq!(
+            pieces.iter().map(|p| p.1).collect::<Vec<_>>(),
+            vec![PieceEnd::Clause, PieceEnd::Clause, PieceEnd::Sentence]
+        );
+        // The sentence_end argument is used verbatim for the last piece.
+        let pieces = plan_pieces(&clauses, &counter, 18, 8, PieceEnd::Mid);
+        assert_eq!(pieces.last().map(|p| p.1), Some(PieceEnd::Mid));
+    }
+
+    #[test]
+    fn plan_pieces_long_clause_between_short_ones() {
+        let counter = |s: &str| s.split_whitespace().count();
+        let long = vec!["w"; 30].join(" ");
+        let clauses = vec!["a b".to_string(), long, "c d".to_string()];
+        let pieces = plan_pieces(&clauses, &counter, 18, 8, PieceEnd::Sentence);
+        let ends: Vec<PieceEnd> = pieces.iter().map(|p| p.1).collect();
+        assert_eq!(pieces[0].0, "a b");
+        assert_eq!(pieces.last().map(|p| p.0.as_str()), Some("c d"));
+        // Clause edges end Clause, the inside of the split clause ends Mid.
+        assert_eq!(ends[0], PieceEnd::Clause);
+        assert!(ends[1..ends.len() - 1].contains(&PieceEnd::Mid), "{ends:?}");
+        assert_eq!(
+            ends[ends.len() - 2],
+            PieceEnd::Clause,
+            "last sub-piece of the long clause ends at its clause edge: {ends:?}"
+        );
+        assert_eq!(ends[ends.len() - 1], PieceEnd::Sentence);
+        for piece in &pieces {
+            assert!(counter(&piece.0) <= 18, "{}", piece.0);
+        }
+    }
+
+    #[test]
+    fn plan_pieces_empty_input_gives_no_pieces() {
+        let counter = |s: &str| s.split_whitespace().count();
+        assert!(plan_pieces(&[], &counter, 18, 8, PieceEnd::Sentence).is_empty());
     }
 
     #[test]

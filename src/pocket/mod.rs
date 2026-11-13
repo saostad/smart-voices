@@ -48,7 +48,8 @@ use self::sentencepiece::SentencePiece;
 use self::text::{PieceEnd, classify_piece_end, prepare_text_prompt, split_text};
 use self::text_v2::{
     MAX_TOKENS as V2_MAX_TOKENS, MIN_TOKENS as V2_MIN_TOKENS, clean_sentence_for_g2p,
-    normalize_for_model, split_chunks, split_sentences, strip_ezafe, translate_phonemes,
+    normalize_for_model, plan_pieces, split_clauses, split_sentences, strip_ezafe,
+    translate_phonemes,
 };
 
 /// Farsi-verified generation settings (model card + blind-test harness).
@@ -794,13 +795,17 @@ impl PocketEngine {
         Ok(audio)
     }
 
-    /// v2 chunk list: normalize, split into sentences, pronounce each one,
-    /// and split the phonemes into 18/8-token chunks (ezafe marks guide the
-    /// split and are stripped before the model). A piece ending at the end
-    /// of its sentence's phonemes ends a sentence; ezafe/word cuts inside
-    /// carry no punctuation, so they are mid-sentence. Never classified by
-    /// last character: the phoneme alphabet's `?` is a phone, not a
-    /// question mark.
+    /// v2 chunk list: normalize, split into sentences, split each sentence
+    /// into clauses, pronounce each clause, and plan the phoneme clauses
+    /// into 18/8-token pieces with [`plan_pieces`] (ezafe marks guide the
+    /// split and are stripped before the model). A boundary at a clause
+    /// edge ends a clause; cuts inside an over-long clause are
+    /// mid-sentence. The last piece of a sentence ends
+    /// [`PieceEnd::Sentence`], except the last sentence of the text, whose
+    /// end is classified from the normalized text, so text ending in `،`
+    /// ends a clause and text ending in a letter ends mid-sentence. Never
+    /// classified by the phonemes' last character: the phoneme alphabet's
+    /// `?` is a phone, not a question mark.
     fn v2_chunks(&mut self, text: &str) -> Result<Vec<(String, PieceEnd)>, EngineError> {
         let normalized =
             normalize_for_model(text).map_err(|_| EngineError::NoAudio(text.to_string()))?;
@@ -809,27 +814,38 @@ impl PocketEngine {
             return Err(EngineError::NoAudio(text.to_string()));
         }
         let mut chunks = Vec::new();
-        for sentence in &sentences {
-            let clean = clean_sentence_for_g2p(sentence);
-            let g2p = self
-                .g2p
-                .as_mut()
-                .expect("v2 engine without a pronunciation model");
-            let phonemes = g2p.phonemise(&clean)?;
-            if phonemes.trim().is_empty() {
-                eprintln!("Pocket TTS: no phonemes for a sentence");
+        for (sentence_index, sentence) in sentences.iter().enumerate() {
+            let sentence_end = if sentence_index + 1 == sentences.len() {
+                classify_piece_end(&normalized)
+            } else {
+                PieceEnd::Sentence
+            };
+            let mut phoneme_clauses = Vec::new();
+            for clause in split_clauses(sentence) {
+                let clean = clean_sentence_for_g2p(&clause);
+                let g2p = self
+                    .g2p
+                    .as_mut()
+                    .expect("v2 engine without a pronunciation model");
+                let phonemes = g2p.phonemise(&clean)?;
+                if phonemes.trim().is_empty() {
+                    eprintln!("Pocket TTS: no phonemes for a sentence");
+                    continue;
+                }
+                phoneme_clauses.push(translate_phonemes(&phonemes));
+            }
+            if phoneme_clauses.is_empty() {
                 continue;
             }
-            let translated = translate_phonemes(&phonemes);
             let counter = |piece: &str| self.tokenizer.encode(&strip_ezafe(piece)).len();
-            let units = split_chunks(&translated, &counter, V2_MAX_TOKENS, V2_MIN_TOKENS);
-            let last = units.len().saturating_sub(1);
-            for (index, unit) in units.into_iter().enumerate() {
-                let end = if index == last {
-                    PieceEnd::Sentence
-                } else {
-                    PieceEnd::Mid
-                };
+            let units = plan_pieces(
+                &phoneme_clauses,
+                &counter,
+                V2_MAX_TOKENS,
+                V2_MIN_TOKENS,
+                sentence_end,
+            );
+            for (unit, end) in units {
                 chunks.push((strip_ezafe(&unit), end));
             }
         }
