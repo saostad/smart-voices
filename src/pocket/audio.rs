@@ -75,12 +75,20 @@ pub(crate) struct RawPiece {
 type OnPiece<'a> = Option<&'a mut dyn FnMut(&[f32])>;
 
 /// Finish raw pieces into playable audio: per piece, trim (the first
-/// piece's start and the last piece's end keep [`TRIM_KEEP_MS`]; cut sides
-/// keep [`trim_keep_ms`] of their boundary), then speed, then
+/// piece's start keeps [`TRIM_KEEP_MS`]; the last piece's end keeps
+/// [`TRIM_KEEP_CLAUSE_MS`] for a clause end and [`TRIM_KEEP_MS`] otherwise;
+/// cut sides keep [`trim_keep_ms`] of their boundary), then speed, then
 /// [`master_chunk`]; between pieces, the boundary's pause
-/// ([`pause_after_ms`], none mid-sentence). Each finished piece and pause
-/// also goes to `on_piece` as it is ready, so streaming callers hear pieces
-/// one by one; the returned audio concatenates exactly what was emitted.
+/// ([`pause_after_ms`], none mid-sentence). At a mid-sentence boundary the
+/// kept silences are overlap-added instead of butt-joined: the previous
+/// piece's last `n` samples fade out while the next piece's first `n`
+/// fade in and the two are summed, where `n` is the smaller of the
+/// [`TRIM_KEEP_MID_MS`] length after speed and the two piece lengths, so
+/// the output is `n` samples shorter per mid boundary. The tail of a
+/// mid-ended piece is held back until the next piece is ready, so
+/// `on_piece` still receives exactly the audio that is returned, in
+/// order. Each finished piece and pause also goes to `on_piece` as it is
+/// ready, so streaming callers hear pieces one by one.
 pub(crate) fn finish_speech(
     pieces: &[RawPiece],
     sample_rate: u32,
@@ -95,6 +103,7 @@ pub(crate) fn finish_speech(
         }
         out.extend_from_slice(part);
     };
+    let mut finished: Vec<Vec<f32>> = Vec::with_capacity(pieces.len());
     for (index, raw) in pieces.iter().enumerate() {
         let keep_start = if index == 0 {
             TRIM_KEEP_MS
@@ -102,16 +111,60 @@ pub(crate) fn finish_speech(
             trim_keep_ms(pieces[index - 1].end)
         };
         let keep_end = if index + 1 == pieces.len() {
-            TRIM_KEEP_MS
+            if raw.end == PieceEnd::Clause {
+                TRIM_KEEP_CLAUSE_MS
+            } else {
+                TRIM_KEEP_MS
+            }
         } else {
             trim_keep_ms(raw.end)
         };
         let piece = trim_silence(&raw.audio, sample_rate, keep_start, keep_end);
         let piece = apply_speed(&piece, speed);
         let piece = master_chunk(&piece, sample_rate);
-        emit(&piece, &mut out);
+        finished.push(piece);
+    }
+    let mid_keep = (TRIM_KEEP_MID_MS as f64 / 1000.0 * f64::from(sample_rate)).round() as usize;
+    let mid_after_speed = if speed.is_finite() && speed > 0.0 {
+        (mid_keep as f32 / speed).round() as usize
+    } else {
+        mid_keep
+    };
+    let overlaps: Vec<usize> = (0..pieces.len().saturating_sub(1))
+        .map(|index| {
+            if pieces[index].end == PieceEnd::Mid {
+                mid_after_speed
+                    .min(finished[index].len())
+                    .min(finished[index + 1].len())
+            } else {
+                0
+            }
+        })
+        .collect();
+    let mut held_tail: Option<Vec<f32>> = None;
+    for (index, piece) in finished.iter().enumerate() {
+        let overlap_out = overlaps.get(index).copied().unwrap_or(0);
+        let mut segment: Vec<f32> = Vec::new();
+        let start = if let Some(tail) = held_tail.take() {
+            let n = tail.len().min(piece.len());
+            for (k, (prev, next)) in tail.iter().zip(piece.iter()).take(n).enumerate() {
+                let fade_in = (k + 1) as f32 / (n + 1) as f32;
+                segment.push(prev * (1.0 - fade_in) + next * fade_in);
+            }
+            n
+        } else {
+            0
+        };
+        let body_end = piece.len() - overlap_out;
+        if body_end >= start {
+            segment.extend_from_slice(&piece[start..body_end]);
+        }
+        if overlap_out > 0 {
+            held_tail = Some(piece[body_end..].to_vec());
+        }
+        emit(&segment, &mut out);
         if index + 1 < pieces.len() {
-            let pause_ms = pause_after_ms(raw.end);
+            let pause_ms = pause_after_ms(pieces[index].end);
             if pause_ms > 0 {
                 let pause = vec![0.0; pause_len(pause_ms)];
                 emit(&pause, &mut out);
@@ -193,8 +246,10 @@ mod tests {
         let audio = finish_speech(&pieces, sample_rate, 1.0, Some(&mut emit));
         // Trim keeps per boundary (mastering and speed 1.0 keep lengths):
         // first start 120 ms; sentence cut sides 120 ms; clause cut sides
-        // 60 ms; last end 120 ms. Pauses: 150 ms after the sentence piece,
-        // 60 ms after the clause piece, none after the mid piece.
+        // 60 ms; the last piece ends Mid, so its outer end keeps 120 ms
+        // and no overlap is subtracted (there is no next piece). Pauses:
+        // 150 ms after the sentence piece, 60 ms after the clause piece,
+        // none after the mid piece.
         let finished = [2_880 + 1 + 2_880, 2_880 + 1 + 1_440, 1_440 + 1 + 2_880];
         let pauses = [3_600, 1_440];
         let expected: usize = finished.iter().sum::<usize>() + pauses.iter().sum::<usize>();
@@ -214,6 +269,71 @@ mod tests {
         // The blips survived mastering where the keeps put them.
         assert_ne!(audio[2_880], 0.0);
         assert_ne!(audio[finished[0] + pauses[0] + 2_880], 0.0);
+    }
+
+    #[test]
+    fn finish_speech_mid_boundary_overlap_adds_without_a_jump() {
+        let sample_rate = 24_000u32;
+        let pieces = [
+            RawPiece {
+                audio: vec![0.5; 4_800],
+                end: PieceEnd::Mid,
+            },
+            RawPiece {
+                audio: vec![0.5; 4_800],
+                end: PieceEnd::Sentence,
+            },
+        ];
+        let mut emitted: Vec<Vec<f32>> = Vec::new();
+        let mut emit = |part: &[f32]| emitted.push(part.to_vec());
+        let audio = finish_speech(&pieces, sample_rate, 1.0, Some(&mut emit));
+        // 25 ms (600 samples) shorter than the butt join, no pause.
+        assert_eq!(audio.len(), 4_800 + 4_800 - 600);
+        assert_eq!(audio, emitted.concat());
+        // At the join (the overlapped 600 samples start at 4 200) no pair
+        // jumps by more than the fade step and the join is not all zero.
+        let join = 4_200;
+        let fade_step = 1.0 / 601.0 + 0.01;
+        for pair in audio[join - 1..join + 600].windows(2) {
+            assert!(
+                (pair[1] - pair[0]).abs() <= fade_step,
+                "jump {} at the join",
+                (pair[1] - pair[0]).abs()
+            );
+        }
+        assert!(audio[join..join + 600].iter().any(|s| *s != 0.0));
+        assert!(
+            !audio[join..join + 600]
+                .windows(50)
+                .any(|run| run.iter().all(|s| *s == 0.0)),
+            "all-zero run at the join"
+        );
+    }
+
+    #[test]
+    fn finish_speech_short_pieces_do_not_panic_at_mid_boundary() {
+        let sample_rate = 24_000u32;
+        let pieces = [
+            RawPiece {
+                audio: vec![0.5; 10],
+                end: PieceEnd::Mid,
+            },
+            RawPiece {
+                audio: vec![0.5; 10],
+                end: PieceEnd::Sentence,
+            },
+        ];
+        let audio = finish_speech(&pieces, sample_rate, 1.0, None);
+        assert_eq!(audio.len(), 20 - 10);
+    }
+
+    #[test]
+    fn finish_speech_single_clause_piece_keeps_60_ms_at_end() {
+        let sample_rate = 24_000u32;
+        let pieces = [blip_piece(5_000, PieceEnd::Clause)];
+        let audio = finish_speech(&pieces, sample_rate, 1.0, None);
+        // Start keeps 120 ms, the clause end keeps 60 ms.
+        assert_eq!(audio.len(), 2_880 + 1 + 1_440);
     }
 
     #[test]
