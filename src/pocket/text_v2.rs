@@ -37,10 +37,30 @@ const NO_CUT_BEFORE: &[&str] = &["rA", "ro", "?ast"];
 
 /// Phoneme spellings (ezafe stripped, exact and case-sensitive) before
 /// which a word cut is preferred when a cut is needed: conjunctions and
-/// clause openers.
+/// clause openers. `va` and `yA` are not listed here: they join phrases
+/// as often as clauses (e.g. `SomAli va qarbi`), so a cut before them is
+/// preferred only after a finite verb (see [`prefers_cut`]).
 const PREFER_CUT_BEFORE: &[&str] = &[
-    "va", "ke", "?ammA", "vali", "yA", "tA", "Cun", "?agar", "zirA", "pas", "sepas",
+    "ke", "?ammA", "vali", "tA", "Cun", "?agar", "zirA", "pas", "sepas",
 ];
+
+/// Phoneme spellings (ezafe stripped, exact and case-sensitive) that are
+/// finite verb forms on their own.
+const FINITE_VERB_FORMS: &[&str] = &[
+    "?ast", "nist", "hast", "bud", "Sod", "kard", "dAd", "goft", "raft", "?Amad",
+];
+
+/// True when `word` (ezafe stripped) looks like a finite verb: it starts
+/// with `mi` or `nemi`, ends with `ad` or `and`, or is one of
+/// [`FINITE_VERB_FORMS`].
+fn looks_like_finite_verb(word: &str) -> bool {
+    let word = strip_ezafe(word);
+    word.starts_with("mi")
+        || word.starts_with("nemi")
+        || word.ends_with("ad")
+        || word.ends_with("and")
+        || FINITE_VERB_FORMS.contains(&word.as_str())
+}
 
 /// True when a cut between `prev` and `next` is allowed: `prev` carries
 /// no ezafe mark, its stripped spelling is not in [`NO_CUT_AFTER`], and
@@ -57,8 +77,18 @@ fn cut_allowed(words: &[&str], at: usize) -> bool {
 }
 
 /// True when the cut before `words[at]` lands before a preferred word.
+/// A cut before `va` or `yA` counts as preferred only when the previous
+/// word looks like a finite verb ([`looks_like_finite_verb`]), because
+/// those conjunctions join phrases as often as clauses.
 fn prefers_cut(words: &[&str], at: usize) -> bool {
-    at < words.len() && PREFER_CUT_BEFORE.contains(&strip_ezafe(words[at]).as_str())
+    if at == 0 || at >= words.len() {
+        return false;
+    }
+    let next = strip_ezafe(words[at]);
+    if PREFER_CUT_BEFORE.contains(&next.as_str()) {
+        return true;
+    }
+    (next == "va" || next == "yA") && looks_like_finite_verb(words[at - 1])
 }
 
 /// Best word segmentation of `words` into pieces within `max_tokens`
@@ -614,9 +644,22 @@ mod tests {
     #[test]
     fn sensible_cut_prefers_before_va() {
         let counter = |s: &str| s.split_whitespace().count();
+        // `miravad` ends with `ad`, so it looks like a finite verb and a
+        // cut before the following `va` is preferred.
         assert_eq!(
-            split_chunks("a b c va d e f", &counter, 4, 2),
-            vec!["a b c", "va d e f"]
+            split_chunks("a b miravad va d e f", &counter, 4, 2),
+            vec!["a b miravad", "va d e f"]
+        );
+    }
+
+    #[test]
+    fn sensible_cut_before_va_after_non_verb_gets_no_preference() {
+        let counter = |s: &str| s.split_whitespace().count();
+        // `SomAli` is not a finite verb, so the cut before `va` gets no
+        // preference and the balanced cut (4/4, not 2/6) wins.
+        assert_eq!(
+            split_chunks("a SomAli va qarbi d e f g", &counter, 6, 2),
+            vec!["a SomAli va qarbi", "d e f g"]
         );
     }
 

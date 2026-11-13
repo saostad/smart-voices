@@ -1317,8 +1317,8 @@ fn apply_word_replacements(value: &str) -> String {
     let mut result = replace_word(value, "e.g.", "for example");
     result = replace_word(&result, "i.e.", "that is");
     result = replace_word(&result, "etc.", "et cetera");
-    result = replace_word(&result, "vs.", "versus");
-    result = replace_word(&result, "vs", "versus");
+    result = replace_word_except(&result, "vs.", "versus", "VS.");
+    result = replace_word_except(&result, "vs", "versus", "VS");
     result = replace_word(&result, "w/", "with");
     result = replace_tilde_before_digit(&result);
     result = result.replace("->", " to ");
@@ -1339,6 +1339,44 @@ fn replace_tilde_before_digit(value: &str) -> String {
         }
         result.push(chars[index]);
         index += 1;
+    }
+    result
+}
+
+/// Like [`replace_word`], but a match whose text is exactly `skip_exact`
+/// is left alone (exact upper-case `VS` is a name, e.g. "VS Code", not
+/// the abbreviation for "versus").
+fn replace_word_except(value: &str, target: &str, replacement: &str, skip_exact: &str) -> String {
+    if value.is_empty() || target.is_empty() {
+        return value.to_string();
+    }
+    let target_chars: Vec<char> = target.chars().collect();
+    let chars: Vec<char> = value.chars().collect();
+    let mut result = String::with_capacity(value.len());
+    let mut index = 0;
+    while index < chars.len() {
+        let matched_text: Option<String> = if chars.len() - index >= target_chars.len()
+            && chars[index..index + target_chars.len()]
+                .iter()
+                .zip(target_chars.iter())
+                .all(|(&c, &t)| c.eq_ignore_ascii_case(&t))
+            && is_word_boundary_before(&chars, index)
+            && is_word_boundary_after(&chars, index + target_chars.len())
+        {
+            Some(chars[index..index + target_chars.len()].iter().collect())
+        } else {
+            None
+        };
+        match matched_text {
+            Some(text) if text != skip_exact => {
+                result.push_str(replacement);
+                index += target_chars.len();
+            }
+            _ => {
+                result.push(chars[index]);
+                index += 1;
+            }
+        }
     }
     result
 }
@@ -2156,6 +2194,8 @@ mod tests {
             sanitize_default("Cats vs dogs.")[0].text,
             "Cats versus dogs."
         );
+        // Exact upper-case VS is a name (VS Code), not "versus".
+        assert_eq!(sanitize_default("VS Code.")[0].text, "VS Code.");
         assert_eq!(sanitize_default("A → B.")[0].text, "A to B.");
         assert_eq!(sanitize_default("A -> B.")[0].text, "A to B.");
         assert_eq!(sanitize_default("Fish & chips.")[0].text, "Fish and chips.");

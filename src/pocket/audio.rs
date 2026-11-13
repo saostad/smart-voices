@@ -130,7 +130,7 @@ pub(crate) fn finish_speech(
     } else {
         mid_keep
     };
-    let overlaps: Vec<usize> = (0..pieces.len().saturating_sub(1))
+    let mut overlaps: Vec<usize> = (0..pieces.len().saturating_sub(1))
         .map(|index| {
             if pieces[index].end == PieceEnd::Mid {
                 mid_after_speed
@@ -141,6 +141,19 @@ pub(crate) fn finish_speech(
             }
         })
         .collect();
+    // A piece's incoming overlap plus its outgoing overlap must never
+    // exceed its length, or the samples between them would be emitted
+    // twice. Shrink the outgoing overlap to fit what the incoming one
+    // leaves behind.
+    for index in 0..finished.len() {
+        let incoming = if index == 0 { 0 } else { overlaps[index - 1] };
+        if index < overlaps.len() {
+            let max_outgoing = finished[index].len().saturating_sub(incoming);
+            if overlaps[index] > max_outgoing {
+                overlaps[index] = max_outgoing;
+            }
+        }
+    }
     let mut held_tail: Option<Vec<f32>> = None;
     for (index, piece) in finished.iter().enumerate() {
         let overlap_out = overlaps.get(index).copied().unwrap_or(0);
@@ -325,6 +338,33 @@ mod tests {
         ];
         let audio = finish_speech(&pieces, sample_rate, 1.0, None);
         assert_eq!(audio.len(), 20 - 10);
+    }
+
+    #[test]
+    fn finish_speech_short_middle_piece_overlaps_do_not_duplicate_samples() {
+        let sample_rate = 24_000u32;
+        let pieces = [
+            RawPiece {
+                audio: vec![0.5; 4_800],
+                end: PieceEnd::Mid,
+            },
+            RawPiece {
+                audio: vec![0.5; 700],
+                end: PieceEnd::Mid,
+            },
+            RawPiece {
+                audio: vec![0.5; 4_800],
+                end: PieceEnd::Sentence,
+            },
+        ];
+        let mut emitted: Vec<Vec<f32>> = Vec::new();
+        let mut emit = |part: &[f32]| emitted.push(part.to_vec());
+        let audio = finish_speech(&pieces, sample_rate, 1.0, Some(&mut emit));
+        // Incoming overlap to the middle piece is 600; its outgoing
+        // overlap shrinks to 700 - 600 = 100 so the two never overlap
+        // each other. Total is the sum minus the overlaps actually used.
+        assert_eq!(audio.len(), 4_800 + 700 + 4_800 - 600 - 100);
+        assert_eq!(audio, emitted.concat());
     }
 
     #[test]
