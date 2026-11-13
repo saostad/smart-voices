@@ -332,13 +332,13 @@ pub(crate) fn dedupe_repeats(fa: &[&str], mut ph: Vec<String>) -> Vec<String> {
     if fa.len() == 1 && persian_letter_count(fa[0]) <= 3 && ph.len() == 1 {
         let word = &ph[0];
         let bytes_half = word.len() / 2;
-        if word.len() % 2 == 0 {
-            // Exact doubling of a char-boundary half at least 2 chars long.
-            if let (Some(half), Some(rest)) = (word.get(..bytes_half), word.get(bytes_half..)) {
-                if half == rest && half.chars().count() >= 2 {
-                    ph[0] = half.to_string();
-                }
-            }
+        // Exact doubling of a char-boundary half at least 2 chars long.
+        if word.len().is_multiple_of(2)
+            && let (Some(half), Some(rest)) = (word.get(..bytes_half), word.get(bytes_half..))
+            && half == rest
+            && half.chars().count() >= 2
+        {
+            ph[0] = half.to_string();
         }
     }
     ph
@@ -386,26 +386,28 @@ pub(crate) fn align_words(fa: &[&str], ph: &[String]) -> Option<Vec<usize>> {
     dp[0][0]?;
     let mut counts = Vec::with_capacity(n);
     let mut j = 0usize;
-    for i in 0..n {
-        let (_, count) = dp[i][j]?;
+    for row in dp.iter().take(n) {
+        let (_, count) = row[j]?;
         counts.push(count);
         j += count;
     }
     Some(counts)
 }
 
-/// Split phoneme words `ph` into one phoneme clause per Persian clause
-/// in `clauses_fa`, using [`align_words`] over all their Persian words.
-/// A clause with no Persian word contributes nothing. `None` when the
-/// words cannot be aligned.
-pub(crate) fn phoneme_clauses(clauses_fa: &[String], ph: &[String]) -> Option<Vec<String>> {
-    let per_clause: Vec<Vec<&str>> = clauses_fa.iter().map(|c| fa_words(c)).collect();
-    let all: Vec<&str> = per_clause.iter().flatten().copied().collect();
-    let counts = align_words(&all, ph)?;
+/// Join phoneme words into one string per Persian clause, where
+/// `counts` (one per Persian word, in clause order) says how many
+/// phoneme words each Persian word owns. A clause with no Persian word
+/// contributes nothing.
+pub(crate) fn clauses_from_counts(
+    clauses_fa: &[String],
+    ph: &[String],
+    counts: &[usize],
+) -> Vec<String> {
     let mut clauses = Vec::new();
     let mut at = 0usize;
     let mut word_at = 0usize;
-    for words in &per_clause {
+    for clause in clauses_fa {
+        let words = fa_words(clause);
         let owned: usize = counts[word_at..word_at + words.len()].iter().sum();
         word_at += words.len();
         if words.is_empty() {
@@ -414,7 +416,70 @@ pub(crate) fn phoneme_clauses(clauses_fa: &[String], ph: &[String]) -> Option<Ve
         clauses.push(ph[at..at + owned].join(" "));
         at += owned;
     }
-    Some(clauses)
+    clauses
+}
+
+/// Split phoneme words `ph` into one phoneme clause per Persian clause
+/// in `clauses_fa`, using [`align_words`] over all their Persian words.
+/// A clause with no Persian word contributes nothing. `None` when the
+/// words cannot be aligned.
+pub fn phoneme_clauses(clauses_fa: &[String], ph: &[String]) -> Option<Vec<String>> {
+    let all: Vec<&str> = clauses_fa.iter().flat_map(|c| fa_words(c)).collect();
+    let counts = align_words(&all, ph)?;
+    Some(clauses_from_counts(clauses_fa, ph, &counts))
+}
+
+/// Replace the phoneme group of each Persian word that `lookup` knows
+/// (by its spelling stripped of leading/trailing non-letter, non-ZWNJ
+/// characters) with the override as one phoneme word. When the group's
+/// last word carries the ezafe mark, the ezafe is kept: `ye1` after a
+/// vowel-final override, `e1` otherwise. Returns the new phoneme words
+/// and the new per-word counts (1 for a replaced word, unchanged on a
+/// miss), which the caller uses to keep clause shares right.
+pub(crate) fn apply_overrides(
+    fa: &[&str],
+    ph: &[String],
+    counts: &[usize],
+    lookup: &dyn Fn(&str) -> Option<String>,
+) -> (Vec<String>, Vec<usize>) {
+    let mut out: Vec<String> = Vec::with_capacity(ph.len());
+    let mut new_counts: Vec<usize> = Vec::with_capacity(counts.len());
+    let mut at = 0usize;
+    for (word, &count) in fa.iter().zip(counts) {
+        let group = &ph[at..at + count];
+        at += count;
+        let stripped = word.trim_matches(|c: char| !(is_persian_letter(c) || c == ZWNJ));
+        let replaced = if stripped.is_empty() {
+            None
+        } else {
+            lookup(stripped)
+        };
+        match replaced {
+            Some(over) => {
+                let has_ezafe = group.last().is_some_and(|last| last.ends_with(EZAFE_MARK));
+                let word_out = if has_ezafe {
+                    let vowel_final = over
+                        .chars()
+                        .last()
+                        .is_some_and(|c| matches!(c, 'a' | 'e' | 'o' | 'A' | 'i' | 'u'));
+                    if vowel_final {
+                        format!("{over}ye1")
+                    } else {
+                        format!("{over}e1")
+                    }
+                } else {
+                    over
+                };
+                out.push(word_out);
+                new_counts.push(1);
+            }
+            None => {
+                out.extend(group.iter().cloned());
+                new_counts.push(count);
+            }
+        }
+    }
+    (out, new_counts)
 }
 
 /// Plan one sentence's phoneme clauses into pieces: whole clauses merge
@@ -772,6 +837,54 @@ mod tests {
                 "kafSAyam por ?az gel Sod".to_string()
             ])
         );
+    }
+
+    #[test]
+    fn apply_overrides_replaces_known_words_and_keeps_ezafe() {
+        let words = |items: &[&str]| items.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let lookup = |word: &str| match word {
+            "اکسل" => Some("?eksel".to_string()),
+            "گوگل" => Some("gugel".to_string()),
+            "دیتا" => Some("deytA".to_string()),
+            "لپ\u{200c}تاپ" => Some("laptAp".to_string()),
+            _ => None,
+        };
+        // A known word is replaced; its neighbour's ezafe is untouched.
+        let (out, counts) = apply_overrides(
+            &["فایل", "اکسل", "را"],
+            &words(&["fAyle1", "?exkel", "rA"]),
+            &[1, 1, 1],
+            &lookup,
+        );
+        assert_eq!(out, words(&["fAyle1", "?eksel", "rA"]));
+        assert_eq!(counts, vec![1, 1, 1]);
+        // An ezafe on the replaced word is kept, `e1` after a consonant.
+        let (out, _) = apply_overrides(
+            &["گوگل", "جدید"],
+            &words(&["gugle1", "jadid"]),
+            &[1, 1],
+            &lookup,
+        );
+        assert_eq!(out, words(&["gugele1", "jadid"]));
+        // A vowel-final override gets `ye1`.
+        let (out, _) = apply_overrides(
+            &["دیتا", "جدید"],
+            &words(&["deytA1", "jadid"]),
+            &[1, 1],
+            &lookup,
+        );
+        assert_eq!(out, words(&["deytAye1", "jadid"]));
+        // A ZWNJ word the model split becomes its single override word.
+        let (out, counts) =
+            apply_overrides(&["لپ\u{200c}تاپ"], &words(&["lap", "tAp"]), &[2], &lookup);
+        assert_eq!(out, words(&["laptAp"]));
+        assert_eq!(counts, vec![1]);
+        // Punctuation on the Persian word still matches; unknown words pass through.
+        let (out, _) = apply_overrides(&["اکسل،"], &words(&["?exkel"]), &[1], &lookup);
+        assert_eq!(out, words(&["?eksel"]));
+        let (out, counts) = apply_overrides(&["سلام"], &words(&["salAm"]), &[1], &lookup);
+        assert_eq!(out, words(&["salAm"]));
+        assert_eq!(counts, vec![1]);
     }
 
     #[test]

@@ -47,9 +47,9 @@ use self::runtime::{
 use self::sentencepiece::SentencePiece;
 use self::text::{PieceEnd, classify_piece_end, prepare_text_prompt, split_text};
 use self::text_v2::{
-    MAX_TOKENS as V2_MAX_TOKENS, MIN_TOKENS as V2_MIN_TOKENS, clean_sentence_for_g2p,
-    dedupe_repeats, fa_words, normalize_for_model, phoneme_clauses, plan_pieces, split_clauses,
-    split_sentences, strip_ezafe, translate_phonemes,
+    MAX_TOKENS as V2_MAX_TOKENS, MIN_TOKENS as V2_MIN_TOKENS, align_words, apply_overrides,
+    clauses_from_counts, clean_sentence_for_g2p, dedupe_repeats, fa_words, normalize_for_model,
+    plan_pieces, split_clauses, split_sentences, strip_ezafe, translate_phonemes,
 };
 
 /// Farsi-verified generation settings (model card + blind-test harness).
@@ -836,8 +836,13 @@ impl PocketEngine {
             let ph_words: Vec<String> = translated.split_whitespace().map(str::to_string).collect();
             let fa = fa_words(sentence);
             let ph_words = dedupe_repeats(&fa, ph_words);
-            let phoneme_clauses = match phoneme_clauses(&clauses_fa, &ph_words) {
-                Some(clauses) => clauses,
+            let phoneme_clauses = match align_words(&fa, &ph_words) {
+                Some(counts) => {
+                    let lookup =
+                        |word: &str| crate::latin_fa::phoneme_overrides().get(word).cloned();
+                    let (ph_words, counts) = apply_overrides(&fa, &ph_words, &counts, &lookup);
+                    clauses_from_counts(&clauses_fa, &ph_words, &counts)
+                }
                 None => {
                     eprintln!(
                         "warn: fallback: true, attempted=clause_alignment, reason=word_count_mismatch, taken=whole_sentence_cuts"

@@ -511,14 +511,9 @@ mod tests {
                 "line {} value has a char outside Persian letters, ZWNJ and spaces: {persian}",
                 line_no + 1
             );
+            const ALPHABET: &str = "aeoAiubptsjChxdzrSqfkglmnvy?;";
             assert!(
-                !phonemes.is_empty()
-                    && phonemes.chars().all(|c| matches!(
-                        c,
-                        'a' | 'e' | 'o' | 'A' | 'i' | 'u' | 'b' | 'p' | 't' | 's' | 'j' | 'C'
-                            | 'h' | 'x' | 'd' | 'z' | 'r' | 'S' | 'q' | 'f' | 'k' | 'g' | 'l' | 'm'
-                            | 'n' | 'v' | 'y' | '?' | ';'
-                    )),
+                !phonemes.is_empty() && phonemes.chars().all(|c| c != ' ' && ALPHABET.contains(c)),
                 "line {} phonemes use a char outside the v2 alphabet: {phonemes}",
                 line_no + 1
             );
