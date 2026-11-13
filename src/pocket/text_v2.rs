@@ -296,6 +296,127 @@ pub fn split_clauses(sentence: &str) -> Vec<String> {
     split_keep_all(sentence, &SOFT_BREAKS)
 }
 
+/// ZWNJ (U+200C), inside Persian words such as «این‌قدر».
+const ZWNJ: char = '\u{200c}';
+
+/// Whitespace tokens of `text` that contain at least one Persian letter.
+pub(crate) fn fa_words(text: &str) -> Vec<&str> {
+    split_words(text)
+        .into_iter()
+        .filter(|word| word.chars().any(is_persian_letter))
+        .collect()
+}
+
+fn zwnj_part_count(word: &str) -> usize {
+    word.split(ZWNJ).count()
+}
+
+fn persian_letter_count(word: &str) -> usize {
+    word.chars().filter(|&c| is_persian_letter(c)).count()
+}
+
+/// Drop repeated phoneme words the model emits for very short inputs.
+/// `fa` is the sentence's Persian words. The phoneme list may keep at
+/// most the total ZWNJ part count of `fa`; while it is longer and an
+/// adjacent pair repeats, the second of the first such pair is dropped.
+/// A lone phoneme word that is an exact doubling (`tamtam`) for a
+/// Persian word of at most 3 letters is halved (`tam`).
+pub(crate) fn dedupe_repeats(fa: &[&str], mut ph: Vec<String>) -> Vec<String> {
+    let max = fa.iter().map(|word| zwnj_part_count(word)).sum::<usize>();
+    while ph.len() > max {
+        let Some(at) = (1..ph.len()).find(|&i| ph[i - 1] == ph[i]) else {
+            break;
+        };
+        ph.remove(at);
+    }
+    if fa.len() == 1 && persian_letter_count(fa[0]) <= 3 && ph.len() == 1 {
+        let word = &ph[0];
+        let bytes_half = word.len() / 2;
+        if word.len() % 2 == 0 {
+            // Exact doubling of a char-boundary half at least 2 chars long.
+            if let (Some(half), Some(rest)) = (word.get(..bytes_half), word.get(bytes_half..)) {
+                if half == rest && half.chars().count() >= 2 {
+                    ph[0] = half.to_string();
+                }
+            }
+        }
+    }
+    ph
+}
+
+/// For each Persian word in `fa`, how many phoneme words it owns: 1, or
+/// its ZWNJ part count when that is more than 1. The counts must sum to
+/// `ph.len()` exactly; among assignments that fit, the one minimising
+/// the total |phoneme chars − 1.4 × Persian letters| wins, with ties
+/// going to the earlier word taking 1. `None` when nothing fits.
+pub(crate) fn align_words(fa: &[&str], ph: &[String]) -> Option<Vec<usize>> {
+    let n = fa.len();
+    let m = ph.len();
+    let choices: Vec<Vec<usize>> = fa
+        .iter()
+        .map(|word| {
+            let parts = zwnj_part_count(word);
+            if parts > 1 { vec![1, parts] } else { vec![1] }
+        })
+        .collect();
+    // dp[i][j]: best cost for fa[i..] owning ph[j..], with its choice.
+    let mut dp: Vec<Vec<Option<(f64, usize)>>> = vec![vec![None; m + 1]; n + 1];
+    dp[n][m] = Some((0.0, 0));
+    for i in (0..n).rev() {
+        for j in (0..=m).rev() {
+            let mut best: Option<(f64, usize)> = None;
+            for &count in &choices[i] {
+                let end = j + count;
+                if end > m {
+                    continue;
+                }
+                let Some((suffix, _)) = dp[i + 1][end] else {
+                    continue;
+                };
+                let joined_chars = ph[j..end].join(" ").chars().count() as f64;
+                let cost = (joined_chars - 1.4 * persian_letter_count(fa[i]) as f64).abs() + suffix;
+                // Strict `<` keeps the first (smallest) count on a tie.
+                if best.is_none_or(|(seen, _)| cost < seen - 1e-9) {
+                    best = Some((cost, count));
+                }
+            }
+            dp[i][j] = best;
+        }
+    }
+    dp[0][0]?;
+    let mut counts = Vec::with_capacity(n);
+    let mut j = 0usize;
+    for i in 0..n {
+        let (_, count) = dp[i][j]?;
+        counts.push(count);
+        j += count;
+    }
+    Some(counts)
+}
+
+/// Split phoneme words `ph` into one phoneme clause per Persian clause
+/// in `clauses_fa`, using [`align_words`] over all their Persian words.
+/// A clause with no Persian word contributes nothing. `None` when the
+/// words cannot be aligned.
+pub(crate) fn phoneme_clauses(clauses_fa: &[String], ph: &[String]) -> Option<Vec<String>> {
+    let per_clause: Vec<Vec<&str>> = clauses_fa.iter().map(|c| fa_words(c)).collect();
+    let all: Vec<&str> = per_clause.iter().flatten().copied().collect();
+    let counts = align_words(&all, ph)?;
+    let mut clauses = Vec::new();
+    let mut at = 0usize;
+    let mut word_at = 0usize;
+    for words in &per_clause {
+        let owned: usize = counts[word_at..word_at + words.len()].iter().sum();
+        word_at += words.len();
+        if words.is_empty() {
+            continue;
+        }
+        clauses.push(ph[at..at + owned].join(" "));
+        at += owned;
+    }
+    Some(clauses)
+}
+
 /// Plan one sentence's phoneme clauses into pieces: whole clauses merge
 /// while they fit `max_tokens`; a clause over the budget is split with
 /// [`split_chunks`] and never merges with its neighbours. A boundary at a
@@ -575,6 +696,82 @@ mod tests {
             vec!["سلام،", "دنیا؛", "خداحافظ:", "رفت"]
         );
         assert_eq!(split_clauses("سلام دنیا"), vec!["سلام دنیا"]);
+    }
+
+    #[test]
+    fn dedupe_repeats_drops_repeats_and_halves_doubling() {
+        let words = |items: &[&str]| items.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            dedupe_repeats(&["سلام،"], words(&["salAm", "salAm"])),
+            words(&["salAm"])
+        );
+        assert_eq!(
+            dedupe_repeats(&["نه!"], words(&["na", "na"])),
+            words(&["na"])
+        );
+        assert_eq!(
+            dedupe_repeats(&["تم."], words(&["tamtam"])),
+            words(&["tam"])
+        );
+        assert_eq!(
+            dedupe_repeats(&["بابا"], words(&["bAbA"])),
+            words(&["bAbA"])
+        );
+    }
+
+    #[test]
+    fn align_words_counts() {
+        let words = |items: &[&str]| items.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            align_words(&["سلام", "دنیا"], &words(&["salAm", "donyA"])),
+            Some(vec![1, 1])
+        );
+        assert_eq!(
+            align_words(
+                &["چرا", "این\u{200c}قدر", "دیر", "آمدی"],
+                &words(&["CerA", "?in", "qadr", "dir", "?Amadi"])
+            ),
+            Some(vec![1, 2, 1, 1])
+        );
+        assert_eq!(
+            align_words(
+                &["لپ\u{200c}تاپ", "می\u{200c}خرم"],
+                &words(&["lap", "tAp", "mixaram"])
+            ),
+            Some(vec![2, 1])
+        );
+        assert_eq!(
+            align_words(
+                &["لپ\u{200c}تاپ", "می\u{200c}خرم"],
+                &words(&["laptAp", "mixaram"])
+            ),
+            Some(vec![1, 1])
+        );
+        assert_eq!(
+            align_words(&["سلام", "دنیا"], &words(&["salAm", "donyA", "extra"])),
+            None
+        );
+    }
+
+    #[test]
+    fn phoneme_clauses_splits_by_alignment() {
+        let clauses = vec![
+            "بعد از باران،".to_string(),
+            "کفش\u{200c}هایم پر از گل شد.".to_string(),
+        ];
+        let ph: Vec<String> = [
+            "ba?d", "?az", "bArAn", "kafSAyam", "por", "?az", "gel", "Sod",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        assert_eq!(
+            phoneme_clauses(&clauses, &ph),
+            Some(vec![
+                "ba?d ?az bArAn".to_string(),
+                "kafSAyam por ?az gel Sod".to_string()
+            ])
+        );
     }
 
     #[test]

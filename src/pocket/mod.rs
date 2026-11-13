@@ -48,8 +48,8 @@ use self::sentencepiece::SentencePiece;
 use self::text::{PieceEnd, classify_piece_end, prepare_text_prompt, split_text};
 use self::text_v2::{
     MAX_TOKENS as V2_MAX_TOKENS, MIN_TOKENS as V2_MIN_TOKENS, clean_sentence_for_g2p,
-    normalize_for_model, plan_pieces, split_clauses, split_sentences, strip_ezafe,
-    translate_phonemes,
+    dedupe_repeats, fa_words, normalize_for_model, phoneme_clauses, plan_pieces, split_clauses,
+    split_sentences, strip_ezafe, translate_phonemes,
 };
 
 /// Farsi-verified generation settings (model card + blind-test harness).
@@ -795,9 +795,10 @@ impl PocketEngine {
         Ok(audio)
     }
 
-    /// v2 chunk list: normalize, split into sentences, split each sentence
-    /// into clauses, pronounce each clause, and plan the phoneme clauses
-    /// into 18/8-token pieces with [`plan_pieces`] (ezafe marks guide the
+    /// v2 chunk list: normalize, split into sentences, pronounce each
+    /// whole sentence once, recover its clauses by aligning the phoneme
+    /// words to the Persian words, and plan the phoneme clauses into
+    /// 18/8-token pieces with [`plan_pieces`] (ezafe marks guide the
     /// split and are stripped before the model). A boundary at a clause
     /// edge ends a clause; cuts inside an over-long clause are
     /// mid-sentence. The last piece of a sentence ends
@@ -820,20 +821,30 @@ impl PocketEngine {
             } else {
                 PieceEnd::Sentence
             };
-            let mut phoneme_clauses = Vec::new();
-            for clause in split_clauses(sentence) {
-                let clean = clean_sentence_for_g2p(&clause);
-                let g2p = self
-                    .g2p
-                    .as_mut()
-                    .expect("v2 engine without a pronunciation model");
-                let phonemes = g2p.phonemise(&clean)?;
-                if phonemes.trim().is_empty() {
-                    eprintln!("Pocket TTS: no phonemes for a sentence");
-                    continue;
-                }
-                phoneme_clauses.push(translate_phonemes(&phonemes));
+            let clauses_fa = split_clauses(sentence);
+            let clean = clean_sentence_for_g2p(sentence);
+            let g2p = self
+                .g2p
+                .as_mut()
+                .expect("v2 engine without a pronunciation model");
+            let phonemes = g2p.phonemise(&clean)?;
+            if phonemes.trim().is_empty() {
+                eprintln!("Pocket TTS: no phonemes for a sentence");
+                continue;
             }
+            let translated = translate_phonemes(&phonemes);
+            let ph_words: Vec<String> = translated.split_whitespace().map(str::to_string).collect();
+            let fa = fa_words(sentence);
+            let ph_words = dedupe_repeats(&fa, ph_words);
+            let phoneme_clauses = match phoneme_clauses(&clauses_fa, &ph_words) {
+                Some(clauses) => clauses,
+                None => {
+                    eprintln!(
+                        "warn: fallback: true, attempted=clause_alignment, reason=word_count_mismatch, taken=whole_sentence_cuts"
+                    );
+                    vec![ph_words.join(" ")]
+                }
+            };
             if phoneme_clauses.is_empty() {
                 continue;
             }
