@@ -28,8 +28,8 @@ browser	براوزر	brAvzer
 bug	باگ	bAg
 business	بیزینس	biznes
 button	باتن	bAten
-cable	کابل	keybel
-cache	کش	keS
+cable	کابل	
+cache	کش	
 calendar	کلندر	kalender
 camera	کمرا	kamerA
 cancel	کنسل	kansel
@@ -78,7 +78,7 @@ disk	دیسک	disk
 disney	دیزنی	dizni
 display	دیسپلی	displey
 docker	داکر	dAker
-domain	دومین	domeyn
+domain	دامین	dAmin
 download	دانلود	dAnlod
 drive	درایو	drAyv
 dropbox	دراپ‌باکس	drApbAks
@@ -105,11 +105,11 @@ function	فانکشن	fAnkSen
 galaxy	گلکسی	galaksi
 game	گیم	geym
 gemini	جمینای	jeminAy
-git	گیت	git
+git	گیت	
 github	گیت‌هاب	githAb
 gitlab	گیت‌لب	gitlab
 gmail	جی‌میل	jimeyl
-go	گو	go
+go	گو	
 google	گوگل	gugel
 gps	جی‌پی‌اس	jipi?es
 gpt	جی‌پی‌تی	jipiti
@@ -178,7 +178,7 @@ max	مکس	maks
 media	مدیا	mediA
 meeting	میتینگ	miting
 memory	مموری	memori
-menu	منو	menu
+menu	منو	
 message	مسیج	mesij
 messenger	مسنجر	mesenjer
 meta	متا	metA
@@ -192,10 +192,10 @@ monitor	مانیتور	mAnitor
 mouse	ماوس	mAus
 mozilla	موزیلا	mozilA
 nasa	ناسا	nAsA
-net	نت	net
+net	نت	
 netflix	نتفلیکس	netfliks
 network	نتورک	netvork
-node	نود	nod
+node	نود	
 nokia	نوکیا	nokiA
 note	نوت	not
 notification	نوتیفیکیشن	notifikeySen
@@ -209,7 +209,7 @@ open	اوپن	?open
 openai	اوپن‌ای‌آی	?open?ey?Ay
 option	آپشن	?ApSen
 oracle	اوراکل	?orAkel
-org	ارگ	?org
+org	ارگ	
 os	او‌اس	?o?es
 outlook	اوت‌لوک	?Autluk
 package	پکیج	pakej
@@ -226,18 +226,18 @@ php	پی‌اچ‌پی	pi?eCpi
 pinterest	پینترست	pinterest
 pixel	پیکسل	piksel
 platform	پلتفرم	platform
-play	پلی	pley
+play	پلی	
 playlist	پلی‌لیست	pleylist
 plugin	پلاگین	plAgin
 plus	پلاس	pelAs
 podcast	پادکست	pAdkast
 portal	پورتال	portAl
-post	پست	post
+post	پست	
 powerpoint	پاورپوینت	pAverpoynt
 premium	پریمیوم	perimiyom
 print	پرینت	perint
 printer	پرینتر	perinter
-pro	پرو	pro
+pro	پرو	
 product	پروداکت	perodAkt
 profile	پروفایل	profAyl
 program	پروگرام	porogrAm
@@ -248,7 +248,7 @@ protocol	پروتکل	protokol
 proxy	پراکسی	prAksi
 python	پایتون	pAyton
 qr	کیو‌آر	kiyu?Ar
-ram	رم	ram
+ram	رم	
 react	ری‌اکت	ri?akt
 reaction	ری‌اکشن	ri?akSen
 reddit	ردیت	redit
@@ -256,7 +256,7 @@ remote	ریموت	rimot
 report	ریپورت	riport
 router	روتر	ruter
 ruby	روبی	rubi
-rust	راست	rAst
+rust	راست	
 safari	سافاری	sAfAri
 samsung	سامسونگ	sAmsong
 save	سیو	seyv
@@ -266,11 +266,11 @@ script	اسکریپت	?eskript
 search	سرچ	serC
 security	سکیوریتی	sekiyuriti
 seo	سئو	se?o
-server	سرور	server
+server	سرور	
 service	سرویس	servis
 session	سشن	seSen
 settings	ستینگ	seting
-share	شیر	Ser
+share	شئر	Ser
 shopify	شاپیفای	SApifAy
 shortcut	شورتکات	SortkAt
 site	سایت	sAyt
@@ -355,7 +355,7 @@ whatsapp	واتس‌اپ	vAts?ap
 wifi	وای‌فای	vAyfAy
 wikipedia	ویکی‌پدیا	vikipediA
 windows	ویندوز	vindoz
-word	ورد	vord
+word	ورد	
 wordpress	وردپرس	vordpres
 workspace	ورک‌اسپیس	vorkspeys
 www	دابلیو‌دابلیو‌دابلیو	dAbelyudAbelyudAbelyu

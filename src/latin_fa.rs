@@ -41,7 +41,9 @@ fn word_list() -> &'static HashMap<String, String> {
 }
 
 /// Map from the Persian spelling (second TSV column) to its exact
-/// phonemes (third column), in the v2 model's alphabet.
+/// phonemes (third column), in the v2 model's alphabet. A row whose
+/// phonemes column is empty has no override (the pronunciation model
+/// decides), so it is skipped here.
 pub(crate) fn phoneme_overrides() -> &'static HashMap<String, String> {
     static LIST: OnceLock<HashMap<String, String>> = OnceLock::new();
     LIST.get_or_init(|| {
@@ -54,7 +56,9 @@ pub(crate) fn phoneme_overrides() -> &'static HashMap<String, String> {
             if let (Some(_written), Some(persian), Some(phonemes)) =
                 (columns.next(), columns.next(), columns.next())
             {
-                map.insert(persian.to_string(), phonemes.to_string());
+                if !phonemes.is_empty() {
+                    map.insert(persian.to_string(), phonemes.to_string());
+                }
             }
         }
         map
@@ -478,6 +482,17 @@ mod tests {
         assert_eq!(overrides.get("اکسل").map(String::as_str), Some("?eksel"));
         assert_eq!(overrides.get("گوگل").map(String::as_str), Some("gugel"));
         assert_eq!(overrides.get("فرم‌ور").map(String::as_str), Some("fermver"));
+        // Spellings that are ordinary Persian words have an empty
+        // phonemes column, so they get no override.
+        for persian in [
+            "نود", "شیر", "منو", "دومین", "گو", "نت", "ارگ", "ورد", "سرور", "پست", "رم", "کابل",
+            "گیت", "پرو", "پلی", "کش", "راست",
+        ] {
+            assert!(
+                !overrides.contains_key(persian),
+                "{persian} must have no phoneme override"
+            );
+        }
     }
 
     #[test]
@@ -512,8 +527,10 @@ mod tests {
                 line_no + 1
             );
             const ALPHABET: &str = "aeoAiubptsjChxdzrSqfkglmnvy?;";
+            // The phonemes column may be empty (no override); when it
+            // is present it must use only the v2 alphabet.
             assert!(
-                !phonemes.is_empty() && phonemes.chars().all(|c| c != ' ' && ALPHABET.contains(c)),
+                phonemes.chars().all(|c| c != ' ' && ALPHABET.contains(c)),
                 "line {} phonemes use a char outside the v2 alphabet: {phonemes}",
                 line_no + 1
             );
