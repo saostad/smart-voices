@@ -95,6 +95,105 @@ fn glued_before(chars: &[char], start: usize) -> bool {
     start > 0 && is_digit(chars[start - 1])
 }
 
+fn currency_word(c: char) -> Option<&'static str> {
+    Some(match c {
+        '$' => "دلار",
+        '€' => "یورو",
+        '£' => "پوند",
+        '¥' => "ین",
+        '₹' => "روپیه",
+        '\u{FDFC}' => "ریال",
+        _ => return None,
+    })
+}
+
+const MAGNITUDES: [&str; 4] = ["هزار", "میلیون", "میلیارد", "تریلیون"];
+
+/// A magnitude word at `start`, followed by a non-letter boundary.
+fn magnitude_at(chars: &[char], start: usize) -> Option<(&'static str, usize)> {
+    for word in MAGNITUDES {
+        let word_chars: Vec<char> = word.chars().collect();
+        if start + word_chars.len() <= chars.len()
+            && chars[start..start + word_chars.len()] == word_chars[..]
+        {
+            let end = start + word_chars.len();
+            if chars.get(end).is_none_or(|c| !c.is_alphabetic()) {
+                return Some((word, end));
+            }
+        }
+    }
+    None
+}
+
+fn skip_spaces(chars: &[char], mut index: usize) -> usize {
+    while chars.get(index).is_some_and(|c| c.is_whitespace()) {
+        index += 1;
+    }
+    index
+}
+
+/// Spoken degree suffix at `start` (`°C`, `℃`, `°F` or a bare `°`).
+fn degree_at(chars: &[char], start: usize) -> Option<(&'static str, usize)> {
+    match chars.get(start) {
+        Some('℃') => Some((" درجه سانتی‌گراد", start + 1)),
+        Some('°') => match chars.get(start + 1) {
+            Some('C') => Some((" درجه سانتی‌گراد", start + 2)),
+            Some('F') => Some((" درجه فارنهایت", start + 2)),
+            _ => Some((" درجه", start + 1)),
+        },
+        _ => None,
+    }
+}
+
+/// Try an abbreviation at `start` (whole token; optional spaces after the
+/// inner dot; optional final dot).
+fn try_abbreviation(chars: &[char], start: usize) -> Option<(String, usize)> {
+    if start > 0 && (chars[start - 1].is_alphabetic() || is_digit(chars[start - 1])) {
+        return None;
+    }
+    if chars.get(start + 1) != Some(&'.') {
+        return None;
+    }
+    let mut second = start + 2;
+    while chars.get(second).is_some_and(|c| c.is_whitespace()) {
+        second += 1;
+    }
+    let expansion = match (chars[start], chars.get(second)) {
+        ('ه', Some('ش')) => "هجری شمسی",
+        ('ه', Some('ق')) => "هجری قمری",
+        ('ق', Some('م')) => "قبل از میلاد",
+        _ => return None,
+    };
+    let mut end = second + 1;
+    if chars.get(end) == Some(&'.') {
+        end += 1;
+    }
+    if chars
+        .get(end)
+        .is_some_and(|c| c.is_alphabetic() || is_digit(*c))
+    {
+        return None;
+    }
+    Some((expansion.to_string(), end))
+}
+
+fn collapse_double_spaces(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    let mut previous_space = false;
+    for c in text.chars() {
+        if c == ' ' {
+            if !previous_space {
+                result.push(c);
+            }
+            previous_space = true;
+        } else {
+            result.push(c);
+            previous_space = false;
+        }
+    }
+    result
+}
+
 /// Try a date at `start` (`Y/M/D` or `Y-M-D`, same separator twice). Returns
 /// the replacement (the original text when the shape matches but the date
 /// is out of range) and the index just past the pattern.
@@ -215,15 +314,44 @@ fn try_decimal(chars: &[char], start: usize) -> Option<(String, usize)> {
     ))
 }
 
-/// Expand dates, times, ranges, signs and Persian decimals in Persian
-/// text. Text that matches no rule is returned unchanged.
+/// Expand dates, times, ranges, signs, Persian decimals, currency,
+/// symbols and abbreviations in Persian text. Text that matches no rule
+/// is returned unchanged.
 #[must_use]
 pub fn expand(text: &str) -> String {
     let chars: Vec<char> = text.chars().collect();
     let mut result = String::with_capacity(text.len());
+    let mut symbol_changed = false;
     let mut index = 0;
     while index < chars.len() {
         let c = chars[index];
+        if let Some((spoken, end)) = try_abbreviation(&chars, index) {
+            result.push_str(&spoken);
+            index = end;
+            continue;
+        }
+        if let Some(word) = currency_word(c) {
+            symbol_changed = true;
+            let number_start = skip_spaces(&chars, index + 1);
+            if let Some(run) = digit_run(&chars, number_start) {
+                let number = normalized_digits(&chars, number_start, run.end);
+                // `$۵ میلیون` → `5 میلیون دلار`: the currency word goes
+                // after a following magnitude word.
+                if chars.get(run.end) == Some(&' ')
+                    && let Some((magnitude, magnitude_end)) = magnitude_at(&chars, run.end + 1)
+                {
+                    result.push_str(&format!("{number} {magnitude} {word}"));
+                    index = magnitude_end;
+                } else {
+                    result.push_str(&format!("{number} {word}"));
+                    index = run.end;
+                }
+            } else {
+                result.push_str(word);
+                index += 1;
+            }
+            continue;
+        }
         if is_digit(c) && !glued_before(&chars, index) {
             if let Some((spoken, end)) = try_date(&chars, index)
                 .or_else(|| try_time(&chars, index))
@@ -237,9 +365,38 @@ pub fn expand(text: &str) -> String {
                 index = end;
                 continue;
             }
-            // No pattern: copy the whole digit run as it is.
             let run = digit_run(&chars, index).expect("digit at index");
-            result.extend(&chars[index..run.end]);
+            let number = normalized_digits(&chars, index, run.end);
+            // A currency symbol right after the number (optional space).
+            let symbol_at = skip_spaces(&chars, run.end);
+            if let Some(word) = chars.get(symbol_at).and_then(|&s| currency_word(s)) {
+                symbol_changed = true;
+                let after = skip_spaces(&chars, symbol_at + 1);
+                if symbol_at + 1 < after
+                    && let Some((magnitude, magnitude_end)) = magnitude_at(&chars, after)
+                {
+                    result.push_str(&format!("{number} {magnitude} {word}"));
+                    index = magnitude_end;
+                } else {
+                    result.push_str(&format!("{number} {word}"));
+                    index = symbol_at + 1;
+                }
+                continue;
+            }
+            // A degree sign right after the number (optional space).
+            if let Some((suffix, end)) = degree_at(&chars, symbol_at) {
+                symbol_changed = true;
+                result.push_str(&number);
+                result.push_str(suffix);
+                index = end;
+                continue;
+            }
+            // A number taking part in an operator expression is rewritten.
+            if matches!(chars.get(run.end), Some('+' | '=' | '×' | '÷')) {
+                result.push_str(&number);
+            } else {
+                result.extend(&chars[index..run.end]);
+            }
             index = run.end;
             continue;
         }
@@ -253,10 +410,74 @@ pub fn expand(text: &str) -> String {
             index = run.end;
             continue;
         }
+        if let Some((suffix, end)) = degree_at(&chars, index) {
+            symbol_changed = true;
+            result.push_str(suffix);
+            index = end;
+            continue;
+        }
+        let operator: Option<(&str, usize)> = match c {
+            '×' => Some((" در ", index + 1)),
+            '÷' => Some((" تقسیم بر ", index + 1)),
+            '=' if chars.get(index + 1).is_some_and(|&n| is_digit(n)) => {
+                let run = digit_run(&chars, index + 1).expect("digit after =");
+                result.push_str(" مساوی ");
+                result.push_str(&normalized_digits(&chars, index + 1, run.end));
+                symbol_changed = true;
+                index = run.end;
+                continue;
+            }
+            '=' => Some((" مساوی ", index + 1)),
+            '+' if chars.get(index + 1).is_some_and(|&n| is_digit(n)) => {
+                let run = digit_run(&chars, index + 1).expect("digit after +");
+                result.push_str(" به\u{200c}علاوه ");
+                result.push_str(&normalized_digits(&chars, index + 1, run.end));
+                symbol_changed = true;
+                index = run.end;
+                continue;
+            }
+            '#' if chars.get(index + 1).is_some_and(|&n| is_digit(n)) => {
+                let run = digit_run(&chars, index + 1).expect("digit after #");
+                result.push_str("شماره ");
+                result.push_str(&normalized_digits(&chars, index + 1, run.end));
+                symbol_changed = true;
+                index = run.end;
+                continue;
+            }
+            '@' if index > 0
+                && chars[index - 1].is_ascii_alphanumeric()
+                && chars
+                    .get(index + 1)
+                    .is_some_and(|n| n.is_ascii_alphanumeric()) =>
+            {
+                Some((" ات ", index + 1))
+            }
+            '.' if index > 0
+                && chars[index - 1].is_ascii_alphanumeric()
+                && chars
+                    .get(index + 1)
+                    .is_some_and(|n| n.is_ascii_alphanumeric())
+                && (chars[index - 1].is_ascii_alphabetic()
+                    || chars[index + 1].is_ascii_alphabetic()) =>
+            {
+                Some((" دات ", index + 1))
+            }
+            _ => None,
+        };
+        if let Some((spoken, end)) = operator {
+            symbol_changed = true;
+            result.push_str(spoken);
+            index = end;
+            continue;
+        }
         result.push(c);
         index += 1;
     }
-    result
+    if symbol_changed {
+        collapse_double_spaces(&result)
+    } else {
+        result
+    }
 }
 
 #[cfg(test)]
@@ -271,6 +492,20 @@ mod tests {
         assert_eq!(expand("۱۴۰۵/۰۷/۱۴"), "14 مهر 1405");
         assert_eq!(expand("2026-11-13"), "13 نوامبر 2026");
         assert_eq!(expand("۱۴۰۵/۱۳/۰۱"), "۱۴۰۵/۱۳/۰۱");
+    }
+
+    #[test]
+    fn currency_symbols_and_abbreviations() {
+        assert_eq!(expand("$۲۵"), "25 دلار");
+        assert_eq!(expand("۲۰€"), "20 یورو");
+        assert_eq!(expand("$۵ میلیون"), "5 میلیون دلار");
+        assert_eq!(expand("۲۵°C"), "25 درجه سانتی‌گراد");
+        assert_eq!(expand("۲+۲=۴"), "2 به\u{200c}علاوه 2 مساوی 4");
+        assert_eq!(expand("a@b.com"), "a ات b دات com");
+        assert_eq!(expand("3.5"), "3.5");
+        assert_eq!(expand("سال ۱۳۵۷ ه.ش"), "سال ۱۳۵۷ هجری شمسی");
+        assert_eq!(expand("۵۰۰ ق.م."), "۵۰۰ قبل از میلاد");
+        assert_eq!(expand("#۳"), "شماره 3");
     }
 
     #[test]
