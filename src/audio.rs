@@ -51,23 +51,7 @@ fn resample_to_rate(samples: &[f32], from: u32, to: u32) -> Result<Vec<f32>, Aud
         eprintln!("error: invalid playback sample rate {from} -> {to}");
         return Err(AudioError::Resample { from, to });
     }
-    // A missing or invalid settings file falls back to the defaults
-    // `Settings::load` already returns (the app warned at startup); it
-    // must not stop playback.
-    let (settings, error) = match crate::settings::settings_path() {
-        Some(path) => crate::settings::Settings::load(&path),
-        None => {
-            eprintln!(
-                "warn: fallback: true, attempted=settings_file, reason=settings_directory_unavailable, taken=default_resampler_settings"
-            );
-            (crate::settings::Settings::default(), None)
-        }
-    };
-    if let Some(error) = error {
-        eprintln!(
-            "warn: fallback: true, attempted=settings_file, reason={error}, taken=default_resampler_settings"
-        );
-    }
+    let settings = current_settings("default_resampler_settings");
     Ok(resample_with(
         samples,
         from,
@@ -75,6 +59,121 @@ fn resample_to_rate(samples: &[f32], from: u32, to: u32) -> Result<Vec<f32>, Aud
         settings.resample_cutoff_ratio,
         settings.resample_filter_zeros,
     ))
+}
+
+/// The saved settings, read fresh so tray changes apply without a restart.
+/// A missing or invalid settings file falls back to the defaults
+/// `Settings::load` already returns (the app warned at startup); it must
+/// not stop playback. `taken` names the fallback in the warning.
+fn current_settings(taken: &str) -> crate::settings::Settings {
+    let (settings, error) = match crate::settings::settings_path() {
+        Some(path) => crate::settings::Settings::load(&path),
+        None => {
+            eprintln!(
+                "warn: fallback: true, attempted=settings_file, reason=settings_directory_unavailable, taken={taken}"
+            );
+            (crate::settings::Settings::default(), None)
+        }
+    };
+    if let Some(error) = error {
+        eprintln!("warn: fallback: true, attempted=settings_file, reason={error}, taken={taken}");
+    }
+    settings
+}
+
+/// An output device as the user knows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutputDevice {
+    /// Display name, also the `[output_devices]` key the tray writes
+    /// (e.g. "JBL Flip 5").
+    pub name: String,
+    /// System id that also matches a profile: the PulseAudio / PipeWire sink
+    /// name on Linux (e.g. "bluez_output.AA_BB_CC_DD_EE_FF.1"); `None`
+    /// elsewhere.
+    pub id: Option<String>,
+}
+
+/// What [`AudioSink::wake_up`] found before (re)opening the output stream.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutputWakeUp {
+    pub device: OutputDevice,
+    /// Silence to play first so the device is awake for the first words
+    /// (zero when the device has no wake-up profile).
+    pub lead: std::time::Duration,
+}
+
+/// Identify the device a stream on `device` really plays on. On Linux cpal
+/// only sees ALSA's "default", so the default PulseAudio / PipeWire sink is
+/// asked for through `pactl`.
+pub fn describe_output_device(device: &cpal::Device) -> Result<OutputDevice, String> {
+    #[cfg(target_os = "linux")]
+    match default_sink_via_pactl() {
+        Ok(found) => return Ok(found),
+        Err(err) => eprintln!(
+            "warn: fallback: true, attempted=pactl_default_sink, reason={err}, taken=cpal_device_name"
+        ),
+    }
+    let description = device
+        .description()
+        .map_err(|err| format!("Couldn't read the audio output device name: {err}"))?;
+    Ok(OutputDevice {
+        name: description.name().to_string(),
+        id: None,
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn default_sink_via_pactl() -> Result<OutputDevice, String> {
+    let run = |args: &[&str]| -> Result<String, String> {
+        let output = std::process::Command::new("pactl")
+            .args(args)
+            // Untranslated field labels ("Default Sink:", "Description:").
+            .env("LC_ALL", "C")
+            .output()
+            .map_err(|err| format!("couldn't run pactl {}: {err}", args.join(" ")))?;
+        if !output.status.success() {
+            return Err(format!(
+                "pactl {} failed ({}): {}",
+                args.join(" "),
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    };
+    let id =
+        parse_pactl_default_sink(&run(&["info"])?).ok_or("pactl info reported no default sink")?;
+    let name = parse_pactl_sink_description(&run(&["list", "sinks"])?, &id)
+        .ok_or_else(|| format!("pactl list sinks has no description for {id}"))?;
+    Ok(OutputDevice { name, id: Some(id) })
+}
+
+/// The `Default Sink:` value of `LC_ALL=C pactl info`.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn parse_pactl_default_sink(info: &str) -> Option<String> {
+    info.lines()
+        .find_map(|line| line.trim().strip_prefix("Default Sink:"))
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+}
+
+/// The `Description:` of sink `id` in `LC_ALL=C pactl list sinks`.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn parse_pactl_sink_description(list: &str, id: &str) -> Option<String> {
+    let mut in_sink = false;
+    for line in list.lines() {
+        let line = line.trim();
+        if line.starts_with("Sink #") {
+            in_sink = false;
+        } else if let Some(name) = line.strip_prefix("Name:") {
+            in_sink = name.trim() == id;
+        } else if in_sink && let Some(description) = line.strip_prefix("Description:") {
+            let description = description.trim();
+            return (!description.is_empty()).then(|| description.to_string());
+        }
+    }
+    None
 }
 
 /// Windowed-sinc resample with explicit settings (see [`resample_to_rate`]
@@ -225,6 +324,36 @@ impl AudioSink {
             .lock()
             .unwrap_or_else(|err| err.into_inner())
             .events = Some(sender);
+    }
+
+    /// Call before `enqueue`. When the next `enqueue` will (re)open the
+    /// stream, identify the device it will play on and how much silence it
+    /// needs first to wake up (its `[output_devices]` profile). `None` while
+    /// the stream is open: an open stream keeps playing silence, so the
+    /// device is already awake. Also `None` (with a warning) when the device
+    /// can't be identified; `enqueue` then reports a missing device itself.
+    pub fn wake_up(&mut self) -> Option<OutputWakeUp> {
+        if self.stream.is_some() && !self.dead.load(Ordering::SeqCst) {
+            return None;
+        }
+        let device = cpal::default_host().default_output_device()?;
+        let device = match describe_output_device(&device) {
+            Ok(device) => device,
+            Err(err) => {
+                eprintln!(
+                    "warn: fallback: true, attempted=output_device_profile, reason={err}, taken=no_wake_up"
+                );
+                return None;
+            }
+        };
+        let settings = current_settings("no_wake_up");
+        let wake_up_ms = settings
+            .output_profile(&device.name, device.id.as_deref())
+            .map_or(0, |profile| profile.wake_up_ms);
+        Some(OutputWakeUp {
+            device,
+            lead: std::time::Duration::from_millis(u64::from(wake_up_ms)),
+        })
     }
 
     /// Queue mono `samples` at `sample_rate` Hz for gapless playback,
@@ -428,6 +557,37 @@ mod tests {
         let mid = out[out.len() / 2];
         assert!((mid - 1.0).abs() < 0.02, "mid DC sample {mid}");
         assert_eq!(resample_with(&dc, 24_000, 24_000, 0.99, 6), dc);
+    }
+
+    #[test]
+    fn pactl_output_names_the_default_sink() {
+        let info = "Server Name: PulseAudio (on PipeWire 1.2.7)\n\
+                    Default Sink: bluez_output.AA_BB_CC_DD_EE_FF.1\n\
+                    Default Source: alsa_input.pci-0000_00_1f.3.analog-stereo\n";
+        assert_eq!(
+            parse_pactl_default_sink(info).as_deref(),
+            Some("bluez_output.AA_BB_CC_DD_EE_FF.1")
+        );
+        assert_eq!(parse_pactl_default_sink("Server Name: x\n"), None);
+        assert_eq!(parse_pactl_default_sink("Default Sink: \n"), None);
+
+        let sinks = "Sink #58\n\tState: SUSPENDED\n\
+                     \tName: alsa_output.pci-0000_00_1f.3.analog-stereo\n\
+                     \tDescription: Built-in Audio Analog Stereo\n\
+                     \tDriver: PipeWire\n\
+                     Sink #91\n\tState: RUNNING\n\
+                     \tName: bluez_output.AA_BB_CC_DD_EE_FF.1\n\
+                     \tDescription: JBL Flip 5\n";
+        assert_eq!(
+            parse_pactl_sink_description(sinks, "bluez_output.AA_BB_CC_DD_EE_FF.1").as_deref(),
+            Some("JBL Flip 5")
+        );
+        assert_eq!(
+            parse_pactl_sink_description(sinks, "alsa_output.pci-0000_00_1f.3.analog-stereo")
+                .as_deref(),
+            Some("Built-in Audio Analog Stereo")
+        );
+        assert_eq!(parse_pactl_sink_description(sinks, "missing"), None);
     }
 
     #[test]

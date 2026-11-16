@@ -13,7 +13,7 @@ use std::collections::VecDeque;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use crate::audio::{AudioSink, SinkEvent};
+use crate::audio::{AudioSink, OutputDevice, OutputWakeUp, SinkEvent};
 use crate::chunk::SpeechChunk;
 use crate::engine::{
     EngineError, KokoroEngine, ModelVariant, ParadeeEngine, PersianVoice, PiperEngine,
@@ -217,9 +217,19 @@ pub trait Output: Send {
     fn close_if_idle(&mut self);
     /// Wire the channel receiving [`SinkEvent`]s (called once by spawn).
     fn set_event_sender(&mut self, sender: mpsc::Sender<SinkEvent>);
+    /// Called before each `enqueue`: `Some` when that enqueue will (re)open
+    /// the output, naming the device and the silence it needs to wake up
+    /// (see [`AudioSink::wake_up`]).
+    fn wake_up(&mut self) -> Option<OutputWakeUp> {
+        None
+    }
 }
 
 impl Output for AudioSink {
+    fn wake_up(&mut self) -> Option<OutputWakeUp> {
+        AudioSink::wake_up(self)
+    }
+
     fn enqueue(&mut self, id: u64, samples: &[f32], sample_rate: u32) -> Result<(), String> {
         AudioSink::enqueue(self, id, samples, sample_rate).map_err(|err| err.to_string())
     }
@@ -296,6 +306,13 @@ pub enum PlayerEvent {
         load_ms: u64,
         synth_ms: u64,
         chars: usize,
+    },
+    /// Audio is starting on an output device that was idle: the device and
+    /// the wake-up silence played before the speech (zero when the device
+    /// has no wake-up profile).
+    OutputDevice {
+        device: OutputDevice,
+        wake_up: Duration,
     },
 }
 
@@ -466,6 +483,9 @@ struct Inflight {
     id: u64,
     index: usize,
     duration: Duration,
+    /// Wake-up silence ahead of chunk `index` (no `Chunk` event of its own;
+    /// the chunk's event fires once the silence is done).
+    wake_up: bool,
 }
 
 struct Controller<O: Output> {
@@ -794,7 +814,10 @@ impl<O: Output> Controller<O> {
         };
         let was_head = pos == 0;
         self.inflight.remove(pos);
-        if was_head && let Some(head) = self.inflight.front() {
+        if was_head
+            && let Some(head) = self.inflight.front()
+            && !head.wake_up
+        {
             // The next item starts playing now.
             let index = head.index;
             let duration = head.duration;
@@ -915,6 +938,15 @@ impl<O: Output> Controller<O> {
         {
             return; // Stale: a play/stop/jump superseded it.
         }
+        if let Some(wake) = self.output.wake_up() {
+            self.emit(PlayerEvent::OutputDevice {
+                device: wake.device,
+                wake_up: wake.lead,
+            });
+            if !wake.lead.is_zero() && !self.enqueue_wake_up(wake.lead, rate, index) {
+                return;
+            }
+        }
         let id = self.next_id;
         self.next_id = self.next_id.wrapping_add(1);
         match self.output.enqueue(id, &samples, rate) {
@@ -924,6 +956,7 @@ impl<O: Output> Controller<O> {
                     id,
                     index,
                     duration,
+                    wake_up: false,
                 });
                 self.synth_next = index + 1;
                 if self.debug_latency && self.latency_pending && index == 0 {
@@ -960,6 +993,30 @@ impl<O: Output> Controller<O> {
                 }
             }
             Err(message) => self.fail(message),
+        }
+    }
+
+    /// Queue `lead` of silence ahead of chunk `index` so a sleeping output
+    /// device is awake for its first words. Returns false after failing the
+    /// playback on an output error.
+    fn enqueue_wake_up(&mut self, lead: Duration, rate: u32, index: usize) -> bool {
+        let frames = (lead.as_secs_f64() * f64::from(rate)).round() as usize;
+        let id = self.next_id;
+        self.next_id = self.next_id.wrapping_add(1);
+        match self.output.enqueue(id, &vec![0.0; frames], rate) {
+            Ok(()) => {
+                self.inflight.push_back(Inflight {
+                    id,
+                    index,
+                    duration: lead,
+                    wake_up: true,
+                });
+                true
+            }
+            Err(message) => {
+                self.fail(message);
+                false
+            }
         }
     }
 
@@ -1034,6 +1091,9 @@ mod tests {
         clears: usize,
         closes: usize,
         sender: Option<mpsc::Sender<SinkEvent>>,
+        /// Returned by the next `wake_up` call only (the stream then counts
+        /// as open, like the real sink).
+        wake: Option<OutputWakeUp>,
     }
 
     #[derive(Clone)]
@@ -1050,6 +1110,7 @@ mod tests {
                 clears: 0,
                 closes: 0,
                 sender: None,
+                wake: None,
             }));
             (
                 Self {
@@ -1082,6 +1143,10 @@ mod tests {
     }
 
     impl Output for FakeOutput {
+        fn wake_up(&mut self) -> Option<OutputWakeUp> {
+            self.shared.lock().unwrap().wake.take()
+        }
+
         fn enqueue(&mut self, id: u64, samples: &[f32], sample_rate: u32) -> Result<(), String> {
             self.shared
                 .lock()
@@ -1349,6 +1414,54 @@ mod tests {
         assert_eq!(next_event(&events), PlayerEvent::Finished);
         assert_eq!(next_event(&events), PlayerEvent::State(PlayerState::Idle));
         assert_eq!(factory_count.load(Ordering::SeqCst), 1);
+        player.shutdown();
+    }
+
+    #[test]
+    fn wake_up_silence_plays_before_the_first_chunk() {
+        let (player, events, shared, _, _) = spawn_player(None, FakeSynth::new());
+        let device = OutputDevice {
+            name: "JBL Flip 5".to_string(),
+            id: Some("bluez_output.AA_BB.1".to_string()),
+        };
+        shared.lock().unwrap().wake = Some(OutputWakeUp {
+            device: device.clone(),
+            lead: Duration::from_millis(500),
+        });
+        player.play("One. Two.");
+        drain_playlist(&events);
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Loading)
+        );
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::State(PlayerState::Playing)
+        );
+        assert_eq!(
+            next_event(&events),
+            PlayerEvent::OutputDevice {
+                device,
+                wake_up: Duration::from_millis(500),
+            }
+        );
+        wait_for_enqueued(&shared, 2);
+        // Half a second of silence at the synth rate goes first.
+        assert_eq!(shared.lock().unwrap().enqueued[0].1, 12_000);
+        // The first chunk is not "now reading" while the silence plays.
+        expect_no_event(&events);
+        let ids = FakeOutput::enqueued_ids(&shared);
+        FakeOutput::finish(&shared, ids[0]);
+        assert_eq!(next_event(&events), chunk(0, 2, "One."));
+        wait_for_enqueued(&shared, 3);
+        let ids = FakeOutput::enqueued_ids(&shared);
+        FakeOutput::finish(&shared, ids[1]);
+        assert_eq!(next_event(&events), chunk(1, 2, "Two."));
+        FakeOutput::finish(&shared, ids[2]);
+        assert_eq!(next_event(&events), PlayerEvent::Finished);
+        assert_eq!(next_event(&events), PlayerEvent::State(PlayerState::Idle));
+        // Only one enqueue of silence: the stream stayed open.
+        assert_eq!(shared.lock().unwrap().enqueued.len(), 3);
         player.shutdown();
     }
 

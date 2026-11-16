@@ -1,5 +1,6 @@
 //! Persistent user settings (`settings.toml`).
 
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
 use std::io::ErrorKind;
@@ -154,6 +155,19 @@ impl ServerSettings {
     }
 }
 
+/// Longest wake-up silence an output device profile may ask for.
+pub const MAX_WAKE_UP_MS: u32 = 5000;
+
+/// Settings for one output device (`[output_devices."Device name"]`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct OutputDeviceProfile {
+    /// Silence played before the first words when audio starts on this
+    /// device after it was idle, so a speaker that sleeps when idle (most
+    /// Bluetooth speakers) is awake before the speech starts. 0 = off.
+    pub wake_up_ms: u32,
+}
+
 /// User settings. Missing file entries fall back to [`Settings::default`];
 /// unknown entries are ignored.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -211,9 +225,39 @@ pub struct Settings {
     pub date_order: crate::normalize::DateOrder,
     /// Global shortcut bindings (`[shortcuts]` table).
     pub shortcuts: Shortcuts,
+    /// Per-device profiles, keyed by the output device name (as shown in
+    /// the tray's Speaker Wake-Up menu) or, on Linux, the PulseAudio /
+    /// PipeWire sink name.
+    pub output_devices: BTreeMap<String, OutputDeviceProfile>,
 }
 
 impl Settings {
+    /// The profile for an output device, matched by its display name or
+    /// its system id (the Linux sink name).
+    #[must_use]
+    pub fn output_profile(&self, name: &str, id: Option<&str>) -> Option<&OutputDeviceProfile> {
+        self.output_devices
+            .get(name)
+            .or_else(|| id.and_then(|id| self.output_devices.get(id)))
+    }
+
+    /// Set the wake-up silence for the device named `name` (with system id
+    /// `id`); 0 removes its profile. A profile saved under the id is
+    /// replaced by one under the name, so exactly one entry applies.
+    pub fn set_wake_up_ms(&mut self, name: &str, id: Option<&str>, wake_up_ms: u32) {
+        if let Some(id) = id {
+            self.output_devices.remove(id);
+        }
+        if wake_up_ms == 0 {
+            self.output_devices.remove(name);
+        } else {
+            self.output_devices
+                .entry(name.to_string())
+                .or_default()
+                .wake_up_ms = wake_up_ms;
+        }
+    }
+
     /// The English voice of the selected model (the value under
     /// [`ModelVariant::voice_setting_key`]).
     #[must_use]
@@ -264,6 +308,7 @@ impl Default for Settings {
             respell_names: false,
             date_order: crate::normalize::DateOrder::MonthFirst,
             shortcuts: Shortcuts::default(),
+            output_devices: BTreeMap::new(),
         }
     }
 }
@@ -323,6 +368,16 @@ impl Settings {
         }
         if !(1..=64).contains(&self.resample_filter_zeros) {
             return Err("resample_filter_zeros must be between 1 and 64".into());
+        }
+        for (name, profile) in &self.output_devices {
+            if name.trim().is_empty() {
+                return Err("output_devices names must not be empty".into());
+            }
+            if profile.wake_up_ms > MAX_WAKE_UP_MS {
+                return Err(format!(
+                    "output_devices.\"{name}\".wake_up_ms must be at most {MAX_WAKE_UP_MS}"
+                ));
+            }
         }
         Ok(())
     }
@@ -497,6 +552,10 @@ mod tests {
                 stop: "ctrl+alt+Q".to_string(),
                 ..Shortcuts::default()
             },
+            output_devices: BTreeMap::from([(
+                "JBL Flip 5".to_string(),
+                OutputDeviceProfile { wake_up_ms: 750 },
+            )]),
         };
         settings.save(&path).unwrap();
         let (loaded, err) = Settings::load(&path);
@@ -899,6 +958,59 @@ mod tests {
             }
         }
         assert_eq!(resolved, Some(path));
+    }
+
+    #[test]
+    fn output_device_profiles_load_match_and_validate() {
+        let dir = unique_temp_dir();
+        let path = dir.join("settings.toml");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            &path,
+            "[output_devices.\"JBL Flip 5\"]\nwake_up_ms = 600\n\
+             [output_devices.\"bluez_output.AA_BB.1\"]\nwake_up_ms = 900\n",
+        )
+        .unwrap();
+        let (mut settings, err) = Settings::load(&path);
+        assert!(err.is_none(), "unexpected error: {err:?}");
+        // Matched by display name first, then by the system id.
+        let by_name = settings.output_profile("JBL Flip 5", Some("bluez_output.XX.1"));
+        assert_eq!(by_name.map(|p| p.wake_up_ms), Some(600));
+        let by_id = settings.output_profile("Speaker", Some("bluez_output.AA_BB.1"));
+        assert_eq!(by_id.map(|p| p.wake_up_ms), Some(900));
+        // Devices without a profile (built-in speakers) get none.
+        assert!(
+            settings
+                .output_profile("Built-in Audio Analog Stereo", None)
+                .is_none()
+        );
+        // 0 removes the profile; a new device gets one; setting by name
+        // replaces a profile saved under the device's id.
+        settings.set_wake_up_ms("JBL Flip 5", None, 0);
+        settings.set_wake_up_ms("Sony WH-1000XM4", None, 250);
+        settings.set_wake_up_ms("Speaker", Some("bluez_output.AA_BB.1"), 400);
+        assert!(!settings.output_devices.contains_key("bluez_output.AA_BB.1"));
+        assert_eq!(
+            settings
+                .output_profile("Speaker", Some("bluez_output.AA_BB.1"))
+                .map(|p| p.wake_up_ms),
+            Some(400)
+        );
+        settings.save(&path).unwrap();
+        let (reloaded, err) = Settings::load(&path);
+        assert!(err.is_none(), "unexpected error: {err:?}");
+        assert_eq!(reloaded, settings);
+        assert!(reloaded.output_profile("JBL Flip 5", None).is_none());
+        // Too long a wake-up is rejected with the key named.
+        std::fs::write(
+            &path,
+            "[output_devices.\"JBL Flip 5\"]\nwake_up_ms = 5001\n",
+        )
+        .unwrap();
+        let (_, err) = Settings::load(&path);
+        std::fs::remove_dir_all(&dir).unwrap();
+        let message = err.expect("too long wake-up is reported").to_string();
+        assert!(message.contains("wake_up_ms"), "{message}");
     }
 }
 

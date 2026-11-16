@@ -26,7 +26,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy}
 use winit::platform::macos::{ActivationPolicy, EventLoopBuilderExtMacOS};
 use winit::window::WindowId;
 
-use crate::audio::AudioSink;
+use crate::audio::{AudioSink, OutputDevice};
 use crate::autostart;
 use crate::clipboard::{self, ClipboardEvent, MIN_TEXT_LEN};
 use crate::control::{ControlError, ControlHost, ControlRequest, PlaybackStatus};
@@ -124,6 +124,42 @@ const UNLOAD_OPTIONS: [(u32, &str); 5] = [
     (60, "After 1 hour"),
     (0, "Never"),
 ];
+
+/// Speaker wake-up choices in the Settings menu: `wake_up_ms` + label
+/// (a custom value from the file shows no check but is kept).
+const WAKE_UP_OPTIONS: [(u32, &str); 7] = [
+    (0, "Off (no delay)"),
+    (250, "¼ second"),
+    (500, "½ second"),
+    (1000, "1 second"),
+    (1500, "1½ seconds"),
+    (2000, "2 seconds"),
+    (3000, "3 seconds"),
+];
+
+/// Header of the Speaker Wake-Up submenu: which device its choice applies to.
+fn wake_up_device_label(device: Option<&OutputDevice>) -> String {
+    match device {
+        Some(device) => format!("For: {}", device.name),
+        None => "For: unknown speaker (read something first)".to_string(),
+    }
+}
+
+/// The current default output device, or `None` (with a warning) when it
+/// can't be identified.
+fn current_output_device() -> Option<OutputDevice> {
+    use cpal::traits::HostTrait;
+    let device = cpal::default_host().default_output_device()?;
+    match crate::audio::describe_output_device(&device) {
+        Ok(device) => Some(device),
+        Err(err) => {
+            eprintln!(
+                "warn: fallback: true, attempted=output_device_name, reason={err}, taken=unknown_speaker_menu"
+            );
+            None
+        }
+    }
+}
 
 /// Menu label for a speed (`1.0` → `"1×"`, `1.25` → `"1.25×"`).
 fn speed_label(speed: f32) -> String {
@@ -362,6 +398,12 @@ struct App {
     pause_items: Vec<(f32, CheckMenuItem)>,
     model_items: Vec<(ModelVariant, CheckMenuItem)>,
     unload_items: Vec<(u32, CheckMenuItem)>,
+    /// Speaker Wake-Up header naming the current output device.
+    wake_up_device_item: Option<MenuItem>,
+    wake_up_items: Vec<(u32, CheckMenuItem)>,
+    /// The output device audio plays on (refreshed whenever the player
+    /// opens the output); the Speaker Wake-Up choice applies to it.
+    output_device: Option<OutputDevice>,
     edit_pron_item: Option<MenuItem>,
     open_settings_item: Option<MenuItem>,
     change_shortcuts_item: Option<MenuItem>,
@@ -519,6 +561,9 @@ impl App {
             pause_items: Vec::new(),
             model_items: Vec::new(),
             unload_items: Vec::new(),
+            wake_up_device_item: None,
+            wake_up_items: Vec::new(),
+            output_device: None,
             edit_pron_item: None,
             open_settings_item: None,
             change_shortcuts_item: None,
@@ -808,6 +853,33 @@ impl App {
             unload_items.push((minutes, item));
         }
 
+        // Identify the current speaker now so the menu is right before the
+        // first reading; the player refreshes it whenever audio starts.
+        self.output_device = current_output_device();
+        let wake_up_menu = Submenu::new("Speaker Wake-Up", true);
+        let wake_up_device_item = MenuItem::new(
+            wake_up_device_label(self.output_device.as_ref()),
+            false,
+            None,
+        );
+        wake_up_menu
+            .append(&wake_up_device_item)
+            .map_err(menu_build_error)?;
+        let current_wake_up = self.current_wake_up_ms();
+        let mut wake_up_items = Vec::with_capacity(WAKE_UP_OPTIONS.len());
+        for (wake_up_ms, label) in WAKE_UP_OPTIONS {
+            let item = CheckMenuItem::new(label, true, wake_up_ms == current_wake_up, None);
+            wake_up_menu.append(&item).map_err(menu_build_error)?;
+            wake_up_items.push((wake_up_ms, item));
+        }
+        wake_up_menu
+            .append(&MenuItem::new(
+                "Silence before reading, so a wireless speaker is awake",
+                false,
+                None,
+            ))
+            .map_err(menu_build_error)?;
+
         let edit_pron_item = MenuItem::new("Edit Pronunciations…", true, None);
         let open_settings_item = MenuItem::new("Open Settings File…", true, None);
 
@@ -851,6 +923,9 @@ impl App {
             .map_err(menu_build_error)?;
         settings_menu
             .append(&speed_menu)
+            .map_err(menu_build_error)?;
+        settings_menu
+            .append(&wake_up_menu)
             .map_err(menu_build_error)?;
         settings_menu
             .append(&PredefinedMenuItem::separator())
@@ -953,6 +1028,8 @@ impl App {
         self.pause_items = pause_items;
         self.model_items = model_items;
         self.unload_items = unload_items;
+        self.wake_up_device_item = Some(wake_up_device_item);
+        self.wake_up_items = wake_up_items;
         self.edit_pron_item = Some(edit_pron_item);
         self.open_settings_item = Some(open_settings_item);
         self.change_shortcuts_item = Some(change_shortcuts_item);
@@ -1408,6 +1485,17 @@ impl App {
                 self.pending_copy_to_read_ms = None;
                 self.show_idle_frame();
                 self.show_error(&message);
+            }
+            PlayerEvent::OutputDevice { device, wake_up } => {
+                if !wake_up.is_zero() {
+                    eprintln!(
+                        "Waiting {} ms for {} to wake up before reading.",
+                        wake_up.as_millis(),
+                        device.name
+                    );
+                }
+                self.output_device = Some(device);
+                self.update_wake_up_checks();
             }
             PlayerEvent::Latency {
                 read_to_first_ms,
@@ -1894,6 +1982,13 @@ impl App {
             .map(|(minutes, _)| *minutes)
         {
             self.on_unload_selected(minutes);
+        } else if let Some(wake_up_ms) = self
+            .wake_up_items
+            .iter()
+            .find(|(_, item)| id == item.id())
+            .map(|(wake_up_ms, _)| *wake_up_ms)
+        {
+            self.on_wake_up_selected(wake_up_ms);
         } else if self
             .edit_pron_item
             .as_ref()
@@ -2161,6 +2256,43 @@ impl App {
         }
         self.update_unload_checks();
         self.save_settings();
+    }
+
+    /// Save the wake-up silence for the current output device (only that
+    /// device: other speakers keep their own setting).
+    fn on_wake_up_selected(&mut self, wake_up_ms: u32) {
+        let Some(device) = self.output_device.clone() else {
+            self.update_wake_up_checks();
+            self.show_error(
+                "Couldn't tell which speaker is in use. Read something on it first, then choose again.",
+            );
+            return;
+        };
+        self.settings
+            .set_wake_up_ms(&device.name, device.id.as_deref(), wake_up_ms);
+        self.update_wake_up_checks();
+        self.save_settings();
+    }
+
+    /// The saved wake-up silence for the current output device (0 = none).
+    fn current_wake_up_ms(&self) -> u32 {
+        self.output_device
+            .as_ref()
+            .and_then(|device| {
+                self.settings
+                    .output_profile(&device.name, device.id.as_deref())
+            })
+            .map_or(0, |profile| profile.wake_up_ms)
+    }
+
+    fn update_wake_up_checks(&self) {
+        let current = self.current_wake_up_ms();
+        for (wake_up_ms, item) in &self.wake_up_items {
+            item.set_checked(*wake_up_ms == current);
+        }
+        if let Some(item) = &self.wake_up_device_item {
+            item.set_text(wake_up_device_label(self.output_device.as_ref()));
+        }
     }
 
     fn update_unload_checks(&self) {
@@ -2629,13 +2761,14 @@ fn download_label(model: ModelId) -> &'static str {
 /// can't be inspected in tests, so the test below pins this list against the
 /// owner-approved layout instead.
 #[cfg(test)]
-fn settings_menu_order() -> [Option<&'static str>; 15] {
+fn settings_menu_order() -> [Option<&'static str>; 16] {
     [
         Some("Voice Model"),
         Some("English Voice"),
         Some("Persian Voice"),
         Some("Pause Length"),
         Some("Reading Speed"),
+        Some("Speaker Wake-Up"),
         None,
         Some("Launch at Login"),
         Some("Watch the Clipboard"),
@@ -2761,6 +2894,7 @@ mod tests {
                 Some("Persian Voice"),
                 Some("Pause Length"),
                 Some("Reading Speed"),
+                Some("Speaker Wake-Up"),
                 None,
                 Some("Launch at Login"),
                 Some("Watch the Clipboard"),

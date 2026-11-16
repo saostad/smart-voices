@@ -143,7 +143,7 @@ impl PlaybackStatus {
                 self.index = None;
                 self.text = None;
             }
-            PlayerEvent::Latency { .. } => {}
+            PlayerEvent::Latency { .. } | PlayerEvent::OutputDevice { .. } => {}
         }
     }
 

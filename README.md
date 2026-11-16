@@ -113,6 +113,13 @@ The `Settings` submenu holds everything customizable:
 - `Fix Hard Names and Foreign Words` — off by default. With English voices,
   respell about 25,000 hard names and foreign words. It helps names a voice
   gets badly wrong and can hurt ones it already says well.
+- `Speaker Wake-Up` — for the speaker in use right now (named at the top of
+  the submenu), play ¼–3 seconds of silence before reading so a Bluetooth
+  speaker that sleeps when idle doesn't cut off the first words. Each speaker
+  keeps its own choice, so built-in speakers stay at `Off`. Saved in
+  `settings.toml` as `[output_devices."JBL Flip 5"]` / `wake_up_ms = 500`
+  (0–5000); on Linux the PipeWire / PulseAudio sink name also works as the
+  key.
 - `Free Memory When Idle` — free the voice memory after 1–60 minutes, or
   `Never`.
 - `Shortcuts` — shows the current bindings; change them in `settings.toml`

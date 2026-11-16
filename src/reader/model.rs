@@ -102,7 +102,7 @@ impl ReaderModel {
                 self.current = None;
                 self.reset_timing();
             }
-            PlayerEvent::Latency { .. } => {}
+            PlayerEvent::Latency { .. } | PlayerEvent::OutputDevice { .. } => {}
         }
     }
 
