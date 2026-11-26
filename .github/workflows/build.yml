@@ -56,6 +56,18 @@ jobs:
         shell: bash
         run: scripts/fetch-onnxruntime.sh
 
+      # Newer MSVC (windows-2025-vs2026 image from 2026-11-16) rejects espeak-ng's
+      # `#if __has_include_next(<unistd.h>)` (error C7780). Force-include a header
+      # that defines it as 0 when missing; MSVC has no unistd.h to include anyway.
+      - name: Work around MSVC __has_include_next (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          header="$(cygpath -m "$RUNNER_TEMP")/msvc_has_include_next.h"
+          printf '#ifndef __has_include_next\n#define __has_include_next(x) 0\n#endif\n' > "$header"
+          echo "CFLAGS_x86_64_pc_windows_msvc=-FI$header" >> "$GITHUB_ENV"
+          cat "$header"
+
       - name: Install Linux audio dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config dpkg-dev cmake libclang-dev
