@@ -298,7 +298,17 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(body).unwrap()["error"]["kind"],
             "too_large"
         );
-        client.shutdown(Shutdown::Write).unwrap();
+        // The server has already sent its FIN and may have fully closed; macOS
+        // then rejects shutdown with EINVAL (Linux and Windows don't).
+        if let Err(err) = client.shutdown(Shutdown::Write) {
+            assert!(
+                matches!(
+                    err.kind(),
+                    io::ErrorKind::InvalidInput | io::ErrorKind::NotConnected
+                ),
+                "unexpected shutdown error: {err}"
+            );
+        }
         handler.join().unwrap().unwrap();
     }
     #[test]

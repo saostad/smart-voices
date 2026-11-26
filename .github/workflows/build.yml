@@ -65,7 +65,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          cargo fetch --locked
+          cargo fetch
           shopt -s nullglob
           files=("${CARGO_HOME:-$HOME/.cargo}"/registry/src/*/espeak-rs-sys-*/espeak-ng/src/include/compat/*.h)
           patched=0
