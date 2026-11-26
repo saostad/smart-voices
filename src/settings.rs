@@ -298,7 +298,7 @@ impl Default for Settings {
             resample_cutoff_ratio: 0.99,
             resample_filter_zeros: 6,
             model: ModelVariant::Fast,
-            persian_voice: PersianVoice::PocketV2,
+            persian_voice: PersianVoice::TinyAva,
             watch_clipboard: true,
             auto_read: true,
             unload_after_minutes: 15,
@@ -796,7 +796,7 @@ mod tests {
         assert!(err.is_none(), "unexpected error: {err:?}");
         assert_eq!(settings.voice, "bm_lewis");
         assert_eq!(settings.shortcuts, Shortcuts::default());
-        assert_eq!(settings.persian_voice, PersianVoice::PocketV2);
+        assert_eq!(settings.persian_voice, PersianVoice::TinyAva);
     }
 
     #[test]
@@ -812,32 +812,37 @@ mod tests {
     }
 
     #[test]
-    fn saved_pocket_voice_stays_v1_while_new_installs_default_to_v2() {
-        // New installs (no key saved) get v2.
-        assert_eq!(Settings::default().persian_voice, PersianVoice::PocketV2);
+    fn saved_persian_voice_stays_while_new_installs_default_to_tiny_ava() {
+        // New installs (no key saved) get Tiny Ava.
+        assert_eq!(Settings::default().persian_voice, PersianVoice::TinyAva);
         let dir = unique_temp_dir();
         let path = dir.join("settings.toml");
         std::fs::create_dir_all(&dir).unwrap();
-        // A voice saved before v2 existed keeps meaning v1: nobody is
-        // silently switched.
+        // A voice saved before Tiny Ava existed keeps its saved choice:
+        // nobody is silently switched.
         std::fs::write(&path, "persian_voice = \"pocket\"\n").unwrap();
         let (settings, err) = Settings::load(&path);
         assert!(err.is_none(), "unexpected error: {err:?}");
         assert_eq!(settings.persian_voice, PersianVoice::Pocket);
         assert_eq!(settings.persian_voice.id(), "pocket");
-        // v2 loads and saves under its own id.
+        // v2 keeps its own id.
         std::fs::write(&path, "persian_voice = \"pocket-v2\"\n").unwrap();
         let (settings, err) = Settings::load(&path);
         assert!(err.is_none(), "unexpected error: {err:?}");
         assert_eq!(settings.persian_voice, PersianVoice::PocketV2);
+        // Tiny Ava loads and saves under its own id.
+        std::fs::write(&path, "persian_voice = \"tiny-ava\"\n").unwrap();
+        let (settings, err) = Settings::load(&path);
+        assert!(err.is_none(), "unexpected error: {err:?}");
+        assert_eq!(settings.persian_voice, PersianVoice::TinyAva);
         let settings = Settings {
-            persian_voice: PersianVoice::PocketV2,
+            persian_voice: PersianVoice::TinyAva,
             ..Settings::default()
         };
         settings.save(&path).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(
-            text.contains("persian_voice = \"pocket-v2\""),
+            text.contains("persian_voice = \"tiny-ava\""),
             "saved form: {text}"
         );
         std::fs::remove_dir_all(&dir).unwrap();

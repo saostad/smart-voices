@@ -53,7 +53,8 @@ letting the download finish for next time.
 | Phonon (best-quality English) | ~103 MB | Only if you pick it in Settings |
 | Phonon voices (37 English voices) | ~9.5 MB | First reading with a Phonon voice other than Default |
 | Zonos (studio-quality English, for fast computers) | ~1.1 GB | Only if you pick it in Settings |
-| Persian voice (Pocket, best quality) | ~230 MB | First Persian reading (English-only use never downloads it) |
+| Persian voice (Tiny Ava, fast — default) | ~21 MB | First Persian reading (English-only use never downloads it) |
+| Persian voice (Pocket, best quality) | ~230 MB | Only if you pick a Pocket voice in Settings |
 | Persian voice (Piper, smaller) | ~67 MB | Only if you pick a Piper voice in Settings |
 
 You can also pre-download from a terminal:
@@ -91,8 +92,9 @@ The `Settings` submenu holds everything customizable:
   Default plus 37 catalog voices in American, British and Characters groups
   for Phonon, or 10 voices in American, British · Irish and Characters
   groups for Zonos.
-- `Persian Voice` — `Pocket v2 (best quality — recommended)` is the default
-  and sounds the most natural; `Pocket v1` below it. The Piper voices (Amir,
+- `Persian Voice` — `Tiny Ava (Parisa — fast, recommended)` is the default
+  lightweight Persian voice; `Pocket v2 (best quality)` and `Pocket v1` offer
+  a larger, more expressive voice below it. The Piper voices (Amir,
   Gyro, Reza Ibrahim, Ganji, Ganji Adabi) are smaller downloads and start
   faster, with lower quality.
   English words inside Persian text are read with Persian pronunciation.
@@ -215,7 +217,7 @@ and `shortcuts.*`, which need a restart. Set `SMART_VOICES_URL` and
 These commands need nothing running (handy for scripts and testing):
 
 - `smart-voices speak "<text>"` — read text aloud (`--voice`, `--speed`,
-  `--model fast|small|phonon|paradee|zonos`, `--persian-voice pocket|amir|gyro|reza_ibrahim|ganji|ganji_adabi`, `--verbose`).
+  `--model fast|small|phonon|paradee|zonos`, `--persian-voice tiny-ava|pocket-v2|pocket|amir|gyro|reza_ibrahim|ganji|ganji_adabi`, `--verbose`).
   With `--model phonon`, `--voice` takes a catalog voice name (e.g. `Zoey`) or `default`;
   with `--model paradee`, it takes one of its four voice names; with
   `--model zonos`, one of its voice names (e.g. `Savannah`).
@@ -556,3 +558,7 @@ The English text normalizer (`src/normalize.rs`) and name lexicon
 Underdog Non-Commercial License 1.0: free for non-commercial use with credit.
 Any commercial use of this app would need a license from Underdog or both
 features removed.
+
+The default Persian voice is powered by
+[tiny-ava](https://huggingface.co/mehdi-hf/tiny-ava) (Mehdi Allahyari /
+OncillaAI, CC BY 4.0).

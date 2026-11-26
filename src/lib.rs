@@ -24,6 +24,7 @@ pub mod reader;
 pub mod sanitize;
 pub mod settings;
 pub mod shortcuts;
+pub mod tiny_ava;
 pub mod word_timing;
 pub mod zonos;
 

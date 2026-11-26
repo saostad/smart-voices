@@ -21,6 +21,11 @@ const LIMITER_LOOKAHEAD_MS: f64 = 5.0;
 const LIMITER_RELEASE_MS: f64 = 50.0;
 /// Second-order Butterworth high-pass in front of the chain.
 const HIGHPASS_FREQ_HZ: f64 = 70.0;
+/// Gentle mastering target RMS for Tiny Ava (70 Hz HPF + clamped gain + limiter,
+/// avoiding the 6:1 compressor and −10 LUFS overdrive).
+const GENTLE_TARGET_RMS: f64 = 0.145;
+const GENTLE_GAIN_MIN_DB: f64 = -12.0;
+const GENTLE_GAIN_MAX_DB: f64 = 12.0;
 
 /// ITU-R BS.1770-4 integrated loudness in LUFS: K-weighting (high-shelf
 /// pre-filter + RLB high-pass, coefficients computed for `sample_rate` with
@@ -116,6 +121,33 @@ pub(crate) fn master_chunk(samples: &[f32], sample_rate: u32) -> Vec<f32> {
         );
     }
     out
+}
+
+/// Gentle distortion-free mastering for source-filter voices like Tiny Ava:
+/// 70 Hz high-pass, linear gain toward [`GENTLE_TARGET_RMS`] (clamped to
+/// ±12 dB), and look-ahead peak limiting at [`PEAK_CEILING`] with no downward
+/// compressor or −10 LUFS overdrive.
+pub(crate) fn master_chunk_gentle(samples: &[f32], sample_rate: u32) -> Vec<f32> {
+    if samples.is_empty() {
+        return Vec::new();
+    }
+    if samples.iter().all(|s| *s == 0.0) {
+        return samples.to_vec();
+    }
+    let out = apply_high_pass(samples, sample_rate);
+    let rms = (out
+        .iter()
+        .map(|&s| f64::from(s) * f64::from(s))
+        .sum::<f64>()
+        / out.len() as f64)
+        .sqrt();
+    if rms <= 1e-6 {
+        return out;
+    }
+    let gain_db =
+        (20.0 * (GENTLE_TARGET_RMS / rms).log10()).clamp(GENTLE_GAIN_MIN_DB, GENTLE_GAIN_MAX_DB);
+    let gained = apply_gain_db(&out, gain_db);
+    apply_limiter(&gained, sample_rate)
 }
 
 /// Second-order direct-form biquad: y = b0·x + b1·x1 + b2·x2 − a1·y1 − a2·y2.
@@ -391,5 +423,31 @@ mod tests {
         );
         let peak = mastered.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
         assert!(peak <= PEAK_CEILING, "peak {peak}");
+    }
+
+    #[test]
+    fn master_chunk_gentle_lifts_spiky_signal_without_crushing_dynamics() {
+        // Spiky low-RMS source-filter-like pulse wave: 0.05 RMS, sharp 0.50 peaks.
+        let mut spiky = vec![0.02f32; 24_000];
+        for (i, s) in spiky.iter_mut().enumerate() {
+            let phase = (i % 160) as f32 / 160.0;
+            *s = if phase < 0.08 {
+                0.50 * (2.0 * std::f32::consts::PI * 300.0 * i as f32 / 24_000.0).sin()
+            } else {
+                0.004 * (2.0 * std::f32::consts::PI * 200.0 * i as f32 / 24_000.0).sin()
+            };
+        }
+        let gentle = master_chunk_gentle(&spiky, 24_000);
+        assert_eq!(gentle.len(), spiky.len());
+        let peak = gentle.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
+        let rms = (gentle
+            .iter()
+            .map(|&s| f64::from(s) * f64::from(s))
+            .sum::<f64>()
+            / gentle.len() as f64)
+            .sqrt();
+        assert!(peak <= PEAK_CEILING, "peak {peak}");
+        assert!(rms > 0.08 && rms < 0.22, "gentle rms {rms}");
+        assert_eq!(master_chunk_gentle(&[0.0; 16], 24_000), vec![0.0; 16]);
     }
 }

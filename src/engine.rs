@@ -209,14 +209,17 @@ impl ModelVariant {
     }
 }
 
-/// Persian voices: Pocket v2 (best quality, default), Pocket v1, plus the
-/// Piper voices. Each Pocket voice is one shared model; each Piper voice is
-/// its own model.
+/// Persian voices: Tiny Ava (Parisa — fast, default), Pocket v2 (best quality),
+/// Pocket v1, plus the Piper voices. Each Tiny Ava / Pocket voice is one shared
+/// model; each Piper voice is its own model.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PersianVoice {
-    /// Pocket TTS Farsi v2 (default, best quality).
+    /// Tiny Ava (Parisa — fast, lightweight, default).
     #[default]
+    #[serde(rename = "tiny-ava")]
+    TinyAva,
+    /// Pocket TTS Farsi v2 (best quality).
     #[serde(rename = "pocket-v2")]
     PocketV2,
     /// Pocket TTS Farsi v1.
@@ -233,8 +236,9 @@ pub enum PersianVoice {
     GanjiAdabi,
 }
 
-/// All Persian voices, in menu order (Pocket v2 first: it is the default).
-pub const PERSIAN_VOICES: [PersianVoice; 7] = [
+/// All Persian voices, in menu order (Tiny Ava first: it is the default).
+pub const PERSIAN_VOICES: [PersianVoice; 8] = [
+    PersianVoice::TinyAva,
     PersianVoice::PocketV2,
     PersianVoice::Pocket,
     PersianVoice::Amir,
@@ -245,10 +249,11 @@ pub const PERSIAN_VOICES: [PersianVoice; 7] = [
 ];
 
 impl PersianVoice {
-    /// Parse a CLI value or settings id (`"pocket-v2"`, `"pocket"`,
+    /// Parse a CLI value or settings id (`"tiny-ava"`, `"pocket-v2"`, `"pocket"`,
     /// `"amir"`, `"gyro"`, `"reza_ibrahim"`, `"ganji"`, `"ganji_adabi"`).
     pub fn parse(s: &str) -> Option<Self> {
         match s {
+            "tiny-ava" => Some(Self::TinyAva),
             "pocket-v2" => Some(Self::PocketV2),
             "pocket" => Some(Self::Pocket),
             "amir" => Some(Self::Amir),
@@ -263,6 +268,7 @@ impl PersianVoice {
     /// Short id used in settings, the CLI, and file names.
     pub fn id(self) -> &'static str {
         match self {
+            Self::TinyAva => "tiny-ava",
             Self::PocketV2 => "pocket-v2",
             Self::Pocket => "pocket",
             Self::Amir => "amir",
@@ -279,6 +285,7 @@ impl PersianVoice {
     /// status line.
     pub fn short_label(self) -> &'static str {
         match self {
+            Self::TinyAva => "Tiny Ava",
             Self::PocketV2 => "Pocket v2",
             Self::Pocket => "Pocket v1",
             Self::Amir => "Amir",
@@ -289,11 +296,12 @@ impl PersianVoice {
         }
     }
 
-    /// Human-readable label for the Settings menu. Pocket v2 says what it
-    /// does for a beginner; the Piper names are just names.
+    /// Human-readable label for the Settings menu. Tiny Ava and Pocket v2
+    /// explain their strengths; the Piper names are just names.
     pub fn label(self) -> &'static str {
         match self {
-            Self::PocketV2 => "Pocket v2 (best quality — recommended)",
+            Self::TinyAva => "Tiny Ava (Parisa — fast, recommended)",
+            Self::PocketV2 => "Pocket v2 (best quality)",
             Self::Pocket => "Pocket v1",
             Self::Amir => "Amir (Piper — smaller, faster)",
             Self::Gyro => "Gyro (Piper — smaller, faster)",
@@ -306,6 +314,7 @@ impl PersianVoice {
     /// Directory name under the models root.
     pub fn dir_name(self) -> &'static str {
         match self {
+            Self::TinyAva => "tiny-ava",
             Self::PocketV2 => "pocket-farsi-v2",
             Self::Pocket => "pocket-farsi-v1",
             Self::Amir => "vits-piper-fa_IR-amir-medium",
@@ -319,6 +328,7 @@ impl PersianVoice {
     /// ONNX model file name inside the model dir.
     pub fn model_file(self) -> &'static str {
         match self {
+            Self::TinyAva => "tiny-ava-parisa.onnx",
             Self::PocketV2 => "pocket-farsi-v2.onnx",
             Self::Pocket => "pocket-farsi-v1.onnx",
             Self::Amir => "fa_IR-amir-medium.onnx",
@@ -329,11 +339,14 @@ impl PersianVoice {
         }
     }
 
-    /// Download URL. Each Pocket voice is a single `.onnx` file on
+    /// Download URL. Each Tiny Ava / Pocket voice is a single `.onnx` file on
     /// Hugging Face; the Piper voices are `.tar.bz2` archives (see
     /// `models::download`).
     pub fn url(self) -> &'static str {
         match self {
+            Self::TinyAva => {
+                "https://huggingface.co/mehdi-hf/tiny-ava/resolve/main/onnx/tiny-ava-parisa.onnx"
+            }
             Self::PocketV2 => {
                 "https://huggingface.co/saostad/readly-voices/resolve/main/pocket-farsi-v2/pocket-farsi-v2.onnx"
             }
@@ -359,11 +372,11 @@ impl PersianVoice {
     }
 
     /// Files and dirs that must exist inside the model dir (model file
-    /// first). Each Pocket voice is a single self-contained file; Piper
-    /// needs its tokens and espeak data too.
+    /// first). Tiny Ava and each Pocket voice is a single self-contained file;
+    /// Piper needs its tokens and espeak data too.
     pub fn required_files(self) -> Vec<&'static str> {
         match self {
-            Self::Pocket | Self::PocketV2 => vec![self.model_file()],
+            Self::TinyAva | Self::Pocket | Self::PocketV2 => vec![self.model_file()],
             _ => vec![
                 self.model_file(),
                 self.config_file(),
@@ -381,20 +394,25 @@ impl PersianVoice {
             Self::RezaIbrahim => "fa_IR-reza_ibrahim-medium.onnx.json",
             Self::Ganji => "fa_IR-ganji-medium.onnx.json",
             Self::GanjiAdabi => "fa_IR-ganji_adabi-medium.onnx.json",
-            Self::Pocket | Self::PocketV2 => "",
+            Self::TinyAva | Self::Pocket | Self::PocketV2 => "",
         }
     }
 
-    /// True for the Piper voices (Pocket is handled by its own engine).
+    /// True for the Piper voices (Tiny Ava and Pocket are handled by their own engines).
     pub fn is_piper(self) -> bool {
-        !matches!(self, Self::Pocket | Self::PocketV2)
+        !matches!(self, Self::TinyAva | Self::Pocket | Self::PocketV2)
     }
 
-    /// Single-file download coordinates for the Pocket voices (`None` for
-    /// Piper, which ships as `.tar.bz2` archives). Adding a voice is one
+    /// Single-file download coordinates for Tiny Ava and the Pocket voices (`None`
+    /// for Piper, which ships as `.tar.bz2` archives). Adding a voice is one
     /// entry here (plus its `url`).
     pub fn download_spec(self) -> Option<DownloadSpec> {
         match self {
+            Self::TinyAva => Some(DownloadSpec {
+                url: self.url(),
+                size: 21_361_734,
+                sha256: "90418714f60c1095beb2249993725c5eb63bfb0a0aaaf43d6c0a32613602f45e",
+            }),
             Self::PocketV2 => Some(DownloadSpec {
                 url: self.url(),
                 size: 226_378_457,
@@ -612,6 +630,9 @@ pub enum EngineError {
     /// The Pocket model file exists but ONNX Runtime refused it (the real
     /// runtime error is kept).
     PocketLoadFailed(PathBuf, String),
+    /// The Tiny Ava model file exists but ONNX Runtime refused it (the real
+    /// runtime error is kept).
+    TinyAvaLoadFailed(PathBuf, String),
     /// The ONNX Runtime library itself couldn't be loaded (real error kept).
     PocketRuntime(String),
     /// The Pocket model ran but its data or outputs were malformed.
@@ -670,6 +691,11 @@ impl fmt::Display for EngineError {
             EngineError::PocketLoadFailed(dir, message) => write!(
                 f,
                 "Couldn't load the Pocket Persian voice from {}: {message}. The file may be damaged; delete the folder and run `smart-voices download --persian` again.",
+                dir.display()
+            ),
+            EngineError::TinyAvaLoadFailed(dir, message) => write!(
+                f,
+                "Couldn't load the Tiny Ava voice from {}: {message}. The file may be damaged; delete the folder and run `smart-voices download --persian` again.",
                 dir.display()
             ),
             EngineError::PocketRuntime(message) => write!(
@@ -1087,9 +1113,17 @@ mod tests {
     fn persian_voice_ids_labels_and_paths() {
         let expected = [
             (
+                PersianVoice::TinyAva,
+                "tiny-ava",
+                "Tiny Ava (Parisa — fast, recommended)",
+                "Tiny Ava",
+                "tiny-ava",
+                "tiny-ava-parisa.onnx",
+            ),
+            (
                 PersianVoice::PocketV2,
                 "pocket-v2",
-                "Pocket v2 (best quality — recommended)",
+                "Pocket v2 (best quality)",
                 "Pocket v2",
                 "pocket-farsi-v2",
                 "pocket-farsi-v2.onnx",
@@ -1156,20 +1190,25 @@ mod tests {
                 assert_eq!(voice.required_files(), [file]);
                 let spec = voice
                     .download_spec()
-                    .expect("pocket voices have a download spec");
+                    .expect("tiny-ava and pocket voices have a download spec");
                 assert_eq!(spec.url, voice.url());
-                let (url, size, sha256) = if voice == PersianVoice::PocketV2 {
-                    (
+                let (url, size, sha256) = match voice {
+                    PersianVoice::TinyAva => (
+                        "https://huggingface.co/mehdi-hf/tiny-ava/resolve/main/onnx/tiny-ava-parisa.onnx",
+                        21_361_734,
+                        "90418714f60c1095beb2249993725c5eb63bfb0a0aaaf43d6c0a32613602f45e",
+                    ),
+                    PersianVoice::PocketV2 => (
                         "https://huggingface.co/saostad/readly-voices/resolve/main/pocket-farsi-v2/pocket-farsi-v2.onnx",
                         226_378_457,
                         "53a49a5d2fdf94832a0163939c38eb638789ae1f1678dccdd539240dffcf4703",
-                    )
-                } else {
-                    (
+                    ),
+                    PersianVoice::Pocket => (
                         "https://huggingface.co/saostad/readly-voices/resolve/main/pocket-farsi-v1/pocket-farsi-v1.onnx",
                         226_396_445,
                         "3f3322396a6f8a65e970438f0a58b146e90cd49283cf8c46cef7f3f877cdca30",
-                    )
+                    ),
+                    _ => unreachable!(),
                 };
                 assert_eq!(voice.url(), url);
                 assert_eq!(spec.size, size);
@@ -1191,8 +1230,8 @@ mod tests {
         }
         assert_eq!(PersianVoice::parse("sara"), None);
         assert_eq!(PersianVoice::parse(""), None);
-        assert_eq!(PersianVoice::default(), PersianVoice::PocketV2);
-        assert_eq!(PERSIAN_VOICES[0], PersianVoice::PocketV2);
+        assert_eq!(PersianVoice::default(), PersianVoice::TinyAva);
+        assert_eq!(PERSIAN_VOICES[0], PersianVoice::TinyAva);
     }
 
     #[test]

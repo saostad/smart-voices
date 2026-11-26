@@ -22,12 +22,12 @@
 
 pub(crate) mod audio;
 pub mod g2p;
-mod mastering;
+pub(crate) mod mastering;
 pub mod normalize_fa;
 pub(crate) mod runtime;
 pub mod sentencepiece;
 pub mod settings;
-mod text;
+pub(crate) mod text;
 pub mod text_v2;
 
 use std::borrow::Cow;

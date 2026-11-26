@@ -1,40 +1,104 @@
 //! Pocket TTS audio recipe: per-piece trim and speed, pauses by piece end,
 //! piece finishing.
 
-use super::mastering::master_chunk;
+use super::mastering::{master_chunk, master_chunk_gentle};
 use super::text::PieceEnd;
 
 /// Silence kept at each end when trimming a chunk (outer ends always keep
 /// this).
 const TRIM_KEEP_MS: u64 = 120;
+/// Gentle silence kept at outer/sentence ends for Tiny Ava.
+const GENTLE_TRIM_KEEP_MS: u64 = 100;
 /// Silence kept at the cut side of a clause boundary (`،`, `؛`, …).
 const TRIM_KEEP_CLAUSE_MS: u64 = 60;
 /// Silence kept at the cut side of a mid-sentence cut (no punctuation).
 const TRIM_KEEP_MID_MS: u64 = 25;
 /// Pause after a sentence-final piece; mid-sentence cuts get no pause.
 const PAUSE_SENTENCE_MS: u64 = 150;
+/// Gentle pause after a sentence-final piece for Tiny Ava.
+const GENTLE_PAUSE_SENTENCE_MS: u64 = 140;
 /// Pause after a clause-final piece.
 const PAUSE_CLAUSE_MS: u64 = 60;
 /// Samples at or below this magnitude count as silence.
 const TRIM_THRESHOLD: f32 = 0.01;
+const GENTLE_TRIM_MIN_THRESHOLD: f32 = 0.002;
+const GENTLE_TRIM_PEAK_RATIO: f32 = 0.015;
+
+#[derive(Clone, Copy)]
+struct FinishChain {
+    trim_keep_ms: u64,
+    pause_sentence_ms: u64,
+    relative_trim: bool,
+    gentle_master: bool,
+}
+
+const STANDARD_CHAIN: FinishChain = FinishChain {
+    trim_keep_ms: TRIM_KEEP_MS,
+    pause_sentence_ms: PAUSE_SENTENCE_MS,
+    relative_trim: false,
+    gentle_master: false,
+};
+
+const GENTLE_CHAIN: FinishChain = FinishChain {
+    trim_keep_ms: GENTLE_TRIM_KEEP_MS,
+    pause_sentence_ms: GENTLE_PAUSE_SENTENCE_MS,
+    relative_trim: true,
+    gentle_master: true,
+};
 
 /// Silence kept where a piece meets a boundary of `end` (outer ends keep
-/// [`TRIM_KEEP_MS`]).
-fn trim_keep_ms(end: PieceEnd) -> u64 {
+/// `chain.trim_keep_ms`).
+fn trim_keep_ms_with(end: PieceEnd, outer_keep_ms: u64) -> u64 {
     match end {
-        PieceEnd::Sentence => TRIM_KEEP_MS,
+        PieceEnd::Sentence => outer_keep_ms,
         PieceEnd::Clause => TRIM_KEEP_CLAUSE_MS,
         PieceEnd::Mid => TRIM_KEEP_MID_MS,
     }
 }
 
+/// Silence kept where a piece meets a boundary of `end` (outer ends keep
+/// [`TRIM_KEEP_MS`]).
+#[cfg(test)]
+fn trim_keep_ms(end: PieceEnd) -> u64 {
+    trim_keep_ms_with(end, TRIM_KEEP_MS)
+}
+
 /// Pause after a piece ending with `end` (mid-sentence cuts get none).
-fn pause_after_ms(end: PieceEnd) -> u64 {
+fn pause_after_ms_with(end: PieceEnd, sentence_pause_ms: u64) -> u64 {
     match end {
-        PieceEnd::Sentence => PAUSE_SENTENCE_MS,
+        PieceEnd::Sentence => sentence_pause_ms,
         PieceEnd::Clause => PAUSE_CLAUSE_MS,
         PieceEnd::Mid => 0,
     }
+}
+
+/// Pause after a piece ending with `end` (mid-sentence cuts get none).
+#[cfg(test)]
+fn pause_after_ms(end: PieceEnd) -> u64 {
+    pause_after_ms_with(end, PAUSE_SENTENCE_MS)
+}
+
+fn trim_silence_with_threshold(
+    samples: &[f32],
+    sample_rate: u32,
+    keep_start_ms: u64,
+    keep_end_ms: u64,
+    threshold: f32,
+) -> Vec<f32> {
+    let keep_start = (keep_start_ms as f64 / 1000.0 * f64::from(sample_rate)).round() as usize;
+    let keep_end = (keep_end_ms as f64 / 1000.0 * f64::from(sample_rate)).round() as usize;
+    let first = samples.iter().position(|s| s.abs() > threshold);
+    let last = samples.iter().rposition(|s| s.abs() > threshold);
+    let (Some(first), Some(last)) = (first, last) else {
+        return samples
+            .iter()
+            .take(keep_start + keep_end)
+            .copied()
+            .collect();
+    };
+    let start = first.saturating_sub(keep_start);
+    let end = (last + 1 + keep_end).min(samples.len());
+    samples[start..end].to_vec()
 }
 
 /// Trim leading/trailing silence (samples at or below the threshold) while
@@ -47,20 +111,25 @@ fn trim_silence(
     keep_start_ms: u64,
     keep_end_ms: u64,
 ) -> Vec<f32> {
-    let keep_start = (keep_start_ms as f64 / 1000.0 * f64::from(sample_rate)).round() as usize;
-    let keep_end = (keep_end_ms as f64 / 1000.0 * f64::from(sample_rate)).round() as usize;
-    let first = samples.iter().position(|s| s.abs() > TRIM_THRESHOLD);
-    let last = samples.iter().rposition(|s| s.abs() > TRIM_THRESHOLD);
-    let (Some(first), Some(last)) = (first, last) else {
-        return samples
-            .iter()
-            .take(keep_start + keep_end)
-            .copied()
-            .collect();
-    };
-    let start = first.saturating_sub(keep_start);
-    let end = (last + 1 + keep_end).min(samples.len());
-    samples[start..end].to_vec()
+    trim_silence_with_threshold(
+        samples,
+        sample_rate,
+        keep_start_ms,
+        keep_end_ms,
+        TRIM_THRESHOLD,
+    )
+}
+
+/// Relative silence trim for low-RMS source-filter voices (Tiny Ava).
+fn trim_silence_relative(
+    samples: &[f32],
+    sample_rate: u32,
+    keep_start_ms: u64,
+    keep_end_ms: u64,
+) -> Vec<f32> {
+    let peak = samples.iter().fold(0.0f32, |acc, &s| acc.max(s.abs()));
+    let threshold = (peak * GENTLE_TRIM_PEAK_RATIO).max(GENTLE_TRIM_MIN_THRESHOLD);
+    trim_silence_with_threshold(samples, sample_rate, keep_start_ms, keep_end_ms, threshold)
 }
 
 /// Raw generated audio for one piece, plus how its end sounds (decided
@@ -93,7 +162,28 @@ pub(crate) fn finish_speech(
     pieces: &[RawPiece],
     sample_rate: u32,
     speed: f32,
+    on_piece: OnPiece<'_>,
+) -> Vec<f32> {
+    finish_speech_with(pieces, sample_rate, speed, on_piece, STANDARD_CHAIN)
+}
+
+/// Gentle variant of [`finish_speech`] for Tiny Ava (relative silence trim +
+/// uncompressed mastering).
+pub(crate) fn finish_speech_gentle(
+    pieces: &[RawPiece],
+    sample_rate: u32,
+    speed: f32,
+    on_piece: OnPiece<'_>,
+) -> Vec<f32> {
+    finish_speech_with(pieces, sample_rate, speed, on_piece, GENTLE_CHAIN)
+}
+
+fn finish_speech_with(
+    pieces: &[RawPiece],
+    sample_rate: u32,
+    speed: f32,
     mut on_piece: OnPiece<'_>,
+    chain: FinishChain,
 ) -> Vec<f32> {
     let pause_len = |ms: u64| (ms as f64 / 1000.0 * f64::from(sample_rate)) as usize;
     let mut out: Vec<f32> = Vec::new();
@@ -106,22 +196,30 @@ pub(crate) fn finish_speech(
     let mut finished: Vec<Vec<f32>> = Vec::with_capacity(pieces.len());
     for (index, raw) in pieces.iter().enumerate() {
         let keep_start = if index == 0 {
-            TRIM_KEEP_MS
+            chain.trim_keep_ms
         } else {
-            trim_keep_ms(pieces[index - 1].end)
+            trim_keep_ms_with(pieces[index - 1].end, chain.trim_keep_ms)
         };
         let keep_end = if index + 1 == pieces.len() {
             if raw.end == PieceEnd::Clause {
                 TRIM_KEEP_CLAUSE_MS
             } else {
-                TRIM_KEEP_MS
+                chain.trim_keep_ms
             }
         } else {
-            trim_keep_ms(raw.end)
+            trim_keep_ms_with(raw.end, chain.trim_keep_ms)
         };
-        let piece = trim_silence(&raw.audio, sample_rate, keep_start, keep_end);
+        let piece = if chain.relative_trim {
+            trim_silence_relative(&raw.audio, sample_rate, keep_start, keep_end)
+        } else {
+            trim_silence(&raw.audio, sample_rate, keep_start, keep_end)
+        };
         let piece = apply_speed(&piece, speed);
-        let piece = master_chunk(&piece, sample_rate);
+        let piece = if chain.gentle_master {
+            master_chunk_gentle(&piece, sample_rate)
+        } else {
+            master_chunk(&piece, sample_rate)
+        };
         finished.push(piece);
     }
     let mid_keep = (TRIM_KEEP_MID_MS as f64 / 1000.0 * f64::from(sample_rate)).round() as usize;
@@ -177,7 +275,7 @@ pub(crate) fn finish_speech(
         }
         emit(&segment, &mut out);
         if index + 1 < pieces.len() {
-            let pause_ms = pause_after_ms(pieces[index].end);
+            let pause_ms = pause_after_ms_with(pieces[index].end, chain.pause_sentence_ms);
             if pause_ms > 0 {
                 let pause = vec![0.0; pause_len(pause_ms)];
                 emit(&pause, &mut out);

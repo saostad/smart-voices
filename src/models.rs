@@ -61,6 +61,7 @@ impl ModelId {
     pub fn label(self) -> &'static str {
         match self {
             Self::English(variant) => variant.label(),
+            Self::Persian(PersianVoice::TinyAva) => "Persian voice (Tiny Ava, fast)",
             Self::Persian(PersianVoice::PocketV2) => "Persian voice (Pocket v2, best quality)",
             Self::Persian(PersianVoice::Pocket) => "Persian voice (Pocket v1)",
             Self::Persian(PersianVoice::Amir) => "Persian voice (Amir)",

@@ -2130,7 +2130,7 @@ mod tests {
             ("Hello.", "smart-voices download --model fast"),
             (
                 "سلام دنیا.",
-                "smart-voices download --persian-voice pocket-v2",
+                "smart-voices download --persian-voice tiny-ava",
             ),
         ] {
             let request = validate(

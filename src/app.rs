@@ -2793,6 +2793,7 @@ mod tests {
             ModelId::English(ModelVariant::Small),
             ModelId::English(ModelVariant::Phonon),
             ModelId::English(ModelVariant::Zonos),
+            ModelId::Persian(PersianVoice::TinyAva),
             ModelId::Persian(PersianVoice::PocketV2),
             ModelId::PhononVoices,
         ] {
